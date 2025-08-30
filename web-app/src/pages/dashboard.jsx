@@ -5,7 +5,6 @@ import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import "./dashboard.css";
 
-
 export default function Dashboard() {
   const navigate = useNavigate();
   const [totalElderly, setTotalElderly] = useState(0);
@@ -28,7 +27,7 @@ export default function Dashboard() {
         const elderlySnapshot = await getDocs(collection(db, "elderly"));
         setTotalElderly(elderlySnapshot.size);
 
-        // Users count (caregivers & nurses from 'users' table)
+        // Users count (caregivers & nurses)
         const usersSnapshot = await getDocs(collection(db, "users"));
         let caregiverCount = 0;
         let nurseCount = 0;
@@ -81,14 +80,23 @@ export default function Dashboard() {
       {/* Management */}
       <h2 className="section-title">Management</h2>
       <div className="management-buttons">
-        <button className="mgmt-btn" onClick={() => navigate("/elderly_profile")}>
+        <button className="mgmt-btn" onClick={() => navigate("/elderlyManagement")}>
           👤 Elderly Profile & Life Status Management
-          </button>
-        <button className="mgmt-btn">🏠 Edit House Allocation</button>
-        <button className="mgmt-btn">👥 Edit Caregiver Assignment</button>
+        </button>
+
+        {/* Single caregiver assignment button */}
+        <button
+          className="mgmt-btn"
+          onClick={() => navigate(`/edit_cg_assign`)}
+        >
+          👥 Edit Caregiver Assignment
+        </button>
+
         <div className="management-buttons-row-2">
-          <button className="mgmt-btn">👤 Edit Caregiver Profile</button>
-          <button className="mgmt-btn">🩺 Edit Nurse Profile</button>
+          <button className="mgmt-btn" onClick={() => navigate("/edit_cg_profile")}>
+            👤 Edit Caregiver Profile</button>
+          <button className="mgmt-btn" onClick={() => navigate("/edit_nurse_profile")}>
+            🩺 Edit Nurse Profile</button>
         </div>
       </div>
     </div>

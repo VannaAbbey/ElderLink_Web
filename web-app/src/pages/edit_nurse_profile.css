@@ -1,0 +1,51 @@
+/* Container for all nurse cards */
+.nurse-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: center;
+  padding: 20px;
+  background-color: #f2fdff;
+}
+
+/* Individual nurse card */
+.nurse-card {
+  background-color: #fff;
+  border-radius: 12px;
+  box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
+  width: 180px;
+  text-align: center;
+  padding: 15px;
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+
+.nurse-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.15);
+}
+
+/* Nurse profile picture */
+.nurse-card img {
+  width: 100px;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 50%;
+  margin-bottom: 10px;
+  border: 2px solid #86217c; /* violet border */
+}
+
+/* Nurse name */
+.nurse-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 5px;
+}
+
+/* Optional: nurse email or extra info */
+.nurse-email {
+  font-size: 13px;
+  color: #666;
+  word-break: break-all;
+}
