@@ -686,3 +686,32 @@
 input[type="file"] {
   display: none;
 }
+
+/* FOLDER NAVIGATION */
+.folder-nav {
+  display: flex;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+
+.folder-btn {
+  background: #ddd;
+  border: none;
+  border-radius: 8px 8px 0 0;
+  padding: 10px 20px;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: 0.2s ease-in-out;
+  color: #333;
+}
+
+.folder-btn:hover {
+  background: #ccc;
+}
+
+.folder-btn.active {
+  background: #00588E;
+  color: white;
+  box-shadow: 0px -2px 6px rgba(0, 0, 0, 0.15);
+}

@@ -5,7 +5,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { MdVisibility, MdVisibilityOff } from "react-icons/md";
 import "./login.css";
-
+  
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -50,6 +50,8 @@ export default function Login() {
   return (
     <div className="login-page">
       <div className="login-container">
+        <img src="/images/Elderlink_Logo.png" alt="ElderLink Logo" className="login-logo" />
+        <h2 id="elderlink">ELDERLINK</h2>
         <h2>Login</h2>
         <p>
           Continue your Elderly Care Journey, <br />
@@ -83,4 +85,6 @@ export default function Login() {
       </div>
     </div>
   );
+
+  
 }
