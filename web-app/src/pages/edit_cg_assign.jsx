@@ -24,6 +24,49 @@ const EditCgAssign = () => {
   const [caregivers, setCaregivers] = useState({});
   const [nextCaregiver, setNextCaregiver] = useState("");
 
+  const shuffleArray = (arr) => {
+    let array = [...arr];
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  };
+
+  const randomAssignCaregivers = async () => {
+    try {
+      const caregiverIds = Object.keys(caregivers); // all caregiver IDs
+      if (caregiverIds.length === 0) {
+        alert("No caregivers available to assign.");
+        return;
+      }
+
+      const shuffled = shuffleArray(caregiverIds);
+      let houseIndex = 0;
+
+      for (let cgId of shuffled) {
+        const house = houses[houseIndex % houses.length]; // round-robin
+
+        await addDoc(collection(db, "cg_house_assign"), {
+          assign_id: `AUTO-${cgId}-${house.id}`,
+          user_id: cgId,
+          house_id: house.id,
+          shift: Math.random() > 0.5 ? "Morning" : "Night", // random shift
+          days_assigned: ["Monday","Tuesday","Wednesday","Thursday","Friday"],
+          start_date: new Date(),
+          end_date: new Date(new Date().setDate(new Date().getDate() + 7)), // 1 week
+        });
+
+        houseIndex++;
+      }
+
+      await fetchAssignments(); // refresh table
+      alert("Caregivers shuffled and assigned successfully!");
+    } catch (error) {
+      console.error("Error randomly assigning caregivers:", error);
+    }
+  };
+
   const houses = [
     { id: "H001", name: "St. Sebastian" },
     { id: "H002", name: "St. Emmanuel" },
@@ -41,13 +84,22 @@ const EditCgAssign = () => {
     Night: { start: "17:00", end: "08:00" },
   };
 
-  // Generate assign_id if blank
+  // Auto-generate assign_id as A0001, A0002, ...
   useEffect(() => {
-    if (!formData.assign_id) {
-      const newId = "A" + Math.floor(1000 + Math.random() * 9000);
-      setFormData((prev) => ({ ...prev, assign_id: newId }));
-    }
-  }, [formData.assign_id]);
+    const generateAssignId = () => {
+      if (assignments.length === 0) {
+        return "A0001";
+      }
+      // Find max assign_id number
+      const maxNum = assignments.reduce((max, a) => {
+        const num = parseInt((a.assign_id || "A0000").replace("A", ""), 10);
+        return num > max ? num : max;
+      }, 0);
+      const nextNum = maxNum + 1;
+      return `A${nextNum.toString().padStart(4, "0")}`;
+    };
+    setFormData((prev) => ({ ...prev, assign_id: generateAssignId() }));
+  }, [assignments]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -66,12 +118,15 @@ const EditCgAssign = () => {
     });
   };
 
+  // Fetch caregivers from users table (only user_type === 'caregiver')
   const fetchCaregivers = async () => {
     const snapshot = await getDocs(collection(db, "users"));
     let map = {};
     snapshot.forEach((doc) => {
       const data = doc.data();
-      map[data.user_id] = `${data.user_fname} ${data.user_lname}`;
+      if (data.user_type === "caregiver") {
+        map[data.user_id] = `${data.user_fname} ${data.user_lname} (${data.user_id})`;
+      }
     });
     setCaregivers(map);
   };
@@ -255,18 +310,21 @@ const EditCgAssign = () => {
           <div className="form-row-group">
             <div className="form-row">
               <label>Assign ID</label>
-              <input type="text" name="assign_id" value={formData.assign_id} readOnly />
+              <input type="text" name="assign_id" value={formData.assign_id} readOnly style={{ background: '#eee' }} />
             </div>
             <div className="form-row">
               <label>Caregiver User ID</label>
-              <input
-                type="text"
+              <select
                 name="user_id"
                 value={formData.user_id}
                 onChange={handleChange}
-                placeholder="Ex. U004"
                 required
-              />
+              >
+                <option value="">Select a Caregiver</option>
+                {Object.entries(caregivers).map(([id, name]) => (
+                  <option key={id} value={id}>{name}</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -319,6 +377,9 @@ const EditCgAssign = () => {
 
           <div className="button-row">
             <button type="submit" className="save-btn">Save Assignment</button>
+            <button type="button" className="shuffle-btn" onClick={randomAssignCaregivers}>
+              Shuffle & Assign All
+            </button>
           </div>
         </form>
 
@@ -358,6 +419,28 @@ const EditCgAssign = () => {
                       ? a.end_date.toDate().toLocaleDateString()
                       : new Date(a.end_date).toLocaleDateString()}
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        <h3 className="mt-8 mb-4">👥 All Caregivers (Users Table)</h3>
+        {Object.keys(caregivers).length === 0 ? (
+          <p>No caregivers found in Users table.</p>
+        ) : (
+          <table className="schedule-table">
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(caregivers).map(([id, name]) => (
+                <tr key={id}>
+                  <td>{id}</td>
+                  <td>{name}</td>
                 </tr>
               ))}
             </tbody>

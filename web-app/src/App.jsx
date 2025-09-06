@@ -8,7 +8,6 @@ import Profile_Elderly from "./pages/profileElderly";
 import HouseView from "./pages/houseView";
 
 
-
 export default function App() {
   return (
     <Router>
@@ -20,7 +19,6 @@ export default function App() {
         <Route path="/edit_nurse_profile" element={<EditNurseProfile />} />
         <Route path="/profileElderly/:id" element={<Profile_Elderly />} />
         <Route path="/house/:houseId" element={<HouseView />} />
-
       </Routes>
     </Router>
   );
