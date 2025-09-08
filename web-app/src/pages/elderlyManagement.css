@@ -1,7 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
 
 .elderly-profile-container {
-  min-height: 100vh;
   padding: 20px;
   font-family: 'Poppins', sans-serif;
   background-color: #F2FDFF;
@@ -11,26 +10,9 @@
 .elderly-profile-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-/* BACK BUTTON STYLES */
-.back-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: #f0f0f0;
-  border: none;
-  padding: 8px 12px;
-  cursor: pointer;
-  border-radius: 5px;
-  color: #00588E;
-  font-weight: 600;
-}
-
-.back-btn svg {
-  color: #00588E;
+  justify-content: center; /* centers the content horizontally */
+  gap: 20px; /* optional: spacing between items */
+  padding: 10px;
 }
 
 /* HEADER IMAGE + TEXT CENTER */
@@ -38,7 +20,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 20px;
+  gap: 10px;
   margin: 0 auto;
   text-align: center;
 }
@@ -54,14 +36,34 @@
   color: #00588E;
   font-weight: 700;
   font-size: 40px;
+  margin: 0;
 }
 
-/* TAB BUTTONS CENTERED */
+.header-house {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px;
+}
+
+.header-house-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-house-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* TAB BUTTONS */
 .tab-buttons {
   display: flex;
-  justify-content: center;
-  gap: 30px;
-  margin-bottom: 20px;
+  justify-content: flex-end;
+  gap: 45px;
 }
 
 .tab-buttons button {
@@ -69,7 +71,6 @@
   height: 40px;
   padding: 8px;
   border: none;
-  background: #ddd;
   cursor: pointer;
   border-radius: 50px;
   font-weight: bold;
@@ -83,6 +84,21 @@
 .tab-buttons button.active {
   background: #00588E;
   color: white;
+}
+
+.house-content {
+  margin-top: 10px;
+}
+
+.elderly-folder-container {
+  margin: 0 50px 50px 50px; /* top 0, right 50px, bottom 50px, left 50px */
+  box-shadow: 0 4px 8px -2px rgba(0, 0, 0, 0.4);
+  border-radius: 10px; 
+}
+
+
+.elderly-profile-container.wide-layout {
+  background: #ddd;
 }
 
 /* RECORDS HEADER */
@@ -134,36 +150,6 @@
   font-size: 14px;
 }
 
-/* ELDERLY LIST */
-.elderly-list {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-}
-
-.elderly-card {
-  background: #A5D4DC;
-  border-radius: 10px;
-  padding: 15px;
-  text-align: center;
-  box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.1);
-}
-
-.elderly-card img {
-  width: 60%;
-  height: 60%;
-  object-fit: cover;
-  border-radius: 8px;
-  margin-bottom: 10px;
-}
-
-.elderly-name {
-  font-weight: bold;
-  font-size: 20px;
-  margin-bottom: 5px;
-  color: black;
-}
-
 /* Search + Sort container */
 .search-sort-row {
     display: flex;
@@ -211,6 +197,7 @@
 .switch-house-button:hover {
     background-color: #0a3059;
 }
+
 /* Add Elderly Button */
 .add-elderly-wrapper {
   display: flex;
@@ -579,8 +566,6 @@
 }
 
 /*Switch House Related Layouts*/
-/* ElderlyManagement.css */
-
 /* Floating modal container (right side) */
 .floating-modal {
   position: fixed;
@@ -688,9 +673,9 @@ input[type="file"] {
 }
 
 /* FOLDER NAVIGATION */
+
 .folder-nav {
   display: flex;
-  margin: 20px 0;
   flex-wrap: wrap;
 }
 
@@ -704,6 +689,7 @@ input[type="file"] {
   cursor: pointer;
   transition: 0.2s ease-in-out;
   color: #333;
+  display: inline-block;
 }
 
 .folder-btn:hover {
@@ -715,3 +701,173 @@ input[type="file"] {
   color: white;
   box-shadow: 0px -2px 6px rgba(0, 0, 0, 0.15);
 }
+
+/* =============================== */
+/* Elderly Horizontal Table Layout */
+/* =============================== */
+
+.elderly-table-wrapper {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.elderly-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+  table-layout: fixed; /* ensures header & rows align */
+}
+
+.elderly-table .icon-cell {
+  text-align: center;
+}
+
+.elderly-table thead th {
+  background: #00588E;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 12px 14px;
+  color: #FFFFFF;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.elderly-table td {
+  padding: 12px 14px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 14px;
+  color: #111827;
+  vertical-align: middle;
+}
+
+.elderly-table tr:hover td {
+  background: #f9fbff;
+}
+
+/* Column widths */
+.elderly-table th:nth-child(1),
+.elderly-table td:nth-child(1) {
+  width: 5%; /* Icon expands */
+}
+
+.elderly-table th:nth-child(2),
+.elderly-table td:nth-child(2) {
+  width: 60%; /* Full Name expands */
+}
+
+.elderly-table th:nth-child(3),
+.elderly-table td:nth-child(3) {
+  width: 20%; /* Age */
+  text-align: center;
+}
+
+.elderly-table th:nth-child(4),
+.elderly-table td:nth-child(4) {
+  width: 20%; /* Sex */
+  text-align: center;
+}
+
+.elderly-table th:nth-child(5),
+.elderly-table td:nth-child(5) {
+  width: 10%; /* Select (optional) */
+  text-align: center;
+}
+
+.name-cell .name {
+  font-weight: 600;
+  color: #00588E;
+}
+
+.selected-row td {
+  background: #e6f2ff !important;
+}
+
+/* Checkbox alignment */
+.select-cell input[type="checkbox"] {
+  transform: scale(1.1);
+  cursor: pointer;
+}
+
+/* Container for the tabs, aligned to right */
+.table-tabs {
+  display: flex;
+  justify-content: flex-end; /* top-right */
+  gap: 0; /* no gap between tabs for folder style */
+  margin-bottom: 10px;
+}
+
+/* Individual folder-style tab buttons */
+.table-tabs button {
+  background: #ddd;
+  color: #333;
+  border: none;
+  border-radius: 8px 8px 0 0;
+  padding: 10px 20px;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: 0.2s ease-in-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Active tab */
+.table-tabs button.active {
+  background: #00588E;
+  color: white;
+  box-shadow: 0px -2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* =============================== */
+/* Mobile-Friendly "Stacked" Table */
+/* =============================== */
+@media (max-width: 720px) {
+  .elderly-table thead {
+    display: none; /* hide header row */
+  }
+
+  .elderly-table,
+  .elderly-table tbody,
+  .elderly-table tr,
+  .elderly-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .elderly-table tr {
+    border-bottom: 1px solid #eee;
+    padding: 10px 0;
+  }
+
+  .elderly-table td {
+    border: none;
+    padding: 8px 14px;
+    text-align: left !important;
+  }
+
+  .name-cell .name {
+    font-size: 15px;
+  }
+
+  .age-cell::before {
+    content: 'Age: ';
+    font-weight: 600;
+    color: #6b7280;
+  }
+
+  .sex-cell::before {
+    content: 'Sex: ';
+    font-weight: 600;
+    color: #6b7280;
+  }
+
+  .select-cell {
+    margin-top: 6px;
+  }
+}
+
