@@ -746,6 +746,11 @@ input[type="file"] {
   box-shadow: 0px -2px 6px rgba(0, 0, 0, 0.15);
 }
 
+.status-tabs .tab-icon {
+  margin-right: 6px; /* space between icon and text */
+  vertical-align: middle; /* keeps them aligned */
+}
+
 /* =============================== */
 /* Elderly Horizontal Table Layout */
 /* =============================== */

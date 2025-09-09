@@ -355,6 +355,119 @@ export default function HouseView({ houseId: propHouseId }) {
           </table>
         )}
       </div>
+      {/* Add Elderly Modal */}
+      {showOverlay && (
+        <div className="overlay">
+          <div className="overlay-content">
+            <span className="overlay-close" onClick={() => setShowOverlay(false)}>
+              ✖
+            </span>
+            <h2 className="overlay-header">Add Elderly</h2>
+
+            {/* Upload Image */}
+            <label className="image-upload-box">
+              {previewImage ? (
+                <img src={previewImage} alt="Preview" className="preview-img" />
+              ) : (
+                <div className="placeholder-box">Upload Photo</div>
+              )}
+              <input type="file" accept="image/*" onChange={handleImageChange} />
+            </label>
+
+            {/* Form Fields */}
+            <div className="form-group">
+              <label>First Name</label>
+              <input
+                type="text"
+                name="elderly_fname"
+                value={formData.elderly_fname}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Last Name</label>
+              <input
+                type="text"
+                name="elderly_lname"
+                value={formData.elderly_lname}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Date of Birth</label>
+              <input
+                type="date"
+                name="elderly_bday"
+                value={formData.elderly_bday}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Age</label>
+              <input
+                type="number"
+                name="elderly_age"
+                value={formData.elderly_age}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Sex</label>
+              <select
+                name="elderly_sex"
+                value={formData.elderly_sex}
+                onChange={handleChange}
+              >
+                <option>Male</option>
+                <option>Female</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Mobility Status</label>
+              <select
+                name="elderly_mobilityStatus"
+                value={formData.elderly_mobilityStatus}
+                onChange={handleChange}
+              >
+                <option>Independent</option>
+                <option>Needs Assistance</option>
+                <option>Bedridden</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Diet Notes</label>
+              <input
+                type="text"
+                name="elderly_dietNotes"
+                value={formData.elderly_dietNotes}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Condition</label>
+              <input
+                type="text"
+                name="elderly_condition"
+                value={formData.elderly_condition}
+                onChange={handleChange}
+              />
+            </div>
+
+            {/* Buttons */}
+            <div className="overlay-buttons">
+              <button className="save-btn" onClick={handleSave}>Save</button>
+              <button className="cancel-btn" onClick={() => setShowOverlay(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
