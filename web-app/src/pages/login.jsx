@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { MdVisibility, MdVisibilityOff } from "react-icons/md";
 import "./login.css";
-  
+
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,23 +17,28 @@ export default function Login() {
 
     try {
       // 1️⃣ Authenticate with Firebase Authentication
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const uid = userCredential.user.uid; // Get UID
+      const userEmail = userCredential.user.email; // Firebase email
 
-      // 2️⃣ Query Firestore for user data using email
-      const q = query(
-        collection(db, "users"),
-        where("user_email", "==", email)
-      );
-      const querySnapshot = await getDocs(q);
+      // 2️⃣ Get Firestore document using UID as document ID
+      const userDocRef = doc(db, "users", uid);
+      const userDoc = await getDoc(userDocRef);
 
-      if (querySnapshot.empty) {
+      if (!userDoc.exists()) {
         alert("No user data found in Firestore");
         return;
       }
 
-      const userData = querySnapshot.docs[0].data();
+      const userData = userDoc.data();
 
-      // 3️⃣ Check admin role
+      // 3️⃣ Optional: Verify email consistency
+      if (userData.user_email !== userEmail) {
+        alert("Email mismatch detected. Please contact support.");
+        return;
+      }
+
+      // 4️⃣ Check user type
       if (userData.user_type === "administrator") {
         navigate("/dashboard");
       } else {
@@ -85,6 +90,4 @@ export default function Login() {
       </div>
     </div>
   );
-
-  
 }
