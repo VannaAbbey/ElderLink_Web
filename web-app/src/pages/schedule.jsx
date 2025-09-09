@@ -12,6 +12,8 @@ import {
   deleteDoc,
 } from "firebase/firestore";
 import "./schedule.css";
+import Navbar from "./navbar";
+
 
 export default function Schedule() {
   const [caregivers, setCaregivers] = useState([]);
@@ -36,9 +38,9 @@ export default function Schedule() {
 
   //code for rest day modal
   const [showRestDayModal, setShowRestDayModal] = useState(false);
-const [selectedCaregiverAssignId, setSelectedCaregiverAssignId] = useState(null);
-const [selectedCaregiverName, setSelectedCaregiverName] = useState("");
-const [selectedRestDays, setSelectedRestDays] = useState([]);
+  const [selectedCaregiverAssignId, setSelectedCaregiverAssignId] = useState(null);
+  const [selectedCaregiverName, setSelectedCaregiverName] = useState("");
+  const [selectedRestDays, setSelectedRestDays] = useState([]);
 
 
   useEffect(() => {
@@ -452,35 +454,35 @@ const [selectedRestDays, setSelectedRestDays] = useState([]);
   };
 
   // ✅ Manual Rest Day function
-const manualRestDay = async (assignDocId) => {
-  const assign = assignments.find(a => a.id === assignDocId);
-  if (!assign) return;
+  const manualRestDay = async (assignDocId) => {
+    const assign = assignments.find(a => a.id === assignDocId);
+    if (!assign) return;
 
-  const currentDays = assign.days_assigned || [];
-  
-  const input = prompt(
-    `Current days assigned: ${currentDays.join(", ")}\nEnter 2 rest days separated by comma (e.g., Saturday, Sunday):`,
-    ""
-  );
+    const currentDays = assign.days_assigned || [];
 
-  if (!input) return;
+    const input = prompt(
+      `Current days assigned: ${currentDays.join(", ")}\nEnter 2 rest days separated by comma (e.g., Saturday, Sunday):`,
+      ""
+    );
 
-  const restDays = input.split(",").map(d => d.trim()).filter(d => daysOfWeek.includes(d));
+    if (!input) return;
 
-  if (restDays.length !== 2) {
-    alert("Please enter exactly 2 valid rest days!");
-    return;
-  }
+    const restDays = input.split(",").map(d => d.trim()).filter(d => daysOfWeek.includes(d));
 
-  const newDaysAssigned = daysOfWeek.filter(d => !restDays.includes(d)).slice(0, 5);
+    if (restDays.length !== 2) {
+      alert("Please enter exactly 2 valid rest days!");
+      return;
+    }
 
-  await updateDoc(doc(db, "cg_house_assign", assignDocId), {
-    days_assigned: newDaysAssigned
-  });
+    const newDaysAssigned = daysOfWeek.filter(d => !restDays.includes(d)).slice(0, 5);
 
-  alert(`Updated working days for ${caregiverName(assign.caregiver_id)}: ${newDaysAssigned.join(", ")}`);
-  await loadAllAssignments();
-};
+    await updateDoc(doc(db, "cg_house_assign", assignDocId), {
+      days_assigned: newDaysAssigned
+    });
+
+    alert(`Updated working days for ${caregiverName(assign.caregiver_id)}: ${newDaysAssigned.join(", ")}`);
+    await loadAllAssignments();
+  };
 
 
   // show elders for UI, accounting for temporary reassigns for today
@@ -511,47 +513,52 @@ const manualRestDay = async (assignDocId) => {
     return true;
   });
 
-// ✅ Open modal for specific caregiver
-const openRestDayModal = (assignDocId, caregiverId) => {
-  setSelectedCaregiverAssignId(assignDocId);
-  setSelectedCaregiverName(caregiverName(caregiverId)); // existing helper
-  setSelectedRestDays([]); // reset selection
-  setShowRestDayModal(true);
-};
+  // ✅ Open modal for specific caregiver
+  const openRestDayModal = (assignDocId, caregiverId) => {
+    setSelectedCaregiverAssignId(assignDocId);
+    setSelectedCaregiverName(caregiverName(caregiverId)); // existing helper
+    setSelectedRestDays([]); // reset selection
+    setShowRestDayModal(true);
+  };
 
-// ✅ Handle checkbox selection
-const toggleRestDay = (day) => {
-  if (selectedRestDays.includes(day)) {
-    setSelectedRestDays(selectedRestDays.filter(d => d !== day));
-  } else if (selectedRestDays.length < 2) {
-    setSelectedRestDays([...selectedRestDays, day]);
-  } else {
-    alert("You can only select 2 rest days.");
-  }
-};
+  // ✅ Handle checkbox selection
+  const toggleRestDay = (day) => {
+    if (selectedRestDays.includes(day)) {
+      setSelectedRestDays(selectedRestDays.filter(d => d !== day));
+    } else if (selectedRestDays.length < 2) {
+      setSelectedRestDays([...selectedRestDays, day]);
+    } else {
+      alert("You can only select 2 rest days.");
+    }
+  };
 
-// ✅ Save selected rest days
-const saveRestDays = async () => {
-  if (selectedRestDays.length !== 2) {
-    alert("Please select exactly 2 rest days.");
-    return;
-  }
+  // ✅ Save selected rest days
+  const saveRestDays = async () => {
+    if (selectedRestDays.length !== 2) {
+      alert("Please select exactly 2 rest days.");
+      return;
+    }
 
-  const newDaysAssigned = daysOfWeek.filter(d => !selectedRestDays.includes(d)).slice(0, 5);
+    const newDaysAssigned = daysOfWeek.filter(d => !selectedRestDays.includes(d)).slice(0, 5);
 
-  await updateDoc(doc(db, "cg_house_assign", selectedCaregiverAssignId), {
-    days_assigned: newDaysAssigned
-  });
+    await updateDoc(doc(db, "cg_house_assign", selectedCaregiverAssignId), {
+      days_assigned: newDaysAssigned
+    });
 
-  alert(`Updated working days for ${selectedCaregiverName}: ${newDaysAssigned.join(", ")}`);
-  setShowRestDayModal(false);
-  await loadAllAssignments();
-};
+    alert(`Updated working days for ${selectedCaregiverName}: ${newDaysAssigned.join(", ")}`);
+    setShowRestDayModal(false);
+    await loadAllAssignments();
+  };
 
 
 
   return (
     <div className="schedule-page">
+
+      <Navbar /> {/* Always on top */}
+    <main className="schedule-container">
+      
+
       <h2 className="page-title">Caregiver Scheduling</h2>
 
       <div style={{ marginBottom: 12 }}>
@@ -619,56 +626,57 @@ const saveRestDays = async () => {
             </tr>
           </thead>
           <tbody>
-  {filteredAssignments.map((a) => {
-    const isAbsent = !!a.is_absent;
-    const elders = getDisplayedEldersFor(a.caregiver_id);
-    return (
-      <tr key={a.id} className={isAbsent ? "absent-row" : ""}>
-        <td>{caregiverName(a.caregiver_id)}</td>
-        <td>{(a.days_assigned || []).join(", ")}</td>
-        <td>{a.time_range?.start} - {a.time_range?.end}</td>
-        <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
-        <td>
-          {isAbsent ? (
-            <>
-              <span className="absent-text">Marked Absent Today</span>
-              <button onClick={() => unmarkAbsent(a.id)} className="unabsent-btn">Unmark</button>
-            </>
-          ) : (
-            <button onClick={() => markAbsent(a.id)} className="absent-btn">Mark as Absent</button>
-          )}
-            <button onClick={() => openRestDayModal(a.id, a.caregiver_id)} className="restday-btn">Set Rest Days</button>
-        </td>
-      </tr>
-    );
-  })}
-</tbody>
+            {filteredAssignments.map((a) => {
+              const isAbsent = !!a.is_absent;
+              const elders = getDisplayedEldersFor(a.caregiver_id);
+              return (
+                <tr key={a.id} className={isAbsent ? "absent-row" : ""}>
+                  <td>{caregiverName(a.caregiver_id)}</td>
+                  <td>{(a.days_assigned || []).join(", ")}</td>
+                  <td>{a.time_range?.start} - {a.time_range?.end}</td>
+                  <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
+                  <td>
+                    {isAbsent ? (
+                      <>
+                        <span className="absent-text">Marked Absent Today</span>
+                        <button onClick={() => unmarkAbsent(a.id)} className="unabsent-btn">Unmark</button>
+                      </>
+                    ) : (
+                      <button onClick={() => markAbsent(a.id)} className="absent-btn">Mark as Absent</button>
+                    )}
+                    <button onClick={() => openRestDayModal(a.id, a.caregiver_id)} className="restday-btn">Set Rest Days</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
         </table>
       </div>
+      </main>
       {showRestDayModal && (
-  <div className="modal-overlay">
-    <div className="modal">
-      <h3>Set Rest Days for {selectedCaregiverName}</h3>
-      <p>Select 2 rest days:</p>
-      <div className="days-checkboxes">
-        {daysOfWeek.map(day => (
-          <label key={day} style={{ display: "block" }}>
-            <input
-              type="checkbox"
-              checked={selectedRestDays.includes(day)}
-              onChange={() => toggleRestDay(day)}
-            />
-            {day}
-          </label>
-        ))}
-      </div>
-      <div className="modal-actions">
-        <button onClick={saveRestDays} className="save-btn">Save</button>
-        <button onClick={() => setShowRestDayModal(false)} className="cancel-btn">Cancel</button>
-      </div>
-    </div>
-  </div>
-)}
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Set Rest Days for {selectedCaregiverName}</h3>
+            <p>Select 2 rest days:</p>
+            <div className="days-checkboxes">
+              {daysOfWeek.map(day => (
+                <label key={day} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedRestDays.includes(day)}
+                    onChange={() => toggleRestDay(day)}
+                  />
+                  {day}
+                </label>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button onClick={saveRestDays} className="save-btn">Save</button>
+              <button onClick={() => setShowRestDayModal(false)} className="cancel-btn">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
