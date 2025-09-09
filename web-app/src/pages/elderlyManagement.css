@@ -87,18 +87,20 @@
 }
 
 .house-content {
-  margin-top: 10px;
+  margin-top: 0; /* 🔹 remove extra gap below folder nav */
 }
 
 .elderly-folder-container {
-  margin: 0 50px 50px 50px; /* top 0, right 50px, bottom 50px, left 50px */
-  box-shadow: 0 4px 8px -2px rgba(0, 0, 0, 0.4);
-  border-radius: 10px; 
+  margin: 0 auto 20px auto;  /* no top margin, 20px bottom, centered horizontally */
+  padding: 15px;             /* inner padding */
+  max-width: 85%;            /* limit width */
+  box-shadow: 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  background: #fff;          /* keeps it neat inside */
 }
 
-
 .elderly-profile-container.wide-layout {
-  background: #ddd;
+  background: #ffffff;
 }
 
 /* RECORDS HEADER */
@@ -676,7 +678,12 @@ input[type="file"] {
 
 .folder-nav {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: center;
+  margin: 0 auto;
+  max-width: 85%;
+  margin-bottom: -1px;   /* pulls tabs down into container */
+  position: relative;
+  z-index: 2;
 }
 
 .folder-btn {
@@ -690,6 +697,7 @@ input[type="file"] {
   transition: 0.2s ease-in-out;
   color: #333;
   display: inline-block;
+  min-width: 200px;
 }
 
 .folder-btn:hover {
@@ -697,6 +705,42 @@ input[type="file"] {
 }
 
 .folder-btn.active {
+  background: #00588E;
+  color: white;
+  border: 1px solid #00588E;
+  border-bottom: none;   /* connects directly to container */
+  position: relative;
+  z-index: 3;            /* ensures active tab overlaps container border */
+}
+
+/* =============================== */
+/* Alive / Deceased Tabs */
+/* =============================== */
+.status-tabs {
+  display: flex;
+  justify-content: flex-end; /* push to the right */
+  margin: 0; /* remove extra space */
+}
+
+.status-tabs button {
+  background: #ddd;
+  border: none;
+  border-radius: 8px 8px 0 0;
+  padding: 10px 20px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: 0.2s ease-in-out;
+  display: flex;
+  align-items: center;
+  color: #333;
+}
+
+.status-tabs button:hover {
+  background: #ccc;
+}
+
+.status-tabs button.active {
   background: #00588E;
   color: white;
   box-shadow: 0px -2px 6px rgba(0, 0, 0, 0.15);
@@ -707,15 +751,13 @@ input[type="file"] {
 /* =============================== */
 
 .elderly-table-wrapper {
-  margin-top: 16px;
+  margin-top: 0; /* 🔹 stick table right under toggle */
   overflow-x: auto;
 }
 
 .elderly-table {
   width: 100%;
   border-collapse: collapse;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
   overflow: hidden;
   background: #ffffff;
   table-layout: fixed; /* ensures header & rows align */
@@ -750,124 +792,69 @@ input[type="file"] {
 /* Column widths */
 .elderly-table th:nth-child(1),
 .elderly-table td:nth-child(1) {
-  width: 5%; /* Icon expands */
+  width: 50px;
 }
 
 .elderly-table th:nth-child(2),
 .elderly-table td:nth-child(2) {
-  width: 60%; /* Full Name expands */
+  width: 120px;
 }
 
 .elderly-table th:nth-child(3),
 .elderly-table td:nth-child(3) {
-  width: 20%; /* Age */
-  text-align: center;
+  width: 150px;
 }
 
 .elderly-table th:nth-child(4),
 .elderly-table td:nth-child(4) {
-  width: 20%; /* Sex */
-  text-align: center;
+  width: 100px;
 }
 
 .elderly-table th:nth-child(5),
 .elderly-table td:nth-child(5) {
-  width: 10%; /* Select (optional) */
-  text-align: center;
+  width: 100px;
 }
 
-.name-cell .name {
-  font-weight: 600;
-  color: #00588E;
+.elderly-table th:nth-child(6),
+.elderly-table td:nth-child(6) {
+  width: 150px;
 }
 
-.selected-row td {
-  background: #e6f2ff !important;
-}
-
-/* Checkbox alignment */
-.select-cell input[type="checkbox"] {
-  transform: scale(1.1);
-  cursor: pointer;
-}
-
-/* Container for the tabs, aligned to right */
-.table-tabs {
-  display: flex;
-  justify-content: flex-end; /* top-right */
-  gap: 0; /* no gap between tabs for folder style */
-  margin-bottom: 10px;
-}
-
-/* Individual folder-style tab buttons */
-.table-tabs button {
-  background: #ddd;
-  color: #333;
-  border: none;
-  border-radius: 8px 8px 0 0;
-  padding: 10px 20px;
-  font-weight: 600;
-  font-size: 16px;
-  cursor: pointer;
-  transition: 0.2s ease-in-out;
-  display: flex;
+/* Table row buttons */
+.action-btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  width: 28px;
+  height: 28px;
+  margin: 0 3px;
+  border: none;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.2s ease;
 }
 
-/* Active tab */
-.table-tabs button.active {
-  background: #00588E;
-  color: white;
-  box-shadow: 0px -2px 6px rgba(0, 0, 0, 0.15);
+.action-btn:hover {
+  background: #e5e7eb;
 }
 
-/* =============================== */
-/* Mobile-Friendly "Stacked" Table */
-/* =============================== */
-@media (max-width: 720px) {
-  .elderly-table thead {
-    display: none; /* hide header row */
-  }
-
-  .elderly-table,
-  .elderly-table tbody,
-  .elderly-table tr,
-  .elderly-table td {
-    display: block;
-    width: 100%;
-  }
-
-  .elderly-table tr {
-    border-bottom: 1px solid #eee;
-    padding: 10px 0;
-  }
-
-  .elderly-table td {
-    border: none;
-    padding: 8px 14px;
-    text-align: left !important;
-  }
-
-  .name-cell .name {
-    font-size: 15px;
-  }
-
-  .age-cell::before {
-    content: 'Age: ';
-    font-weight: 600;
-    color: #6b7280;
-  }
-
-  .sex-cell::before {
-    content: 'Sex: ';
-    font-weight: 600;
-    color: #6b7280;
-  }
-
-  .select-cell {
-    margin-top: 6px;
-  }
+/* Edit and delete buttons with colors */
+.edit-btn {
+  background: #3b82f6;
+  color: #fff;
 }
 
+.edit-btn:hover {
+  background: #2563eb;
+}
+
+.delete-btn {
+  background: #ef4444;
+  color: #fff;
+}
+
+.delete-btn:hover {
+  background: #dc2626;
+}

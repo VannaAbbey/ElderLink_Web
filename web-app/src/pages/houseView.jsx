@@ -280,10 +280,10 @@ export default function HouseView({ houseId: propHouseId }) {
         </div>
       )}
 
-      {/* Elderly Table with Tabs at Top-Right */}
+      {/* Elderly Table with Status Tabs */}
       <div className="elderly-table-wrapper" style={{ position: "relative" }}>
         {/* Alive / Deceased Tabs */}
-        <div className="table-tabs">
+        <div className="status-tabs">
           <button
             className={activeTab === "Alive" ? "active" : ""}
             onClick={() => setActiveTab("Alive")}
@@ -355,140 +355,6 @@ export default function HouseView({ houseId: propHouseId }) {
           </table>
         )}
       </div>
-
-      {/* Floating Select Panel */}
-      {showSelectPanel && (
-        <div className="select-panel">
-          <div className="select-panel-header">
-            <strong>Switch House</strong>
-            <button className="select-panel-close" onClick={closeSelectPanel}>✕</button>
-          </div>
-          <div className="select-panel-note">
-            Please select the elderly you want to allocate or change house.
-          </div>
-          <div className="selected-list-compact">
-            {selectedElderly.length === 0 ? (
-              <div className="no-selected">No elderly selected yet.</div>
-            ) : (
-              <ul>
-                {elderlyList
-                  .filter((e) => selectedElderly.includes(e.id))
-                  .map((e) => <li key={e.id}>{e.elderly_fname} {e.elderly_lname}</li>)}
-              </ul>
-            )}
-          </div>
-          <div className="select-panel-actions">
-            <button className="done-btn" onClick={() => {
-              if (selectedElderly.length === 0) {
-                alert("Please select at least one elderly.");
-                return;
-              }
-              setShowAllocateModal(true);
-              setShowSelectPanel(false);
-            }}>
-              Done
-            </button>
-            <button className="cancel-btn" onClick={closeSelectPanel}>Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {/* Add Elderly Overlay */}
-      {showOverlay && (
-        <div className="overlay">
-          <div className="overlay-content">
-            <span className="overlay-close" onClick={() => setShowOverlay(false)}>✕</span>
-            <h2 className="overlay-header">Add Elderly Profile</h2>
-
-            <div className="image-upload-box" onClick={() => document.getElementById("fileInput").click()}>
-              {previewImage ? <img src={previewImage} alt="Preview" className="preview-img" /> : (
-                <div className="placeholder-box"><span className="placeholder-text">+ Upload Photo</span></div>
-              )}
-              <input type="file" id="fileInput" accept="image/*" className="hidden-input" onChange={handleImageChange} />
-            </div>
-
-            {["elderly_fname", "elderly_lname", "elderly_bday", "elderly_age", "elderly_dietNotes", "elderly_condition"].map((field) => (
-              <div className="form-group" key={field}>
-                <label>{fieldLabels[field]}</label>
-                <input
-                  type={field === "elderly_age" ? "number" : field === "elderly_bday" ? "date" : "text"}
-                  name={field}
-                  value={formData[field]}
-                  onChange={handleChange}
-                />
-              </div>
-            ))}
-
-            <div className="form-group">
-              <label>Sex</label>
-              <select name="elderly_sex" value={formData.elderly_sex} onChange={handleChange}>
-                <option>Male</option>
-                <option>Female</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>Mobility Status</label>
-              <select name="elderly_mobilityStatus" value={formData.elderly_mobilityStatus} onChange={handleChange}>
-                <option>Independent</option>
-                <option>Assisted</option>
-                <option>Wheelchair-bound</option>
-                <option>Bedridden</option>
-                <option>Needs Supervision</option>
-              </select>
-            </div>
-
-            <div className="overlay-buttons">
-              <button onClick={handleSave}>Save Elderly Profile</button>
-              <button onClick={() => setShowOverlay(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Allocation Modal */}
-      {showAllocateModal && (
-        <div className="overlay">
-          <div className="overlay-content">
-            <span className="overlay-close" onClick={() => {
-              setShowAllocateModal(false);
-              setSelectedElderly([]);
-            }}>✕</span>
-            <h2>Allocate Selected Elderly</h2>
-
-            <div className="selected-list">
-              <strong>Selected:</strong>
-              <ul>
-                {elderlyList
-                  .filter((e) => selectedElderly.includes(e.id))
-                  .map((e) => <li key={e.id}>{e.elderly_fname} {e.elderly_lname}</li>)}
-              </ul>
-            </div>
-
-            <label>Choose New House:</label>
-            <select className="allocation-select" value={formData.newHouseId} onChange={(e) => setFormData((p) => ({ ...p, newHouseId: e.target.value }))}>
-              <option value="">-- Select House --</option>
-              {Object.keys(houseNames).map((id) => (
-                <option key={id} value={id}>{houseNames[id]}</option>
-              ))}
-            </select>
-
-            <div className="form-group">
-              <label>Reason for Allocation:</label>
-              <textarea rows="3" className="allocation-textarea" value={reason} onChange={(e) => setReason(e.target.value)} />
-            </div>
-
-            <div className="overlay-buttons">
-              <button onClick={confirmAllocation}>Save & Allocate</button>
-              <button onClick={() => {
-                setShowAllocateModal(false);
-                setSelectedElderly([]);
-              }}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MdArrowBack } from "react-icons/md";
+import { MdArrowBack, MdCake, MdTransgender, MdAccessible, MdHome } from "react-icons/md";
+import { FaHeartbeat, FaUser, FaNotesMedical, FaClipboardList, FaUserSlash } from "react-icons/fa";
 import {
   collection,
   query,
@@ -11,7 +12,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import "./elderlyManagement.css";
+import "./profileElderly.css";
 
 export default function Profile_Elderly() {
   const { id } = useParams(); // elderly_id from URL
@@ -136,7 +137,6 @@ export default function Profile_Elderly() {
         <h1>
            {elder.elderly_sex === "Female" ? "Lola" : "Lolo"} {elder.elderly_fname}
         </h1>
-        {/* Edit button visible for all users */}
         <button style={{ marginLeft: "20px" }} onClick={() => setShowEditOverlay(true)}>
           Edit Profile
         </button>
@@ -149,53 +149,37 @@ export default function Profile_Elderly() {
       />
 
       <div className="elderly-details">
+        <p><FaUser /> <strong>Full Name:</strong> {elder.elderly_fname} {elder.elderly_lname}</p>
+        <p><MdCake /> <strong>Age:</strong> {elder.elderly_age}</p>
+        <p><MdCake /> <strong>Birth Date:</strong> {formatTimestamp(elder.elderly_bday)}</p>
+        <p><MdTransgender /> <strong>Sex:</strong> {elder.elderly_sex}</p>
+        <p><MdAccessible /> <strong>Mobility Status:</strong> {elder.elderly_mobilityStatus}</p>
+        <p><FaNotesMedical /> <strong>Dietary Notes:</strong> {elder.elderly_dietNotes || "N/A"}</p>
+        <p><FaHeartbeat /> <strong>Health Condition:</strong> {elder.elderly_condition || "N/A"}</p>
         <p>
-          <strong>Full Name:</strong> {elder.elderly_fname} {elder.elderly_lname}
-        </p>
-        <p>
-          <strong>Age:</strong> {elder.elderly_age}
-        </p>
-        <p>
-          <strong>Birth Date:</strong> {formatTimestamp(elder.elderly_bday)}
-        </p>
-        <p>
-          <strong>Sex:</strong> {elder.elderly_sex}
-        </p>
-        <p>
-          <strong>Mobility Status:</strong> {elder.elderly_mobilityStatus}
-        </p>
-        <p>
-          <strong>Dietary Notes:</strong> {elder.elderly_dietNotes || "N/A"}
-        </p>
-        <p>
-          <strong>Health Condition:</strong> {elder.elderly_condition || "N/A"}
-        </p>
-        <p>
-          <strong>Status:</strong> {elder.elderly_status}
+          {elder.elderly_status === "Alive" ? (
+            <><FaUser /> <strong>Status:</strong> Alive</>
+          ) : (
+            <><FaUserSlash /> <strong>Status:</strong> Deceased</>
+          )}
         </p>
         {elder.elderly_status === "Deceased" && (
           <>
-            <p>
-              <strong>Cause of Death:</strong> {elder.elderly_cause || "N/A"}
-            </p>
-            <p>
-              <strong>Date of Death:</strong> {formatTimestamp(elder.elderly_deathDate)}
-            </p>
+            <p><FaClipboardList /> <strong>Cause of Death:</strong> {elder.elderly_cause || "N/A"}</p>
+            <p><MdCake /> <strong>Date of Death:</strong> {formatTimestamp(elder.elderly_deathDate)}</p>
           </>
         )}
-        <p>
-          <strong>House:</strong> {elder.house_id}
-        </p>
+        <p><MdHome /> <strong>House:</strong> {elder.house_id}</p>
       </div>
 
-      {/* Edit Overlay */}
+      {/* --- Edit Overlay --- */}
       {showEditOverlay && (
         <div className="overlay">
           <div className="overlay-content">
             <span className="overlay-close" onClick={() => setShowEditOverlay(false)}>
               ✕
             </span>
-            <h2 class="overlay-header">Edit Elderly Profile</h2>
+            <h2 className="overlay-header">Edit Elderly Profile</h2>
 
             <div className="image-upload-box" onClick={() => document.getElementById("fileInput").click()}>
               {previewImage ? (
@@ -214,31 +198,13 @@ export default function Profile_Elderly() {
               />
             </div>
 
-            {/* Form Fields with proper labels */}
-            {[
-              "elderly_fname",
-              "elderly_lname",
-              "elderly_bday",
-              "elderly_age",
-              "elderly_dietNotes",
-              "elderly_condition",
-            ].map((field) => (
+            {[ "elderly_fname","elderly_lname","elderly_bday","elderly_age","elderly_dietNotes","elderly_condition"].map((field) => (
               <div className="form-group" key={field}>
                 <label>{labelMap[field]}</label>
                 <input
-                  type={
-                    field === "elderly_age"
-                      ? "number"
-                      : field === "elderly_bday"
-                      ? "date"
-                      : "text"
-                  }
+                  type={ field === "elderly_age" ? "number" : field === "elderly_bday" ? "date" : "text" }
                   name={field}
-                  value={
-                    field === "elderly_bday"
-                      ? formatDateInput(formData[field])
-                      : formData[field] || ""
-                  }
+                  value={ field === "elderly_bday" ? formatDateInput(formData[field]) : formData[field] || "" }
                   onChange={handleChange}
                 />
               </div>
@@ -275,7 +241,7 @@ export default function Profile_Elderly() {
         </div>
       )}
 
-      {/* Confirmation Modal */}
+      {/* --- Confirmation Modal --- */}
       {showConfirm && (
         <div className="overlay">
           <div className="overlay-content">

@@ -56,12 +56,6 @@ export default function ElderlyManagement() {
         </div>
       </div>
 
-      <div className="elderly-folder-container">
-                {/* Content */}
-        <div className="tab-content">
-          {activeTab === "records" && (
-            <div className="view-records">
-
               {/* Folder Navigation */}
               <div className="folder-nav">
                 {houses.map((house) => (
@@ -78,7 +72,12 @@ export default function ElderlyManagement() {
                   </button>
                 ))}
               </div>
-
+              
+      <div className="elderly-folder-container">
+                {/* Content */}
+        <div className="tab-content">
+          {activeTab === "records" && (
+            <div className="view-records">
               {/* Always render HouseView */}
               <div className="house-content">
                 <HouseView houseId={activeHouse} />
