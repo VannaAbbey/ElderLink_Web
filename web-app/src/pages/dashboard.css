@@ -1,60 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
 
+/* Dashboard Container */
 .dashboard-container {
   min-height: 100vh;
-  background-color: #F2FDFF;
-  padding: 20px;
+  background: url("/images/AdminBackground.png") no-repeat center center/cover;
   font-family: 'Poppins', sans-serif;
   display: flex;
   flex-direction: column;
   align-items: center;
-}
-
-/* Header */
-.dashboard-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  width: 100%;
-  max-width: 1100px;
-  position: relative; /* for absolute positioning of title */
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* Center the "Admin Dashboard" without moving icons */
-.header-left h1 {
-  font-size: 1.5rem;
-  font-weight: bold;
-  text-align: center;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.menu-btn {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-}
-
-.logout-btn {
-  background-color: #d9534f;
-  border: none;
-  color: white;
-  padding: 8px 15px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.logout-btn:hover {
-  background-color: #c9302c;
 }
 
 /* Section Titles */
@@ -77,7 +30,7 @@
 }
 
 .overview-card {
-  background: white;
+  background: #FFFFFFFF;
   padding: 20px;
   border-radius: 8px;
   box-shadow: 0px 2px 4px rgba(0,0,0,0.1);
@@ -96,6 +49,7 @@
   font-weight: bold;
 }
 
+/* Management Buttons */
 .management-buttons {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -105,13 +59,13 @@
 }
 
 .management-buttons-row-2 {
-  grid-column: 1 / -1; /* span all 3 columns */
+  grid-column: 1 / -1;
   display: flex;
   justify-content: center;
   gap: 20px;
   width: 100%;
   max-width: 1100px;
-} 
+}
 
 .mgmt-btn {
   background: white;

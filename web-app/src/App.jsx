@@ -7,7 +7,6 @@ import EditNurseProfile from "./pages/edit_cg_profile";
 import Profile_Elderly from "./pages/profileElderly";
 import HouseView from "./pages/houseView";
 
-
 export default function App() {
   return (
     <Router>

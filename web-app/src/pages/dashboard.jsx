@@ -1,33 +1,23 @@
 import React, { useEffect, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
-import { auth, db } from "../firebase";
-import { signOut } from "firebase/auth";
-import { useNavigate } from "react-router-dom";
+import { db } from "../firebase";
+import Navbar from "./navbar";
+import { useNavigate } from "react-router-dom";  // ✅ insert this
 import "./dashboard.css";
 
 export default function Dashboard() {
-  const navigate = useNavigate();
   const [totalElderly, setTotalElderly] = useState(0);
   const [totalCaregivers, setTotalCaregivers] = useState(0);
   const [totalNurses, setTotalNurses] = useState(0);
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigate("/login");
-    } catch (error) {
-      console.error("Error signing out:", error);
-    }
-  };
+  const navigate = useNavigate(); // ✅ insert this
 
   useEffect(() => {
     const fetchCounts = async () => {
       try {
-        // Elderly count
         const elderlySnapshot = await getDocs(collection(db, "elderly"));
         setTotalElderly(elderlySnapshot.size);
 
-        // Users count (caregivers & nurses)
         const usersSnapshot = await getDocs(collection(db, "users"));
         let caregiverCount = 0;
         let nurseCount = 0;
@@ -40,7 +30,6 @@ export default function Dashboard() {
 
         setTotalCaregivers(caregiverCount);
         setTotalNurses(nurseCount);
-
       } catch (error) {
         console.error("Error fetching data:", error);
       }
@@ -51,15 +40,8 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard-container">
-      {/* Top Bar */}
-      <div className="dashboard-header">
-        <div className="header-left">
-          <button className="menu-btn">&#9776;</button>
-          <h1>Admin Dashboard</h1>
-        </div>
-        <button onClick={handleLogout} className="logout-btn">Logout</button>
-      </div>
-
+      <Navbar />
+      
       {/* Overview */}
       <h2 className="section-title">Overview</h2>
       <div className="overview-cards">
@@ -80,23 +62,22 @@ export default function Dashboard() {
       {/* Management */}
       <h2 className="section-title">Management</h2>
       <div className="management-buttons">
+
+        {/* unang buttons, nicomment ko lang :P
         <button className="mgmt-btn" onClick={() => navigate("/elderlyManagement")}>
           👤 Elderly Profile & Life Status Management
         </button>
-
-        {/* Single caregiver assignment button */}
-        <button
-          className="mgmt-btn"
-          onClick={() => navigate(`/edit_cg_assign`)}
-        >
+        <button className="mgmt-btn" onClick={() => navigate("/edit_cg_assign")}>
           👥 Edit Caregiver Assignment
-        </button>
+        </button> */}
 
         <div className="management-buttons-row-2">
           <button className="mgmt-btn" onClick={() => navigate("/edit_cg_profile")}>
-            👤 Edit Caregiver Profile</button>
+            👤 Edit Caregiver Profile
+          </button>
           <button className="mgmt-btn" onClick={() => navigate("/edit_nurse_profile")}>
-            🩺 Edit Nurse Profile</button>
+            🩺 Edit Nurse Profile
+          </button>
         </div>
       </div>
     </div>
