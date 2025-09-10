@@ -1,18 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { signOut } from "firebase/auth";
+import { signOut, onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { FaBell } from "react-icons/fa";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  onSnapshot,
-} from "firebase/firestore";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import "./navbar.css";
-
 
 export default function Navbar() {
   const navigate = useNavigate();
@@ -23,10 +15,22 @@ export default function Navbar() {
   const dropdownRef = useRef(null);
   const notifRef = useRef(null);
 
+  // ✅ Redirect to login if user is not authenticated
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        navigate("/login", { replace: true });
+      }
+    });
+    return () => unsubscribeAuth();
+  }, [navigate]);
+
+  // ✅ Logout function
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      navigate("/login");
+      console.log("✅ Successfully logged out");
+      navigate("/login", { replace: true });
     } catch (error) {
       console.error("Error signing out:", error);
     }
@@ -34,25 +38,16 @@ export default function Navbar() {
 
   // ✅ Real-time listener for PENDING notifications
   useEffect(() => {
-    let q;
-    try {
-      q = query(
-        collection(db, "notifications"),
-        where("action_status", "==", "pending"),
-
-      );
-    } catch (error) {
-      console.warn("Missing index. Fallback query without orderBy.");
-      q = query(collection(db, "notifications"), where("action_status", "==", "pending"));
-    }
+    const q = query(
+      collection(db, "notifications"),
+      where("action_status", "==", "pending")
+    );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const notifData = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
-
-      console.log("🔔 New Notifications:", notifData);
       setNotifications(notifData);
     });
 
@@ -96,9 +91,7 @@ export default function Navbar() {
           Elderly Management
         </li>
         <li
-          className={
-            location.pathname.startsWith("/schedule") ? "active" : ""
-          }
+          className={location.pathname.startsWith("/schedule") ? "active" : ""}
           onClick={() => navigate("/schedule")}
         >
           Schedule
