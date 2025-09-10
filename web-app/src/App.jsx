@@ -6,8 +6,8 @@ import EditCaregiverProfile from "./pages/edit_cg_profile";
 import EditNurseProfile from "./pages/edit_cg_profile";
 import Profile_Elderly from "./pages/profileElderly";
 import HouseView from "./pages/houseView";
-
-
+import Notifications from "./pages/notifications";
+import Schedule from "./pages/schedule";
 
 export default function App() {
   return (
@@ -20,6 +20,8 @@ export default function App() {
         <Route path="/edit_nurse_profile" element={<EditNurseProfile />} />
         <Route path="/profileElderly/:id" element={<Profile_Elderly />} />
         <Route path="/house/:houseId" element={<HouseView />} />
+        <Route path="/notifications" element={<Notifications />} />
+        <Route path="/schedule" element={<Schedule />} />
 
       </Routes>
     </Router>
