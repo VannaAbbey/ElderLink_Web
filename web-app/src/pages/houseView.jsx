@@ -14,10 +14,12 @@ import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import "./elderlyManagement.css";
 
+
 export default function HouseView({ houseId: propHouseId }) {
   const { houseId: paramHouseId } = useParams();
   const houseId = propHouseId || paramHouseId;
   const navigate = useNavigate();
+
 
   const [activeTab, setActiveTab] = useState("Alive");
   const [searchTerm, setSearchTerm] = useState("");
@@ -39,9 +41,11 @@ export default function HouseView({ houseId: propHouseId }) {
     newHouseId: "",
   });
 
+
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewImage, setPreviewImage] = useState("");
   const storage = getStorage();
+
 
   const houseImages = {
     H001: "/images/Sebastian.png",
@@ -51,6 +55,7 @@ export default function HouseView({ houseId: propHouseId }) {
     H005: "/images/Gabriel.png",
   };
 
+
   const houseNames = {
     H001: "House of St. Sebastian",
     H002: "House of St. Emmanuel",
@@ -58,6 +63,7 @@ export default function HouseView({ houseId: propHouseId }) {
     H004: "House of St. Rose",
     H005: "House of St. Gabriel",
   };
+
 
   const fieldLabels = {
     elderly_fname: "First Name",
@@ -67,6 +73,7 @@ export default function HouseView({ houseId: propHouseId }) {
     elderly_dietNotes: "Diet Notes",
     elderly_condition: "Condition",
   };
+
 
   useEffect(() => {
     const fetchElderly = async () => {
@@ -82,6 +89,7 @@ export default function HouseView({ houseId: propHouseId }) {
     fetchElderly();
   }, []);
 
+
   const elderlyInHouse = elderlyList.filter((e) => e.house_id === houseId);
   const filteredElderly = elderlyInHouse
     .filter((e) =>
@@ -93,10 +101,12 @@ export default function HouseView({ houseId: propHouseId }) {
       return true;
     });
 
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((p) => ({ ...p, [name]: value }));
   };
+
 
   const handleImageChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -106,6 +116,7 @@ export default function HouseView({ houseId: propHouseId }) {
     }
   };
 
+
   const generateElderlyId = () => {
     const numbers = elderlyList
       .map((e) => parseInt(e.elderly_id?.replace("E", "")))
@@ -113,6 +124,7 @@ export default function HouseView({ houseId: propHouseId }) {
     const nextNum = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
     return `E${String(nextNum).padStart(3, "0")}`;
   };
+
 
   const handleSave = async () => {
     try {
@@ -125,6 +137,7 @@ export default function HouseView({ houseId: propHouseId }) {
         await uploadBytes(storageRef, selectedImage);
         uploadedImageUrl = await getDownloadURL(storageRef);
       }
+
 
       const newElderly = {
         elderly_id: generateElderlyId(),
@@ -144,9 +157,11 @@ export default function HouseView({ houseId: propHouseId }) {
         user_id: "",
       };
 
+
       await addDoc(collection(db, "elderly"), newElderly);
       const q = await getDocs(collection(db, "elderly"));
       setElderlyList(q.docs.map((d) => ({ id: d.id, ...d.data() })));
+
 
       setShowOverlay(false);
       setFormData({
@@ -167,6 +182,7 @@ export default function HouseView({ houseId: propHouseId }) {
     }
   };
 
+
   const toggleSelect = (elderId) => {
     setSelectedElderly((prev) =>
       prev.includes(elderId)
@@ -174,6 +190,7 @@ export default function HouseView({ houseId: propHouseId }) {
         : [...prev, elderId]
     );
   };
+
 
   const confirmAllocation = async () => {
     if (!formData.newHouseId) {
@@ -189,6 +206,7 @@ export default function HouseView({ houseId: propHouseId }) {
       return;
     }
 
+
     try {
       const updates = selectedElderly.map(async (elderId) => {
         const elderRef = doc(db, "elderly", elderId);
@@ -199,8 +217,10 @@ export default function HouseView({ houseId: propHouseId }) {
       });
       await Promise.all(updates);
 
+
       const q = await getDocs(collection(db, "elderly"));
       setElderlyList(q.docs.map((d) => ({ id: d.id, ...d.data() })));
+
 
       alert("Elderly successfully allocated to the new house!");
       setShowAllocateModal(false);
@@ -214,11 +234,13 @@ export default function HouseView({ houseId: propHouseId }) {
     }
   };
 
+
   const isSelected = (id) => selectedElderly.includes(id);
   const closeSelectPanel = () => {
     setShowSelectPanel(false);
     setSelectedElderly([]);
   };
+
 
   return (
   <div className="elderly-profile-container wide-layout">
@@ -241,6 +263,7 @@ export default function HouseView({ houseId: propHouseId }) {
         <h1 className="header-title">{houseNames[houseId]}</h1>
       </div>
     </div>
+
 
     {/* Search & Switch */}
     <div className="search-sort-row">
@@ -266,6 +289,7 @@ export default function HouseView({ houseId: propHouseId }) {
       </div>
     </div>
 
+
     {/* Add Elderly */}
     {activeTab === "Alive" && (
       <div className="add-elderly-wrapper">
@@ -279,6 +303,7 @@ export default function HouseView({ houseId: propHouseId }) {
         </div>
       </div>
     )}
+
 
     {/* Elderly Table with Status Tabs */}
     <div className="elderly-table-wrapper" style={{ position: "relative" }}>
@@ -297,6 +322,7 @@ export default function HouseView({ houseId: propHouseId }) {
           <FaUserSlash size={18} className="tab-icon" /> Deceased
         </button>
       </div>
+
 
       {filteredElderly.length === 0 ? (
         <p className="no-profiles">No profiles found.</p>
@@ -317,9 +343,10 @@ export default function HouseView({ houseId: propHouseId }) {
                 if (showSelectPanel) {
                   toggleSelect(elder.id);
                 } else {
-                  navigate(`/profileElderly/${elder.elderly_id}`);
+                  navigate(`/profileElderly/${elder.id}`);
                 }
               };
+
 
               return (
                 <tr
@@ -356,6 +383,7 @@ export default function HouseView({ houseId: propHouseId }) {
       )}
     </div>
 
+
     {/* Add Elderly Modal */}
     {showOverlay && (
       <div className="overlay">
@@ -364,6 +392,7 @@ export default function HouseView({ houseId: propHouseId }) {
             ✖
           </span>
           <h2 className="overlay-header">Add Elderly</h2>
+
 
           {/* Upload Image */}
           <label className="image-upload-box">
@@ -374,6 +403,7 @@ export default function HouseView({ houseId: propHouseId }) {
             )}
             <input type="file" accept="image/*" onChange={handleImageChange} />
           </label>
+
 
           {/* Form Fields */}
           <div className="form-group">
@@ -386,6 +416,7 @@ export default function HouseView({ houseId: propHouseId }) {
             />
           </div>
 
+
           <div className="form-group">
             <label>Last Name</label>
             <input
@@ -395,6 +426,7 @@ export default function HouseView({ houseId: propHouseId }) {
               onChange={handleChange}
             />
           </div>
+
 
           <div className="form-group">
             <label>Date of Birth</label>
@@ -406,6 +438,7 @@ export default function HouseView({ houseId: propHouseId }) {
             />
           </div>
 
+
           <div className="form-group">
             <label>Age</label>
             <input
@@ -415,6 +448,7 @@ export default function HouseView({ houseId: propHouseId }) {
               onChange={handleChange}
             />
           </div>
+
 
           <div className="form-group">
             <label>Sex</label>
@@ -427,6 +461,7 @@ export default function HouseView({ houseId: propHouseId }) {
               <option>Female</option>
             </select>
           </div>
+
 
           <div className="form-group">
             <label>Mobility Status</label>
@@ -441,6 +476,7 @@ export default function HouseView({ houseId: propHouseId }) {
             </select>
           </div>
 
+
           <div className="form-group">
             <label>Diet Notes</label>
             <input
@@ -450,6 +486,7 @@ export default function HouseView({ houseId: propHouseId }) {
               onChange={handleChange}
             />
           </div>
+
 
           <div className="form-group">
             <label>Condition</label>
@@ -461,6 +498,7 @@ export default function HouseView({ houseId: propHouseId }) {
             />
           </div>
 
+
           {/* Buttons */}
           <div className="overlay-buttons">
             <button className="save-btn" onClick={handleSave}>Save</button>
@@ -470,6 +508,7 @@ export default function HouseView({ houseId: propHouseId }) {
       </div>
     )}
 
+
     {/* Switch House Modal */}
     {showSelectPanel && (
       <div className="overlay">
@@ -478,6 +517,7 @@ export default function HouseView({ houseId: propHouseId }) {
             ✖
           </span>
           <h2 className="overlay-header">Switch House</h2>
+
 
           {/* Select new house */}
           <div className="form-group">
@@ -496,6 +536,7 @@ export default function HouseView({ houseId: propHouseId }) {
             </select>
           </div>
 
+
           {/* Reason */}
           <div className="form-group">
             <label>Reason for Switch</label>
@@ -505,6 +546,7 @@ export default function HouseView({ houseId: propHouseId }) {
               placeholder="Enter reason..."
             />
           </div>
+
 
           {/* Buttons */}
           <div className="overlay-buttons">
