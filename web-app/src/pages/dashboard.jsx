@@ -58,28 +58,6 @@ export default function Dashboard() {
           <p>{totalNurses}</p>
         </div>
       </div>
-
-      {/* Management */}
-      <h2 className="section-title">Management</h2>
-      <div className="management-buttons">
-
-        {/* unang buttons, nicomment ko lang :P
-        <button className="mgmt-btn" onClick={() => navigate("/elderlyManagement")}>
-          👤 Elderly Profile & Life Status Management
-        </button>
-        <button className="mgmt-btn" onClick={() => navigate("/edit_cg_assign")}>
-          👥 Edit Caregiver Assignment
-        </button> */}
-
-        <div className="management-buttons-row-2">
-          <button className="mgmt-btn" onClick={() => navigate("/edit_cg_profile")}>
-            👤 Edit Caregiver Profile
-          </button>
-          <button className="mgmt-btn" onClick={() => navigate("/edit_nurse_profile")}>
-            🩺 Edit Nurse Profile
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
