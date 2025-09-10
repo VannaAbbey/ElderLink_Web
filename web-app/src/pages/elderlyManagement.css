@@ -1,7 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
 
 .elderly-profile-container {
-  min-height: 100vh;
   padding: 20px;
   font-family: 'Poppins', sans-serif;
   background-color: #F2FDFF;
@@ -11,26 +10,9 @@
 .elderly-profile-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
-/* BACK BUTTON STYLES */
-.back-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: #f0f0f0;
-  border: none;
-  padding: 8px 12px;
-  cursor: pointer;
-  border-radius: 5px;
-  color: #00588E;
-  font-weight: 600;
-}
-
-.back-btn svg {
-  color: #00588E;
+  justify-content: center; /* centers the content horizontally */
+  gap: 20px; /* optional: spacing between items */
+  padding: 10px;
 }
 
 /* HEADER IMAGE + TEXT CENTER */
@@ -38,7 +20,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 20px;
+  gap: 10px;
   margin: 0 auto;
   text-align: center;
 }
@@ -54,14 +36,34 @@
   color: #00588E;
   font-weight: 700;
   font-size: 40px;
+  margin: 0;
 }
 
-/* TAB BUTTONS CENTERED */
+.header-house {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px;
+}
+
+.header-house-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-house-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* TAB BUTTONS */
 .tab-buttons {
   display: flex;
-  justify-content: center;
-  gap: 30px;
-  margin-bottom: 20px;
+  justify-content: flex-end;
+  gap: 45px;
 }
 
 .tab-buttons button {
@@ -69,7 +71,6 @@
   height: 40px;
   padding: 8px;
   border: none;
-  background: #ddd;
   cursor: pointer;
   border-radius: 50px;
   font-weight: bold;
@@ -83,6 +84,23 @@
 .tab-buttons button.active {
   background: #00588E;
   color: white;
+}
+
+.house-content {
+  margin-top: 0; /* 🔹 remove extra gap below folder nav */
+}
+
+.elderly-folder-container {
+  margin: 0 auto 20px auto;  /* no top margin, 20px bottom, centered horizontally */
+  padding: 15px;             /* inner padding */
+  max-width: 85%;            /* limit width */
+  box-shadow: 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  background: #fff;          /* keeps it neat inside */
+}
+
+.elderly-profile-container.wide-layout {
+  background: #ffffff;
 }
 
 /* RECORDS HEADER */
@@ -134,36 +152,6 @@
   font-size: 14px;
 }
 
-/* ELDERLY LIST */
-.elderly-list {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-}
-
-.elderly-card {
-  background: #A5D4DC;
-  border-radius: 10px;
-  padding: 15px;
-  text-align: center;
-  box-shadow: 0px 2px 6px rgba(0, 0, 0, 0.1);
-}
-
-.elderly-card img {
-  width: 60%;
-  height: 60%;
-  object-fit: cover;
-  border-radius: 8px;
-  margin-bottom: 10px;
-}
-
-.elderly-name {
-  font-weight: bold;
-  font-size: 20px;
-  margin-bottom: 5px;
-  color: black;
-}
-
 /* Search + Sort container */
 .search-sort-row {
     display: flex;
@@ -211,6 +199,7 @@
 .switch-house-button:hover {
     background-color: #0a3059;
 }
+
 /* Add Elderly Button */
 .add-elderly-wrapper {
   display: flex;
@@ -579,8 +568,6 @@
 }
 
 /*Switch House Related Layouts*/
-/* ElderlyManagement.css */
-
 /* Floating modal container (right side) */
 .floating-modal {
   position: fixed;
@@ -688,10 +675,15 @@ input[type="file"] {
 }
 
 /* FOLDER NAVIGATION */
+
 .folder-nav {
   display: flex;
-  margin: 20px 0;
-  flex-wrap: wrap;
+  justify-content: center;
+  margin: 0 auto;
+  max-width: 85%;
+  margin-bottom: -1px;   /* pulls tabs down into container */
+  position: relative;
+  z-index: 2;
 }
 
 .folder-btn {
@@ -704,6 +696,8 @@ input[type="file"] {
   cursor: pointer;
   transition: 0.2s ease-in-out;
   color: #333;
+  display: inline-block;
+  min-width: 200px;
 }
 
 .folder-btn:hover {
@@ -711,6 +705,42 @@ input[type="file"] {
 }
 
 .folder-btn.active {
+  background: #00588E;
+  color: white;
+  border: 1px solid #00588E;
+  border-bottom: none;   /* connects directly to container */
+  position: relative;
+  z-index: 3;            /* ensures active tab overlaps container border */
+}
+
+/* =============================== */
+/* Alive / Deceased Tabs */
+/* =============================== */
+.status-tabs {
+  display: flex;
+  justify-content: flex-end; /* push to the right */
+  margin: 0; /* remove extra space */
+}
+
+.status-tabs button {
+  background: #ddd;
+  border: none;
+  border-radius: 8px 8px 0 0;
+  padding: 10px 20px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: 0.2s ease-in-out;
+  display: flex;
+  align-items: center;
+  color: #333;
+}
+
+.status-tabs button:hover {
+  background: #ccc;
+}
+
+.status-tabs button.active {
   background: #00588E;
   color: white;
   box-shadow: 0px -2px 6px rgba(0, 0, 0, 0.15);
@@ -796,3 +826,121 @@ input[type="file"] {
   font-weight: bold;
 }
 
+
+.status-tabs .tab-icon {
+  margin-right: 6px; /* space between icon and text */
+  vertical-align: middle; /* keeps them aligned */
+}
+
+/* =============================== */
+/* Elderly Horizontal Table Layout */
+/* =============================== */
+
+.elderly-table-wrapper {
+  margin-top: 0; /* 🔹 stick table right under toggle */
+  overflow-x: auto;
+}
+
+.elderly-table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  background: #ffffff;
+  table-layout: fixed; /* ensures header & rows align */
+}
+
+.elderly-table .icon-cell {
+  text-align: center;
+}
+
+.elderly-table thead th {
+  background: #00588E;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 12px 14px;
+  color: #FFFFFF;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.elderly-table td {
+  padding: 12px 14px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 14px;
+  color: #111827;
+  vertical-align: middle;
+}
+
+.elderly-table tr:hover td {
+  background: #f9fbff;
+}
+
+/* Column widths */
+.elderly-table th:nth-child(1),
+.elderly-table td:nth-child(1) {
+  width: 50px;
+}
+
+.elderly-table th:nth-child(2),
+.elderly-table td:nth-child(2) {
+  width: 120px;
+}
+
+.elderly-table th:nth-child(3),
+.elderly-table td:nth-child(3) {
+  width: 150px;
+}
+
+.elderly-table th:nth-child(4),
+.elderly-table td:nth-child(4) {
+  width: 100px;
+}
+
+.elderly-table th:nth-child(5),
+.elderly-table td:nth-child(5) {
+  width: 100px;
+}
+
+.elderly-table th:nth-child(6),
+.elderly-table td:nth-child(6) {
+  width: 150px;
+}
+
+/* Table row buttons */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 3px;
+  border: none;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.action-btn:hover {
+  background: #e5e7eb;
+}
+
+/* Edit and delete buttons with colors */
+.edit-btn {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.edit-btn:hover {
+  background: #2563eb;
+}
+
+.delete-btn {
+  background: #ef4444;
+  color: #fff;
+}
+
+.delete-btn:hover {
+  background: #dc2626;
+}

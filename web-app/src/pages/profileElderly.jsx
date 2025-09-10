@@ -1,33 +1,29 @@
+// src/pages/profileElderly.jsx
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MdArrowBack } from "react-icons/md";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  doc,
-  updateDoc,
-} from "firebase/firestore";
+import { MdArrowBack, MdCake, MdTransgender, MdAccessible, MdHome } from "react-icons/md";
+import { FaHeartbeat, FaUser, FaNotesMedical, FaClipboardList, FaUserSlash } from "react-icons/fa";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import "./elderlyManagement.css";
+import "./profileElderly.css";
+
 
 export default function Profile_Elderly() {
-  const { id } = useParams(); // elderly_id from URL
+  const { id } = useParams(); // Firestore Document ID from route
   const navigate = useNavigate();
   const [elder, setElder] = useState(null);
   const [loading, setLoading] = useState(true);
-
   const [showEditOverlay, setShowEditOverlay] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [formData, setFormData] = useState({});
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewImage, setPreviewImage] = useState("");
 
+
   const storage = getStorage();
 
-  // Map field names to proper labels
+
   const labelMap = {
     elderly_fname: "First Name",
     elderly_lname: "Last Name",
@@ -37,11 +33,13 @@ export default function Profile_Elderly() {
     elderly_condition: "Health Condition",
   };
 
+
   const formatTimestamp = (ts) => {
     if (!ts) return "N/A";
     if (ts.toDate) return ts.toDate().toLocaleDateString();
     return ts;
   };
+
 
   const formatDateInput = (ts) => {
     if (!ts) return "";
@@ -49,34 +47,41 @@ export default function Profile_Elderly() {
     return date.toISOString().split("T")[0];
   };
 
+
   useEffect(() => {
     const fetchElder = async () => {
       try {
-        const q = query(collection(db, "elderly"), where("elderly_id", "==", id));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          const docData = querySnapshot.docs[0];
-          setElder({ id: docData.id, ...docData.data() });
+        // fetch doc directly by Firestore document ID
+        const elderRef = doc(db, "elderly", id);
+        const docSnap = await getDoc(elderRef);
+
+
+        if (docSnap.exists()) {
+          setElder({ id: docSnap.id, ...docSnap.data() });
           setFormData({
-            ...docData.data(),
-            elderly_bday: docData.data().elderly_bday,
-            elderly_deathDate: docData.data().elderly_deathDate,
+            ...docSnap.data(),
+            elderly_bday: docSnap.data().elderly_bday,
+            elderly_deathDate: docSnap.data().elderly_deathDate,
           });
-          setPreviewImage(docData.data().elderly_profilePic || "");
+          setPreviewImage(docSnap.data().elderly_profilePic || "");
+        } else {
+          setElder(null);
         }
         setLoading(false);
       } catch (err) {
-        console.error(err);
+        console.error("Error fetching elderly profile:", err);
         setLoading(false);
       }
     };
-    fetchElder();
+    if (id) fetchElder();
   }, [id]);
+
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
+
 
   const handleImageChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -86,23 +91,25 @@ export default function Profile_Elderly() {
     }
   };
 
+
   const handleUpdate = async () => {
     try {
       let uploadedImageUrl = formData.elderly_profilePic || "";
 
+
       if (selectedImage) {
-        const storageRef = ref(
-          storage,
-          `elderlyPics/${Date.now()}_${selectedImage.name}`
-        );
+        const storageRef = ref(storage, `elderlyPics/${Date.now()}_${selectedImage.name}`);
         await uploadBytes(storageRef, selectedImage);
         uploadedImageUrl = await getDownloadURL(storageRef);
       }
 
+
       const elderRef = doc(db, "elderly", elder.id);
+
 
       let birthdayValue = formData.elderly_bday;
       if (typeof birthdayValue === "string") birthdayValue = new Date(birthdayValue);
+
 
       await updateDoc(elderRef, {
         elderly_fname: formData.elderly_fname,
@@ -116,6 +123,7 @@ export default function Profile_Elderly() {
         elderly_profilePic: uploadedImageUrl,
       });
 
+
       setElder((prev) => ({ ...prev, ...formData, elderly_profilePic: uploadedImageUrl }));
       setShowEditOverlay(false);
       setSelectedImage(null);
@@ -124,78 +132,67 @@ export default function Profile_Elderly() {
     }
   };
 
+
   if (loading) return <p>Loading...</p>;
   if (!elder) return <p>Elderly profile not found.</p>;
 
+
   return (
-    <div className="elderly-profile-container">
-      <div className="elderly-profile-header">
+    <>
+      {/* --- Header Container --- */}
+      <div className="elderly-profile-header-container">
         <button onClick={() => navigate(-1)}>
           <MdArrowBack /> Back
         </button>
-        <h1>
-           {elder.elderly_sex === "Female" ? "Lola" : "Lolo"} {elder.elderly_fname}
-        </h1>
-        {/* Edit button visible for all users */}
-        <button style={{ marginLeft: "20px" }} onClick={() => setShowEditOverlay(true)}>
-          Edit Profile
-        </button>
+        <h1>{elder.elderly_sex === "Female" ? "Lola" : "Lolo"} {elder.elderly_fname}</h1>
+        <button onClick={() => setShowEditOverlay(true)}>Edit Profile</button>
       </div>
 
-      <img
-        src={elder.elderly_profilePic || "/images/house1.png"}
-        alt={elder.elderly_fname}
-        className="profile-picture-large"
-      />
 
-      <div className="elderly-details">
-        <p>
-          <strong>Full Name:</strong> {elder.elderly_fname} {elder.elderly_lname}
-        </p>
-        <p>
-          <strong>Age:</strong> {elder.elderly_age}
-        </p>
-        <p>
-          <strong>Birth Date:</strong> {formatTimestamp(elder.elderly_bday)}
-        </p>
-        <p>
-          <strong>Sex:</strong> {elder.elderly_sex}
-        </p>
-        <p>
-          <strong>Mobility Status:</strong> {elder.elderly_mobilityStatus}
-        </p>
-        <p>
-          <strong>Dietary Notes:</strong> {elder.elderly_dietNotes || "N/A"}
-        </p>
-        <p>
-          <strong>Health Condition:</strong> {elder.elderly_condition || "N/A"}
-        </p>
-        <p>
-          <strong>Status:</strong> {elder.elderly_status}
-        </p>
-        {elder.elderly_status === "Deceased" && (
-          <>
-            <p>
-              <strong>Cause of Death:</strong> {elder.elderly_cause || "N/A"}
-            </p>
-            <p>
-              <strong>Date of Death:</strong> {formatTimestamp(elder.elderly_deathDate)}
-            </p>
-          </>
-        )}
-        <p>
-          <strong>House:</strong> {elder.house_id}
-        </p>
+      {/* --- Profile Container --- */}
+      <div className="elderly-profile-container-img">
+        <div className="profile-left">
+          <img
+            src={elder.elderly_profilePic || "/images/house1.png"}
+            alt={elder.elderly_fname}
+            className="profile-picture-large"
+          />
+        </div>
+
+
+        <div className="elderly-details">
+          <p><FaUser className="elder-icon"/> <strong>Full Name: </strong> {elder.elderly_fname} {elder.elderly_lname}</p>
+          <p><MdCake className="elder-icon"/> <strong>Age: </strong> {elder.elderly_age}</p>
+          <p><MdCake className="elder-icon"/> <strong>Birth Date: </strong> {formatTimestamp(elder.elderly_bday)}</p>
+          <p><MdTransgender className="elder-icon"/> <strong>Sex: </strong> {elder.elderly_sex}</p>
+          <p><MdAccessible className="elder-icon"/> <strong>Mobility Status: </strong> {elder.elderly_mobilityStatus}</p>
+          <p><FaNotesMedical className="elder-icon"/> <strong>Dietary Notes: </strong> {elder.elderly_dietNotes || "N/A"}</p>
+          <p><FaHeartbeat className="elder-icon"/> <strong>Health Condition: </strong> {elder.elderly_condition || "N/A"}</p>
+          <p>
+            {elder.elderly_status === "Alive" ? (
+              <><FaUser className="elder-icon"/> <strong>Status: </strong> Alive</>
+            ) : (
+              <><FaUserSlash className="elder-icon"/> <strong>Status: </strong> Deceased</>
+            )}
+          </p>
+          {elder.elderly_status === "Deceased" && (
+            <>
+              <p><FaClipboardList className="elder-icon"/> <strong>Cause of Death: </strong> {elder.elderly_cause || "N/A"}</p>
+              <p><MdCake className="elder-icon"/> <strong>Date of Death: </strong> {formatTimestamp(elder.elderly_deathDate)}</p>
+            </>
+          )}
+          <p><MdHome className="elder-icon"/> <strong>House: </strong> {elder.house_id}</p>
+        </div>
       </div>
 
-      {/* Edit Overlay */}
+
+      {/* --- Edit Overlay --- */}
       {showEditOverlay && (
         <div className="overlay">
           <div className="overlay-content">
-            <span className="overlay-close" onClick={() => setShowEditOverlay(false)}>
-              ✕
-            </span>
-            <h2 class="overlay-header">Edit Elderly Profile</h2>
+            <span className="overlay-close" onClick={() => setShowEditOverlay(false)}>✕</span>
+            <h2 className="overlay-header">Edit Elderly Profile</h2>
+
 
             <div className="image-upload-box" onClick={() => document.getElementById("fileInput").click()}>
               {previewImage ? (
@@ -214,35 +211,19 @@ export default function Profile_Elderly() {
               />
             </div>
 
-            {/* Form Fields with proper labels */}
-            {[
-              "elderly_fname",
-              "elderly_lname",
-              "elderly_bday",
-              "elderly_age",
-              "elderly_dietNotes",
-              "elderly_condition",
-            ].map((field) => (
+
+            {["elderly_fname","elderly_lname","elderly_bday","elderly_age","elderly_dietNotes","elderly_condition"].map(field => (
               <div className="form-group" key={field}>
                 <label>{labelMap[field]}</label>
                 <input
-                  type={
-                    field === "elderly_age"
-                      ? "number"
-                      : field === "elderly_bday"
-                      ? "date"
-                      : "text"
-                  }
+                  type={field === "elderly_age" ? "number" : field === "elderly_bday" ? "date" : "text"}
                   name={field}
-                  value={
-                    field === "elderly_bday"
-                      ? formatDateInput(formData[field])
-                      : formData[field] || ""
-                  }
+                  value={field === "elderly_bday" ? formatDateInput(formData[field]) : formData[field] || ""}
                   onChange={handleChange}
                 />
               </div>
             ))}
+
 
             <div className="form-group">
               <label>Sex</label>
@@ -252,13 +233,10 @@ export default function Profile_Elderly() {
               </select>
             </div>
 
+
             <div className="form-group">
               <label>Mobility Status</label>
-              <select
-                name="elderly_mobilityStatus"
-                value={formData.elderly_mobilityStatus}
-                onChange={handleChange}
-              >
+              <select name="elderly_mobilityStatus" value={formData.elderly_mobilityStatus} onChange={handleChange}>
                 <option>Independent</option>
                 <option>Assisted</option>
                 <option>Wheelchair-bound</option>
@@ -266,6 +244,7 @@ export default function Profile_Elderly() {
                 <option>Needs Supervision</option>
               </select>
             </div>
+
 
             <div className="overlay-buttons">
               <button onClick={() => setShowConfirm(true)}>Save Changes</button>
@@ -275,25 +254,19 @@ export default function Profile_Elderly() {
         </div>
       )}
 
-      {/* Confirmation Modal */}
+
+      {/* --- Confirmation Modal --- */}
       {showConfirm && (
         <div className="overlay">
           <div className="overlay-content">
             <h3>Are you really sure you want to modify this profile?</h3>
             <div className="overlay-buttons">
-              <button
-                onClick={() => {
-                  handleUpdate();
-                  setShowConfirm(false);
-                }}
-              >
-                Yes, Save
-              </button>
+              <button onClick={() => { handleUpdate(); setShowConfirm(false); }}>Yes, Save</button>
               <button onClick={() => setShowConfirm(false)}>Cancel</button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
