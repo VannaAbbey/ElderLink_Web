@@ -28,7 +28,7 @@ const EditCgAssign = () => {
     { id: "H001", name: "St. Sebastian" },
     { id: "H002", name: "St. Emmanuel" },
     { id: "H003", name: "St. Charbell" },
-    { id: "H004", name: "St. Rose" },
+    { id: "H004", name: "St. Rose of Lima" },
     { id: "H005", name: "St. Gabriel" },
   ];
 
