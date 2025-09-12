@@ -22,3 +22,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+web-app/serviceAccountKey.json
+web-app/serviceAccountKey.json
