@@ -1,0 +1,41 @@
+.accounts-container {
+  padding: 10px 100px;
+}
+
+.accounts-title {
+  color: #00588E;
+  font-weight: 700;
+  font-size: 40px;
+  margin: 0;
+  padding: 5px;
+  text-align: center;
+}
+
+.accounts-tabs {
+  display: flex;
+}
+
+.accounts-tab {
+  padding: 8px 18px;
+  border: none;
+  outline: none;
+  background: #d9d9d9;
+  color: #333;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+  margin-right: 3px;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+.accounts-tab.active {
+  background: #005b96;
+  color: white;
+}
+
+.accounts-content {
+  border: 1px solid #ddd;
+  border-radius: 0 6px 6px 6px;
+  background: #fff;
+}
