@@ -14,6 +14,7 @@ import Profile_Elderly from "./pages/profileElderly";
 import HouseView from "./pages/houseView";
 import Notifications from "./pages/Notifications";
 import Schedule from "./pages/Schedule";
+import ScheduleV2 from "./pages/schedule-v2";
 
 // ProtectedRoute redirects if user is not logged in
 function ProtectedRoute({ user, children }) {
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="/house/:houseId" element={<ProtectedRoute user={user}><HouseView /></ProtectedRoute>} />
         <Route path="/notifications" element={<ProtectedRoute user={user}><Notifications /></ProtectedRoute>} />
         <Route path="/schedule" element={<ProtectedRoute user={user}><Schedule /></ProtectedRoute>} />
+        <Route path="/schedule-v2" element={<ProtectedRoute user={user}><ScheduleV2 /></ProtectedRoute>} />
 
         {/* Fallback route */}
         <Route path="*" element={user ? <Navigate to="/" replace /> : <Navigate to="/login" replace />} />

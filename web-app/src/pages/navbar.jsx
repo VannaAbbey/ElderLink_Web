@@ -91,10 +91,16 @@ export default function Navbar() {
           Elderly Management
         </li>
         <li
-          className={location.pathname.startsWith("/schedule") ? "active" : ""}
+          className={location.pathname === "/schedule" ? "active" : ""}
           onClick={() => navigate("/schedule")}
         >
           Schedule
+        </li>
+        <li
+          className={location.pathname === "/schedule-v2" ? "active" : ""}
+          onClick={() => navigate("/schedule-v2")}
+        >
+          Schedule v2
         </li>
         <li
           className={location.pathname.startsWith("/accounts") ? "active" : ""}

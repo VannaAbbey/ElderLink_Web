@@ -8,7 +8,7 @@ export default function CgAssignSchedule() {
   useEffect(() => {
     const fetchAssignments = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, "cg_house_assign"));
+        const querySnapshot = await getDocs(collection(db, "cg_house_assign_v2")); // Database Name 1
         const data = querySnapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),

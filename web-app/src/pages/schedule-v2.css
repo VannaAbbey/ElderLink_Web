@@ -1,0 +1,258 @@
+/* Erase Current Schedule button */
+.erase-btn {
+  margin-left: 1em;
+  background: #d9534f;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 3px 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.erase-btn:hover {
+  background: #b52a23;
+}
+
+.schedule-page {
+  font-family: Arial, sans-serif;
+  padding: 0px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.page-title {
+  text-align: center;
+  margin-bottom: 20px;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.control-panel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.control-panel label {
+  font-weight: bold;
+}
+
+.control-panel input,
+.control-panel select,
+.control-panel button {
+  padding: 8px 12px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+}
+
+.control-panel button {
+  background-color: #216386;
+  color: white;
+  cursor: pointer;
+  border: none;
+  font-weight: bold;
+}
+
+.house-tabs {
+  display: flex;
+  justify-content: flex-start; /* Align to left */
+  gap: 5px;
+  margin: 0; /* Remove bottom margin */
+  padding: 0;
+}
+
+.house-tab {
+  padding: 15px 50px;
+  border-radius: 10px 10px 0 0;
+  border: none;
+  background-color: #ece8e8;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s;
+}
+
+.shift-tab {
+  padding: 12px 44px;
+  border-radius: 10px 10px 0 0;
+  border: none;
+  background-color: #ece8e8;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s;
+}
+
+.house-tab.active,
+.shift-tab.active-shift {
+  background-color: #216386;
+  color: white;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+  font-weight: bold;
+}
+
+.table-container {
+  background-color: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-width: 1250px; /* Narrow width for breathing space */
+  width: 100%;
+  margin: 0 auto; /* Center container on page */
+  padding: 15px;
+  position: relative;
+  top: -5px; /* Para dikit sa tabs */
+}
+
+.shift-tabs {
+  display: flex;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+}
+
+.schedule-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+}
+
+
+
+.schedule-table th,
+.schedule-table td {
+  border: 1px solid #ddd;
+  padding: 12px;
+  text-align: left;
+}
+
+.schedule-table th {
+  background-color: #216386  !important; /* Baguhin mo sa gusto mong kulay */
+  color: white; /* Kulay ng text */
+  text-align: center; /* Optional para center text */
+  font-weight: bold;
+  padding: 12px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.absent-btn {
+  background-color: #ff4d4f;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.modify-btn {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.absent-btn:hover {
+  background-color: #d9363e;
+}
+
+.modify-btn:hover {
+  background-color: #218838;
+}
+
+/* Row styling for absent caregivers */
+.absent-row {
+  background-color: rgba(255, 0, 0, 0.3);
+  font-weight: bold;
+}
+
+/* Text notice for absent caregivers */
+.absent-text {
+  color: red;
+  margin-right: 8px;
+}
+
+/* Buttons */
+.absent-btn {
+  background-color: #ff4d4d;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.absent-btn:hover {
+  background-color: #e60000;
+}
+
+.unabsent-btn {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.unabsent-btn:hover {
+  background-color: #45a049;
+}
+
+/* Rest Day Button */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: #fff;
+  padding: 20px;
+  border-radius: 10px;
+  width: 400px;
+  max-width: 90%;
+}
+
+.modal h3 {
+  margin-bottom: 10px;
+}
+
+.days-checkboxes {
+  margin-bottom: 15px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: space-between;
+}
+
+.save-btn {
+  background: green;
+  color: white;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 5px;
+}
+
+.cancel-btn {
+  background: gray;
+  color: white;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 5px;
+}

@@ -47,7 +47,7 @@ const EditCgAssign = () => {
       for (let cgId of shuffled) {
         const house = houses[houseIndex % houses.length]; // round-robin
 
-        await addDoc(collection(db, "cg_house_assign"), {
+        await addDoc(collection(db, "cg_house_assign_v2"), {
           assign_id: `AUTO-${cgId}-${house.id}`,
           user_id: cgId,
           house_id: house.id,
@@ -133,7 +133,7 @@ const EditCgAssign = () => {
 
   const fetchAssignments = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, "cg_house_assign"));
+      const querySnapshot = await getDocs(collection(db, "cg_house_assign_v2"));
       const data = querySnapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
@@ -162,7 +162,7 @@ const EditCgAssign = () => {
       }));
 
       const caregiverSnap = await getDocs(
-        query(collection(db, "cg_house_assign"), where("house_id", "==", houseId))
+        query(collection(db, "cg_house_assign_v2"), where("house_id", "==", houseId))
       );
       const caregiverList = caregiverSnap.docs.map((d) => d.data());
 
@@ -196,7 +196,7 @@ const EditCgAssign = () => {
     };
 
     try {
-      await addDoc(collection(db, "cg_house_assign"), payload);
+      await addDoc(collection(db, "cg_house_assign_v2"), payload);
       await fetchAssignments(); // refresh table
       await distributeElderly(payload.house_id);
 

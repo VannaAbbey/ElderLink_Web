@@ -12,6 +12,7 @@ import Profile_Elderly from "./pages/profileElderly.jsx";
 import HouseView from "./pages/houseView.jsx";
 import Notifications from "./pages/notifications.jsx";
 import Schedule from "./pages/schedule.jsx";
+import ScheduleV2 from "./pages/schedule-v2.jsx";
 
 
 
@@ -27,7 +28,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <Route path="/house/:houseId" element={<HouseView />} />
       <Route path="/notifications" element={<Notifications />} />
       <Route path="/schedule" element={<Schedule />} />
-
+      <Route path="/schedule-v2" element={<ScheduleV2 />} />
     </Routes>
   </BrowserRouter>
 );
