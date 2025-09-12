@@ -150,7 +150,7 @@ export default function ProfileCaregiver() {
         <div className="overlay">
           <div className="overlay-content">
             <span className="overlay-close" onClick={() => setShowEditOverlay(false)}>✕</span>
-            <h2>Edit Caregiver Profile</h2>
+            <h2 className="edit-profile-title">Edit Caregiver Profile</h2>
 
             <div className="image-upload-box" onClick={() => document.getElementById("fileInput").click()}>
               {previewImage ? (
