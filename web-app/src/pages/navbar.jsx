@@ -95,7 +95,7 @@ export default function Navbar() {
         {/* Admin Dropdown */}
         <div className="admin-dropdown" ref={dropdownRef}>
           <button className="admin-btn" onClick={() => setDropdownOpen((prev) => !prev)}>
-            Admin
+            Supervisor
           </button>
           {dropdownOpen && (
             <ul className="dropdown-menu">

@@ -118,7 +118,7 @@ export default function EditAdminProfile() {
       {/* Header */}
       <div className="admin-profile-header">
         <button onClick={() => navigate(-1)}><MdArrowBack /> Back</button>
-        <h1>{admin.user_fname} {admin.user_lname}</h1>
+        <h1> Supervisor {admin.user_fname} {admin.user_lname}</h1>
         <button onClick={() => setShowEditOverlay(true)}>Edit Profile</button>
       </div>
 
@@ -135,19 +135,19 @@ export default function EditAdminProfile() {
         <div className="admin-details">
           <p className="detail-item">
             <FaUser className="icon" />
-            <strong>Full Name: </strong> {admin.user_fname} {admin.user_lname}
+            <strong>Full Name:  </strong>&nbsp; {admin.user_fname} {admin.user_lname}
           </p>
           <p className="detail-item">
             <MdCake className="icon" />
-            <strong>Birth Date: </strong> {formatDateInput(admin.user_bday)}
+            <strong>Birth Date:  </strong>&nbsp; {formatDateInput(admin.user_bday)}
           </p>
           <p className="detail-item">
             <FaPhone className="icon" />
-            <strong>Contact Number (+63): </strong> {admin.user_contactNum || "N/A"}
+            <strong>Contact Number (+63):  </strong>&nbsp; {admin.user_contactNum || "N/A"}
           </p>
           <p className="detail-item">
             <FaEnvelope className="icon" />
-            <strong>Email: </strong> {admin.user_email}
+            <strong>Email:  </strong>&nbsp; {admin.user_email}
           </p>
         </div>
       </div>
