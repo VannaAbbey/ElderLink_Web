@@ -25,11 +25,23 @@
   text-align: center;
 }
 
+.header-house {
+  display: flex;
+  flex-direction: column;  /* stack top row and subtitle */
+  align-items: center;
+  text-align: center;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;   /* keeps image aligned with h1 baseline */
+  gap: 12px;
+}
+
 .header-image {
-  width: 60px;
-  height: 60px;
-  object-fit: cover;
-  border-radius: 6px;
+  width: 55px;
+  height: 55px;
+  object-fit: contain;
 }
 
 .header-title {
@@ -39,13 +51,12 @@
   margin: 0;
 }
 
-.header-house {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 10px;
+.house-shortTitle {
+  margin-top: 6px;
+  font-size: 16px;
+  color: #666;
 }
+
 
 .header-house-left {
   display: flex;
@@ -837,38 +848,74 @@ input[type="file"] {
 /* =============================== */
 
 .elderly-table-wrapper {
-  margin-top: 0; /* 🔹 stick table right under toggle */
+  margin-top: 0;
   overflow-x: auto;
+  position: relative;
 }
 
 .elderly-table {
   width: 100%;
   border-collapse: collapse;
-  overflow: hidden;
-  background: #ffffff;
-  table-layout: fixed; /* ensures header & rows align */
-}
-
-.elderly-table .icon-cell {
-  text-align: center;
+  table-layout: fixed;
+  min-width: 600px; /* ensures responsive scroll on small screens */
 }
 
 .elderly-table thead th {
   background: #00588E;
+  color: #fff;
   font-weight: 600;
   font-size: 14px;
   padding: 12px 14px;
-  color: #FFFFFF;
   text-align: left;
   white-space: nowrap;
 }
 
-.elderly-table td {
+.elderly-table thead .icon-col { width: 10%; }
+.elderly-table thead .name-col { width: 30%; }
+.elderly-table thead .age-col { width: 25%; }
+.elderly-table thead .sex-col { width: 25%; }
+.elderly-table thead .select-col { width: 0%; } /* optional */
+.elderly-table thead .action-th { width: 5%; text-align: center; }
+.elderly-table tbody td {
   padding: 12px 14px;
-  border-top: 1px solid #f0f0f0;
   font-size: 14px;
   color: #111827;
   vertical-align: middle;
+  word-wrap: break-word;
+}
+
+/* tbody cells */
+.elderly-table .icon-cell { width: 10%; text-align: center; }
+.elderly-table .name-cell { width: 30%; }
+.elderly-table .age-cell { width: 25%; }
+.elderly-table .sex-cell { width: 25%; }
+.elderly-table .select-cell { width: 0%; }
+.elderly-table .action-cell {
+  width: 5%; /* larger than th if you want the pencil bigger */
+  text-align: center;
+  cursor: pointer;
+  color: #0f1d26;
+}
+.elderly-table tr:hover td { background: #f9fbff; }
+.elderly-table tr:hover .action-cell { color: #1D4ED8; }
+
+.elderly-table tr:hover td {
+  background: #f9fbff;
+}
+
+.elderly-table tr:hover .action-cell {
+  color: #1D4ED8; /* optional hover effect */
+}
+
+.elderly-table .action-cell {
+  width: 10%;
+  text-align: center;
+  cursor: pointer;
+}
+
+.elderly-table .action-cell .pencil-icon {
+  color: #00588E; /* blue color */
+  font-size: 18px; /* adjust size */
 }
 
 .elderly-table tr:hover td {
@@ -904,6 +951,12 @@ input[type="file"] {
 .elderly-table th:nth-child(6),
 .elderly-table td:nth-child(6) {
   width: 150px;
+}
+
+.elderly-table td:nth-child(5)
+{
+  background-color: #fbfcff; /* light grey */
+  color: #111827; /* optional: text color */
 }
 
 /* Table row buttons */
