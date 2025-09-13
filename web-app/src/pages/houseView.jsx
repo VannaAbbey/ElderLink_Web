@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MdArrowBack } from "react-icons/md";
 import { FaHeartbeat, FaUserSlash, FaUserCircle } from "react-icons/fa";
-import { IoMdArrowDropdown } from "react-icons/io";
 import {
   collection,
   getDocs,
@@ -13,8 +12,7 @@ import {
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import "./elderlyManagement.css";
-import EditElderlyOverlay from "./edit_elderly_profile"; // ✅ import overlay
-
+import EditElderlyOverlay from "./edit_elderly_profile";
 
 export default function HouseView({ houseId: propHouseId }) {
   const { houseId: paramHouseId } = useParams();
@@ -241,19 +239,13 @@ const filteredElderly = elderlyInHouse
     setSelectedElderly([]);
   };
 
+  const totalElderlyInHouse = elderlyList.filter(
+  (e) => e.house_id === houseId).length;
+
   return (
   <div className="elderly-profile-container wide-layout">
   {/* Header */}
   <div className="elderly-profile-header">
-    {!propHouseId && (
-      <button
-        className="back-btn"
-        onClick={() => navigate("/elderlyManagement")}
-      >
-        <MdArrowBack size={20} /> Back
-      </button>
-    )}
-
     <div className="header-house">
   <div className="header-top">
     <img
@@ -266,10 +258,11 @@ const filteredElderly = elderlyInHouse
   <p className="house-shortTitle">
     {houseShortTitles[houseId] || "No short title available."}
   </p>
+  <div className="header-title-wrapper">
+    <span className="total-elderly"> Total Number of Elderly: {totalElderlyInHouse}</span>
+  </div>
 </div>
   </div>
-
-
 
       {/* Search & Sort */}
       <div className="search-sort-row">

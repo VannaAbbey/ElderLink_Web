@@ -8,7 +8,6 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
 }
 
 .back-btn {
@@ -62,6 +61,18 @@
   box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.08);
 }
 
+.caregiver-table th:nth-child(4),
+.caregiver-table td:nth-child(4) {
+  width: 10px;
+  text-align: center;
+}
+
+.caregiver-table td:nth-child(4)
+{
+  background-color: #edeff3; /* light grey */
+  color: #111827; /* optional: text color */
+}
+
 .caregiver-table thead {
   background-color: #005b96;
   color: white;
@@ -89,4 +100,17 @@
   color: #005b96;   /* set text/icon color */
   cursor: pointer;  /* optional: shows it's clickable */
   font-size: 1.2rem; /* optional: adjust size */
+}
+
+.header-title-wrapper {
+  display: flex;
+  flex-direction: column; /* vertical stack */
+  align-items: center; /* left align */
+  gap: 4px; /* spacing between title and total */
+  margin-bottom: 10px;
+}
+
+.total-caregiver {
+  font-size: 0.85rem;
+  color: #555;
 }

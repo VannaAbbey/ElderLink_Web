@@ -50,6 +50,8 @@ export default function EditNurseProfile() {
     navigate(`/profileNurse/${id}`);
   };
 
+  const totalNurses = nurses.length;
+
   return (
     <div className="nurse-list-container">
       {/* Header */}
@@ -59,6 +61,9 @@ export default function EditNurseProfile() {
           <h1 className="header-title">Nurses</h1>
         </div>
       </div>
+      <div className="header-title-wrapper">
+          <span className="total-nurse"> Total Number of Nurses: {totalNurses}</span>
+        </div>
 
       {/* Search + Sort */}
       <div className="search-sort-row">

@@ -50,6 +50,8 @@ export default function EditCaregiverProfile() {
     navigate(`/profileCaregiver/${id}`); //
   };
 
+  const totalCaregivers = caregivers.length;
+
   return (
     <div className="caregiver-list-container">
       {/* Header */}
@@ -59,6 +61,9 @@ export default function EditCaregiverProfile() {
           <h1 className="header-title">Caregivers</h1>
         </div>
       </div>
+        <div className="header-title-wrapper">
+          <span className="total-caregiver"> Total Number of Caregivers: {totalCaregivers}</span>
+        </div>
 
       {/* Search + Sort */}
       <div className="search-sort-row">
