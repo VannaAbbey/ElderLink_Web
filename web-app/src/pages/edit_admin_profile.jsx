@@ -156,8 +156,8 @@ export default function EditAdminProfile() {
       {showEditOverlay && (
         <div className="overlay">
           <div className="overlay-content">
-            <span className="overlay-close" onClick={() => setShowEditOverlay(false)}>✕</span>
-            <h2>Edit Admin Profile</h2>
+            <span className="overlay-close" onClick={() => setShowEditOverlay(false)}>✖</span>
+            <h2>Edit Supervisor Profile</h2>
 
             <div className="image-upload-box" onClick={() => document.getElementById("fileInput").click()}>
               {previewImage ? (
