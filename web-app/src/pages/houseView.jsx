@@ -13,6 +13,8 @@ import {
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import "./elderlyManagement.css";
+import EditElderlyOverlay from "./edit_elderly_profile"; // ✅ import overlay
+
 
 export default function HouseView({ houseId: propHouseId }) {
   const { houseId: paramHouseId } = useParams();
@@ -58,6 +60,18 @@ export default function HouseView({ houseId: propHouseId }) {
     H004: "House of St. Rose of Lima",
     H005: "House of St. Gabriel",
   };
+
+  const houseShortTitles = {
+  H001: "Women Receiving Psychological Support",
+  H002: "Women Requiring Full-Time Bed Care",
+  H003: "Men Requiring Full-Time Bed Care",
+  H004: "Women Living Independently with Assistance",
+  H005: "Men Living Independently with Assistance",
+};
+
+
+const [editElderlyId, setEditElderlyId] = useState(null);
+
 
   useEffect(() => {
     const fetchElderly = async () => {
@@ -228,26 +242,34 @@ const filteredElderly = elderlyInHouse
   };
 
   return (
-    <div className="elderly-profile-container wide-layout">
-      {/* Header */}
-      <div className="elderly-profile-header">
-        {!propHouseId && (
-          <button
-            className="back-btn"
-            onClick={() => navigate("/elderlyManagement")}
-          >
-            <MdArrowBack size={20} /> Back
-          </button>
-        )}
-        <div className="header-house">
-          <img
-            src={houseImages[houseId] || "/images/default-house.png"}
-            alt={houseNames[houseId]}
-            className="header-image"
-          />
-          <h1 className="header-title">{houseNames[houseId]}</h1>
-        </div>
-      </div>
+  <div className="elderly-profile-container wide-layout">
+  {/* Header */}
+  <div className="elderly-profile-header">
+    {!propHouseId && (
+      <button
+        className="back-btn"
+        onClick={() => navigate("/elderlyManagement")}
+      >
+        <MdArrowBack size={20} /> Back
+      </button>
+    )}
+
+    <div className="header-house">
+  <div className="header-top">
+    <img
+      src={houseImages[houseId] || "/images/default-house.png"}
+      alt={houseNames[houseId]}
+      className="header-image"
+    />
+    <h1 className="header-title">{houseNames[houseId]}</h1>
+  </div>
+  <p className="house-shortTitle">
+    {houseShortTitles[houseId] || "No short title available."}
+  </p>
+</div>
+  </div>
+
+
 
       {/* Search & Sort */}
       <div className="search-sort-row">
@@ -358,21 +380,35 @@ const filteredElderly = elderlyInHouse
                 </td>
               )}
               <td
-                className="action-cell"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate(`/profileElderly/${elder.id}`);
-                }}
-                title="Edit"  
-              >
-                <span className="pencil-icon">✎</span>
-              </td>
+    className="action-cell"
+    onClick={(e) => {
+      e.stopPropagation();
+      setEditElderlyId(elder.id); // ✅ open overlay instead of navigating
+    }}
+    title="Edit"
+  >
+    <span className="pencil-icon">✎</span>
+  </td>
+
+
             </tr>
           );
         })}
       </tbody>
     </table>
+    
         )}
+        {editElderlyId && (
+  <EditElderlyOverlay
+    elderId={editElderlyId}
+    onClose={() => setEditElderlyId(null)}
+    onUpdate={async () => {
+      const q = await getDocs(collection(db, "elderly"));
+      setElderlyList(q.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }}
+  />
+)}
+
       </div>
 
             {/* Add Elderly Modal */}
