@@ -123,7 +123,7 @@
   position: relative;
   width: 100%;
   max-width: 1200px;
-  margin: 2rem auto;
+  margin-bottom: 50px;
   overflow: visible;       /* allow cards to expand naturally */
   height: auto;            /* auto height instead of fixed */
   min-height: 400px;       /* keep baseline so cards don’t shrink too much */
