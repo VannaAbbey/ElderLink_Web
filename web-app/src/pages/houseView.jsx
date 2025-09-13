@@ -331,7 +331,7 @@ const [editElderlyId, setEditElderlyId] = useState(null);
           <th className="icon-col"></th>
           <th className="name-col">Full Name</th>
           <th className="age-col">Age</th>
-          <th className="sex-col">Sex</th>
+          <th className="mobility-col">Mobility Status</th>
           {showSelectPanel && <th className="select-col">Select</th>}
           <th className="action-th">Action</th>
         </tr>
@@ -359,7 +359,7 @@ const [editElderlyId, setEditElderlyId] = useState(null);
                 {elder.elderly_fname} {elder.elderly_lname}
               </td>
               <td className="age-cell">{elder.elderly_age ?? "—"}</td>
-              <td className="sex-cell">{elder.elderly_sex || "—"}</td>
+              <td className="mobility-cell">{elder.elderly_mobilityStatus || "—"}</td>
               {showSelectPanel && (
                 <td
                   className="select-cell"

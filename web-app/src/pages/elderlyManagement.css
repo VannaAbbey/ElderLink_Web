@@ -873,7 +873,7 @@ input[type="file"] {
 .elderly-table thead .icon-col { width: 10%; }
 .elderly-table thead .name-col { width: 30%; }
 .elderly-table thead .age-col { width: 25%; }
-.elderly-table thead .sex-col { width: 25%; }
+.elderly-table thead .mobility-col { width: 25%; }
 .elderly-table thead .select-col { width: 0%; } /* optional */
 .elderly-table thead .action-th { width: 5%; text-align: center; }
 .elderly-table tbody td {
@@ -888,7 +888,7 @@ input[type="file"] {
 .elderly-table .icon-cell { width: 10%; text-align: center; }
 .elderly-table .name-cell { width: 30%; }
 .elderly-table .age-cell { width: 25%; }
-.elderly-table .sex-cell { width: 25%; }
+.elderly-table .mobility-cell { width: 25%; }
 .elderly-table .select-cell { width: 0%; }
 .elderly-table .action-cell {
   width: 5%; /* larger than th if you want the pencil bigger */
