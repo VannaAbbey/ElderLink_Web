@@ -1,9 +1,13 @@
+// src/pages/edit_cg_profile.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaUserCircle, FaHeartbeat } from "react-icons/fa";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
+import "./edit_cg_overlay.jsx"; // ✅ import overlay
 import "./edit_cg_profile.css";
+import EditCaregiverOverlay from "./edit_cg_overlay.jsx";
+
 
 export default function EditCaregiverProfile() {
   const navigate = useNavigate();
@@ -11,6 +15,9 @@ export default function EditCaregiverProfile() {
   const [caregivers, setCaregivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortAsc, setSortAsc] = useState(true);
+
+  // ✅ overlay state
+  const [editCaregiverId, setEditCaregiverId] = useState(null);
 
   // Fetch caregivers from Firestore
   useEffect(() => {
@@ -47,7 +54,7 @@ export default function EditCaregiverProfile() {
 
   // Navigate to caregiver profile
   const handleRowClick = (id) => {
-    navigate(`/profileCaregiver/${id}`); //
+    navigate(`/profileCaregiver/${id}`);
   };
 
   return (
@@ -69,7 +76,10 @@ export default function EditCaregiverProfile() {
           onChange={(e) => setSearchTerm(e.target.value)}
           className="search-input"
         />
-        <button className="sort-button" onClick={() => setSortAsc((prev) => !prev)}>
+        <button
+          className="sort-button"
+          onClick={() => setSortAsc((prev) => !prev)}
+        >
           Sort {sortAsc ? "(A-Z) ▲" : "(Z-A) ▼"}
         </button>
       </div>
@@ -77,9 +87,13 @@ export default function EditCaregiverProfile() {
       {/* Caregiver Table */}
       <div className="caregiver-list">
         {loading ? (
-          <p style={{ textAlign: "center", color: "#777" }}>Loading caregivers...</p>
+          <p style={{ textAlign: "center", color: "#777" }}>
+            Loading caregivers...
+          </p>
         ) : filteredCaregivers.length === 0 ? (
-          <p style={{ textAlign: "center", color: "#555" }}>No caregivers found.</p>
+          <p style={{ textAlign: "center", color: "#555" }}>
+            No caregivers found.
+          </p>
         ) : (
           <table className="caregiver-table">
             <thead>
@@ -91,36 +105,48 @@ export default function EditCaregiverProfile() {
               </tr>
             </thead>
             <tbody>
-            {filteredCaregivers.map((cg) => (
-              <tr
-                key={cg.id}
-                className="caregiver-row"
-                onClick={() => handleRowClick(cg.id)}
-                style={{ cursor: "pointer" }}
-              >
-                <td>
-                  <FaUserCircle className="caregiver-icon" />
-                </td>
-                <td>
-                  {cg.user_fname} {cg.user_lname}
-                </td>
-                <td>{cg.user_email}</td>
-                <td
-                  className="action-cell"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigate(`/profileCaregiver/${cg.id}`);
-                  }}
-                  title="Edit"
+              {filteredCaregivers.map((cg) => (
+                <tr
+                  key={cg.id}
+                  className="caregiver-row"
+                  onClick={() => handleRowClick(cg.id)}
+                  style={{ cursor: "pointer" }}
                 >
-                  <span className="pencil-icon">✎</span>
-                </td>
-              </tr>
-            ))}
+                  <td>
+                    <FaUserCircle className="caregiver-icon" />
+                  </td>
+                  <td>
+                    {cg.user_fname} {cg.user_lname}
+                  </td>
+                  <td>{cg.user_email}</td>
+                  <td
+                    className="action-cell"
+                    onClick={(e) => {
+                      e.stopPropagation(); // ✅ prevent row click
+                      setEditCaregiverId(cg.id); // ✅ show overlay
+                    }}
+                    title="Edit"
+                  >
+                    <span className="pencil-icon">✎</span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {/* ✅ Overlay (only shows if editCaregiverId is set) */}
+      {editCaregiverId && (
+        <EditCaregiverOverlay
+          caregiverId={editCaregiverId}
+          onClose={() => setEditCaregiverId(null)}
+          onUpdate={() => {
+            console.log("Caregiver updated!");
+            setEditCaregiverId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

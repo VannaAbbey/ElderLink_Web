@@ -4,6 +4,8 @@ import { FaUserNurse, FaUserCircle } from "react-icons/fa"; // nurse + user icon
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import "./edit_nurse_profile.css";
+import EditNurseOverlay from "./edit_nurse_overlay.jsx";
+
 
 export default function EditNurseProfile() {
   const navigate = useNavigate();
@@ -11,6 +13,8 @@ export default function EditNurseProfile() {
   const [nurses, setNurses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortAsc, setSortAsc] = useState(true);
+  const [editNurseId, setEditNurseId] = useState(null);
+
 
   // Fetch nurses from Firestore
   useEffect(() => {
@@ -108,20 +112,31 @@ export default function EditNurseProfile() {
                   <td>{`${nurse.user_fname} ${nurse.user_lname}`}</td>
                   <td>{nurse.user_email || "N/A"}</td>
                   <td
-                    className="action-cell"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(`/profileNurse/${nurse.id}`);
-                    }}
-                  title="Edit"
-                >
-                  <span className="pencil-icon">✎</span>
-                </td>
+    className="action-cell"
+    onClick={(e) => {
+      e.stopPropagation();
+      setEditNurseId(nurse.id); // ✅ open overlay only
+    }}
+    title="Edit"
+  >
+    <span className="pencil-icon">✎</span>
+  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          
         )}
+        {editNurseId && (
+  <EditNurseOverlay
+    nurseId={editNurseId}     // pass the nurse id
+    onClose={() => setEditNurseId(null)} // close overlay
+    onUpdate={() => {
+      // refresh nurses list if needed
+      setEditNurseId(null);
+    }}
+  />
+)}
       </div>
     </div>
   );
