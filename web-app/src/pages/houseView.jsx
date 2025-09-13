@@ -76,7 +76,6 @@ export default function HouseView({ houseId: propHouseId }) {
   const elderlyInHouse = elderlyList.filter((e) => e.house_id === houseId);
 
   // Filtered + Sorted Elderly
-  // Filtered + Sorted Elderly
 const filteredElderly = elderlyInHouse
   .filter((e) => {
     const searchable = `
@@ -264,7 +263,7 @@ const filteredElderly = elderlyInHouse
             className="sort-button"
             onClick={() => setSortAsc((prev) => !prev)}
           >
-            Sort {sortAsc ? "(A-Z) ▲" : "(Z-A) ▼"} <IoMdArrowDropdown size={20} />
+            Sort {sortAsc ? "(A-Z) ▲" : "(Z-A) ▼"}
           </button>
           {activeTab === "Alive" && (
             <button
@@ -376,7 +375,7 @@ const filteredElderly = elderlyInHouse
         )}
       </div>
 
-      {/* Add Elderly Modal */}
+            {/* Add Elderly Modal */}
       {showOverlay && (
         <div className="overlay">
           <div className="overlay-content">
@@ -491,14 +490,68 @@ const filteredElderly = elderlyInHouse
         </div>
       )}
 
-      {/* Switch House Modal */}
+      {/* Floating Select Panel */}
       {showSelectPanel && (
+        <div className="select-panel">
+          <div className="select-panel-header">
+            <strong>Switch House</strong>
+            <button className="select-panel-close" onClick={closeSelectPanel}>
+              ✕
+            </button>
+          </div>
+
+          <div className="select-panel-note">
+            Please select the elderly you want to allocate or change house.
+          </div>
+
+          <div className="selected-list-compact">
+            {selectedElderly.length === 0 ? (
+              <div className="no-selected">No elderly selected yet.</div>
+            ) : (
+              <ul>
+                {elderlyList
+                  .filter((e) => selectedElderly.includes(e.id))
+                  .map((e) => (
+                    <li key={e.id}>
+                      {e.elderly_fname} {e.elderly_lname}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="select-panel-actions">
+            <button
+              className="done-btn"
+              onClick={() => {
+                if (selectedElderly.length === 0) {
+                  alert("Please select at least one elderly.");
+                  return;
+                }
+                setShowAllocateModal(true);
+                setShowSelectPanel(false);
+              }}
+            >
+              Done
+            </button>
+            <button className="cancel-btn" onClick={closeSelectPanel}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Allocate Modal */}
+      {showAllocateModal && (
         <div className="overlay">
           <div className="overlay-content">
-            <span className="overlay-close" onClick={closeSelectPanel}>
+            <span
+              className="overlay-close"
+              onClick={() => setShowAllocateModal(false)}
+            >
               ✖
             </span>
-            <h2 className="overlay-header">Switch House</h2>
+            <h2 className="overlay-header">Allocate to New House</h2>
 
             <div className="form-group">
               <label>New House</label>
@@ -529,7 +582,10 @@ const filteredElderly = elderlyInHouse
               <button className="save-btn" onClick={confirmAllocation}>
                 Confirm
               </button>
-              <button className="cancel-btn" onClick={closeSelectPanel}>
+              <button
+                className="cancel-btn"
+                onClick={() => setShowAllocateModal(false)}
+              >
                 Cancel
               </button>
             </div>

@@ -97,6 +97,7 @@ export default function Dashboard() {
       </div>
 
       <h2 className="section-title">Overview</h2>
+      <div className="overview-cards"></div>
       <div className="overview-cards">
         <div className="overview-card">
           <h3>Total Elderly</h3>
@@ -113,6 +114,7 @@ export default function Dashboard() {
       </div>
 
       <h2 className="section-title">Houses</h2>
+      <div className="line"></div>
       <div className="houses-carousel">
         <button className="carousel-btn prev" onClick={prevSlide}> &lt; </button>
         <div className="carousel-wrapper">
