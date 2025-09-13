@@ -55,7 +55,7 @@ export default function HouseView({ houseId: propHouseId }) {
     H001: "House of St. Sebastian",
     H002: "House of St. Emmanuel",
     H003: "House of St. Charbell",
-    H004: "House of St. Rose",
+    H004: "House of St. Rose of Lima",
     H005: "House of St. Gabriel",
   };
 

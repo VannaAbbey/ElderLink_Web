@@ -1,67 +1,87 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
-
-/* Dashboard Container */
+/* -------------------- Dashboard Container -------------------- */
 .dashboard-container {
   min-height: 100vh;
-  background: url("/images/AdminBackground.png") no-repeat center center/cover;
   font-family: 'Poppins', sans-serif;
   display: flex;
   flex-direction: column;
   align-items: center;
+  background-color: #F2FDFF;
 }
 
-/* Section Titles */
+/* -------------------- Section Titles -------------------- */
 .section-title {
   font-size: 1.1rem;
-  font-weight: bold;
+  font-weight: 600;
   margin-bottom: 10px;
   width: 100%;
   max-width: 1100px;
 }
 
-/* Overview Cards */
+/* -------------------- Overview Cards -------------------- */
 .overview-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 15px;
   width: 100%;
   max-width: 1100px;
+  margin-bottom: 40px;
 }
 
 .overview-card {
-  background: #FFFFFFFF;
+  background: #fff;
   padding: 20px;
   border-radius: 8px;
-  box-shadow: 0px 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   text-align: center;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.overview-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
 .overview-card h3 {
   font-size: 1rem;
   color: #0d3b66;
-  font-weight: bold;
   margin-bottom: 5px;
 }
 
 .overview-card p {
   font-size: 1.8rem;
-  font-weight: bold;
+  font-weight: 700;
 }
 
-/* GRACES Gallery */
+/* -------------------- Graces Gallery -------------------- */
 .graces-gallery-container {
   position: relative;
   width: 100%;
   display: flex;
   justify-content: center;
-  background-color: #FFFFFFFF;
+  margin: 0 0 50px;
 }
 
 .graces-gallery-container .gallery-wrapper {
-  width: 90%;
+  position: relative;
+  z-index: 2; /* keep card above blue strip */
+  width: 80%;
   height: 30vh;
-  margin: 5rem auto;
   overflow: hidden;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 10px 10px 30px rgba(0,0,0,0.1);
+}
+
+.graces-gallery-container::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 40%; /* strip shorter than wrapper */
+  background: #00588E;
+  transform: translateY(-50%);
+  z-index: 1;
 }
 
 .graces-gallery-container .gallery-wrapper-holder {
@@ -76,63 +96,120 @@
   width: 100%;
   height: 100%;
   background-position: center;
-  background-size: cover;   /* fills container without stretching */
+  background-size: cover;
   background-repeat: no-repeat;
   transition: all 0.5s ease;
 }
 
-/* Individual slides */
-.graces-gallery-container #slider-img-1 {
-  background-image: url(/images/GracesGallery/slider1.jpg);
-}
-.graces-gallery-container #slider-img-2 {
-  background-image: url(/images/GracesGallery/slider2.jpg);
-}
-.graces-gallery-container #slider-img-3 {
-  background-image: url(/images/GracesGallery/slider3.jpg);
-}
-.graces-gallery-container #slider-img-4 {
-  background-image: url(/images/GracesGallery/slider4.jpg);
-}
-.graces-gallery-container #slider-img-5 {
-  background-image: url(/images/GracesGallery/slider5.jpg);
-}
-.graces-gallery-container #slider-img-6 {
-  background-image: url(/images/GracesGallery/slider6.jpg);
-}
-
-.graces-gallery-container .button-holder .button{
-  background-color: white;
-  width: 15px;
-  height: 15px;
-  border-radius: 15px;
-  display: inline-block;
-  margin: .3rem
-}
-
-.graces-gallery-container .button-holder {
-  position: absolute;
-  bottom: 10px;              /* place 10px above the bottom inside the image */
-  left: 50%;                 /* center horizontally */
-  transform: translateX(-50%); /* shift back to true center */
-  display: flex;
-  gap: 8px;                  /* space between buttons */
-  justify-content: center;
-  align-items: center;
-  z-index: 10;               /* keep above the images */
-}
+/* Individual Slides */
+#slider-img-1 { background-image: url(/images/GracesGallery/slider1.jpg); }
+#slider-img-2 { background-image: url(/images/GracesGallery/slider2.jpg); }
+#slider-img-3 { background-image: url(/images/GracesGallery/slider3.jpg); }
+#slider-img-4 { background-image: url(/images/GracesGallery/slider4.jpg); }
+#slider-img-5 { background-image: url(/images/GracesGallery/slider5.jpg); }
+#slider-img-6 { background-image: url(/images/GracesGallery/slider6.jpg); }
 
 @keyframes slider {
-  0%{transform: translateX(0%);}
-  10%{transform: translateX(-100%);}
-  20%{transform: translateX(-100%);}
-  30%{transform: translateX(-200%);}
-  40%{transform: translateX(-200%);}
-  50%{transform: translateX(-200%);}
-  60%{transform: translateX(-300%);}
-  70%{transform: translateX(-300%);}
-  80%{transform: translateX(-300%);}
-  90%{transform: translateX(0%);}
-  100%{transform: translateX(0%);}
+  0%, 10% { transform: translateX(0%); }
+  20%, 30% { transform: translateX(-100%); }
+  40%, 50% { transform: translateX(-200%); }
+  60%, 70% { transform: translateX(-300%); }
+  80%, 90% { transform: translateX(-400%); }
+  100% { transform: translateX(-500%); }
+}
+
+/* -------------------- Houses Carousel -------------------- */
+.houses-carousel {
+  position: relative;
+  width: 100%;
+  max-width: 1200px;
+  margin: 2rem auto;
+  overflow: hidden; /* hides cards outside */
+  height: 300px;
+}
+
+.carousel-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.house-card {
+  position: absolute; /* stack them */
+  top: 0;
+  left: 50%;
+  width: 250px;
+  height: 100%;
+  transform: translateX(-50%) scale(0.8);
+  /* only allow JS-controlled transitions */
+  transition: transform 0.4s ease, opacity 0.4s ease;
+  opacity: 0.5;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+  text-align: center;
+  z-index: 1;
+  pointer-events: none; /* prevents hover effects */
+}
+
+.house-card.center {
+  transform: translateX(-50%) scale(1);
+  opacity: 1;
+  z-index: 3;
+}
+
+.house-card.left {
+  transform: translateX(-150%) scale(0.9);
+  z-index: 2;
+}
+
+.house-card.right {
+  transform: translateX(50%) scale(0.9);
+  z-index: 2;
+}
+
+.house-card img {
+  width: 100%;
+  height: 250px;
+  object-fit: cover;
+  border-radius: 12px 12px 0 0;
+}
+
+/* Carousel Buttons */
+.carousel-btn {
+  background-color: #1e3a8a;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+}
+
+.carousel-btn.prev {
+  left: 0;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+}
+
+.carousel-btn.next {
+  right: 0;
+  transform: translate(50%, -50%);
+  z-index: 10;
+}
+
+/* Disable hover transformations on house-card */
+.house-card:hover {
+  transform: inherit;
+  opacity: inherit;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.15);
 }
 
