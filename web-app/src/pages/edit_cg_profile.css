@@ -84,3 +84,9 @@
   color: #4a90e2;
   padding: 0 6px;
 }
+
+.pencil-icon {
+  color: #005b96;   /* set text/icon color */
+  cursor: pointer;  /* optional: shows it's clickable */
+  font-size: 1.2rem; /* optional: adjust size */
+}

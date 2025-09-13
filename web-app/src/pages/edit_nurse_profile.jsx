@@ -91,6 +91,7 @@ export default function EditNurseProfile() {
                 <th></th>
                 <th>Full Name</th>
                 <th>Email</th>
+                <th className="action-th">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -106,6 +107,16 @@ export default function EditNurseProfile() {
                   </td>
                   <td>{`${nurse.user_fname} ${nurse.user_lname}`}</td>
                   <td>{nurse.user_email || "N/A"}</td>
+                  <td
+                    className="action-cell"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/profileNurse/${nurse.id}`);
+                    }}
+                  title="Edit"
+                >
+                  <span className="pencil-icon">✎</span>
+                </td>
                 </tr>
               ))}
             </tbody>

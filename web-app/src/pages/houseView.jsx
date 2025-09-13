@@ -76,22 +76,30 @@ export default function HouseView({ houseId: propHouseId }) {
   const elderlyInHouse = elderlyList.filter((e) => e.house_id === houseId);
 
   // Filtered + Sorted Elderly
-  const filteredElderly = elderlyInHouse
-    .filter((e) =>
-      `${e.elderly_fname} ${e.elderly_lname}`
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase())
-    )
-    .filter((e) => {
-      if (activeTab === "Alive") return e.elderly_status === "Alive";
-      if (activeTab === "Deceased") return e.elderly_status === "Deceased";
-      return true;
-    })
-    .sort((a, b) => {
-      const nameA = `${a.elderly_fname} ${a.elderly_lname}`.toLowerCase();
-      const nameB = `${b.elderly_fname} ${b.elderly_lname}`.toLowerCase();
-      return sortAsc ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
-    });
+  // Filtered + Sorted Elderly
+const filteredElderly = elderlyInHouse
+  .filter((e) => {
+    const searchable = `
+      ${e.elderly_fname || ""} 
+      ${e.elderly_lname || ""} 
+      ${e.elderly_age || ""} 
+      ${e.elderly_mobilityStatus || ""} 
+      ${e.elderly_dietNotes || ""} 
+      ${e.elderly_condition || ""}
+    `.toLowerCase();
+
+    return searchable.includes(searchTerm.toLowerCase());
+  })
+  .filter((e) => {
+    if (activeTab === "Alive") return e.elderly_status === "Alive";
+    if (activeTab === "Deceased") return e.elderly_status === "Deceased";
+    return true;
+  })
+  .sort((a, b) => {
+    const nameA = `${a.elderly_fname} ${a.elderly_lname}`.toLowerCase();
+    const nameB = `${b.elderly_fname} ${b.elderly_lname}`.toLowerCase();
+    return sortAsc ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+  });
 
   const handleChange = (e) => {
     const { name, value } = e.target;
