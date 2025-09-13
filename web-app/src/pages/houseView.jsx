@@ -240,7 +240,8 @@ const filteredElderly = elderlyInHouse
   };
 
   const totalElderlyInHouse = elderlyList.filter(
-  (e) => e.house_id === houseId).length;
+    (e) => e.house_id === houseId && e.elderly_status === "Alive"
+  ).length;
 
   return (
   <div className="elderly-profile-container wide-layout">
@@ -259,7 +260,7 @@ const filteredElderly = elderlyInHouse
     {houseShortTitles[houseId] || "No short title available."}
   </p>
   <div className="header-title-wrapper">
-    <span className="total-elderly"> Total Number of Elderly: {totalElderlyInHouse}</span>
+    <span className="total-elderly"> Total Number of Alive Elderly: {totalElderlyInHouse}</span>
   </div>
 </div>
   </div>
