@@ -304,57 +304,67 @@ export default function HouseView({ houseId: propHouseId }) {
           <p className="no-profiles">No profiles found.</p>
         ) : (
           <table className="elderly-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>Full Name</th>
-                <th>Age</th>
-                <th>Sex</th>
-                {showSelectPanel && <th>Select</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredElderly.map((elder) => {
-                const onRowClick = () => {
-                  if (showSelectPanel) {
-                    toggleSelect(elder.id);
-                  } else {
-                    navigate(`/profileElderly/${elder.id}`);
-                  }
-                };
+      <thead>
+        <tr>
+          <th className="icon-col"></th>
+          <th className="name-col">Full Name</th>
+          <th className="age-col">Age</th>
+          <th className="sex-col">Sex</th>
+          {showSelectPanel && <th className="select-col">Select</th>}
+          <th className="action-th">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {filteredElderly.map((elder) => {
+          const onRowClick = () => {
+            if (showSelectPanel) {
+              toggleSelect(elder.id);
+            } else {
+              navigate(`/profileElderly/${elder.id}`);
+            }
+          };
 
-                return (
-                  <tr
-                    key={elder.id}
-                    className={isSelected(elder.id) ? "selected-row" : ""}
-                    onClick={onRowClick}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td className="icon-cell">
-                      <FaUserCircle size={25} color="#4A90E2" />
-                    </td>
-                    <td className="name-cell">
-                      {elder.elderly_fname} {elder.elderly_lname}
-                    </td>
-                    <td className="age-cell">{elder.elderly_age ?? "—"}</td>
-                    <td className="sex-cell">{elder.elderly_sex || "—"}</td>
-                    {showSelectPanel && (
-                      <td
-                        className="select-cell"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected(elder.id)}
-                          onChange={() => toggleSelect(elder.id)}
-                        />
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          return (
+            <tr
+              key={elder.id}
+              className={isSelected(elder.id) ? "selected-row" : ""}
+              onClick={onRowClick}
+            >
+              <td className="icon-cell">
+                <FaUserCircle size={25} color="#4A90E2" />
+              </td>
+              <td className="name-cell">
+                {elder.elderly_fname} {elder.elderly_lname}
+              </td>
+              <td className="age-cell">{elder.elderly_age ?? "—"}</td>
+              <td className="sex-cell">{elder.elderly_sex || "—"}</td>
+              {showSelectPanel && (
+                <td
+                  className="select-cell"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected(elder.id)}
+                    onChange={() => toggleSelect(elder.id)}
+                  />
+                </td>
+              )}
+              <td
+                className="action-cell"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/profileElderly/${elder.id}`);
+                }}
+                title="Edit"  
+              >
+                <span className="pencil-icon">✎</span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
         )}
       </div>
 
