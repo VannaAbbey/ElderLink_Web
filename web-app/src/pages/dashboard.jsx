@@ -41,31 +41,31 @@ export default function Dashboard() {
 // ---------------- Houses Carousel ----------------
 const houses = [
   { 
-    img: "/images/Sebastian.png", 
+    img: "/images/HousesGallery/sebastiangallery.jpg", 
     name: "St. Sebastian", 
     shortTitle: "Women Receiving Psychological Support",
     desc: "Women who may be experiencing mental health challenges and are provided with care, guidance, and a supportive environment to promote their emotional well-being and recovery." 
   },
   { 
-    img: "/images/Emmanuel.png", 
+    img: "/images/HousesGallery/emmanuelgallery.jpg", 
     name: "St. Emmanuel", 
     shortTitle: "Women Requiring Full-Time Bed Care",
     desc: "Women whose health conditions require them to remain bedridden, receiving attentive, compassionate care to support their daily needs, comfort, and quality of life." 
   },
   { 
-    img: "/images/Charbell.png", 
+    img: "/images/HousesGallery/charbellgallery.jpg", 
     name: "St. Charbell", 
     shortTitle: "Men Requiring Full-Time Bed Care",
     desc: "Men whose medical or physical conditions require them to stay in bed, where they are given specialized support, attentive assistance, and care with dignity and respect." 
   },
   { 
-    img: "/images/Rose.png", 
+    img: "/images/HousesGallery/rosegallery.jpg", 
     name: "St. Rose of Lima", 
     shortTitle: "Women Living Independently with Assistance",
     desc: "Women who are physically able and mobile, supported with the necessary resources, companionship, and guidance to live meaningful and fulfilling lives within a caring environment." 
   },
   { 
-    img: "/images/Gabriel.png", 
+    img: "/images/HousesGallery/gabrielgallery.jpg", 
     name: "St. Gabriel", 
     shortTitle: "Men Living Independently with Assistance",
     desc: "Men who are physically able and mobile, supported with opportunities, resources, and compassionate guidance to help them maintain independence and enjoy a dignified quality of life." 
