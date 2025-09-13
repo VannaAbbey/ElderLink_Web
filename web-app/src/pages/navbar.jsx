@@ -1,18 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { signOut } from "firebase/auth";
+import { signOut, onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { FaBell } from "react-icons/fa";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  onSnapshot,
-} from "firebase/firestore";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import "./navbar.css";
-
 
 export default function Navbar() {
   const navigate = useNavigate();
@@ -23,51 +15,43 @@ export default function Navbar() {
   const dropdownRef = useRef(null);
   const notifRef = useRef(null);
 
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (!user) navigate("/login", { replace: true });
+    });
+    return () => unsubscribeAuth();
+  }, [navigate]);
+
+  // Logout function
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      navigate("/login");
+      navigate("/login", { replace: true });
     } catch (error) {
       console.error("Error signing out:", error);
     }
   };
 
-  // ✅ Real-time listener for PENDING notifications
+  // Real-time notifications
   useEffect(() => {
-    let q;
-    try {
-      q = query(
-        collection(db, "notifications"),
-        where("action_status", "==", "pending"),
-
-      );
-    } catch (error) {
-      console.warn("Missing index. Fallback query without orderBy.");
-      q = query(collection(db, "notifications"), where("action_status", "==", "pending"));
-    }
-
+    const q = query(
+      collection(db, "notifications"),
+      where("action_status", "==", "pending")
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const notifData = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-
-      console.log("🔔 New Notifications:", notifData);
-      setNotifications(notifData);
+      setNotifications(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
-
     return () => unsubscribe();
   }, []);
 
-  // ✅ Close dropdowns on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target))
         setDropdownOpen(false);
-      }
-      if (notifRef.current && !notifRef.current.contains(event.target)) {
+      if (notifRef.current && !notifRef.current.contains(event.target))
         setNotifOpen(false);
-      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -88,17 +72,13 @@ export default function Navbar() {
           Home
         </li>
         <li
-          className={
-            location.pathname.startsWith("/elderlyManagement") ? "active" : ""
-          }
+          className={location.pathname.startsWith("/elderlyManagement") ? "active" : ""}
           onClick={() => navigate("/elderlyManagement")}
         >
           Elderly Management
         </li>
         <li
-          className={
-            location.pathname.startsWith("/schedule") ? "active" : ""
-          }
+          className={location.pathname.startsWith("/schedule") ? "active" : ""}
           onClick={() => navigate("/schedule")}
         >
           Schedule
@@ -114,15 +94,12 @@ export default function Navbar() {
       <div className="nav-actions">
         {/* Admin Dropdown */}
         <div className="admin-dropdown" ref={dropdownRef}>
-          <button
-            className="admin-btn"
-            onClick={() => setDropdownOpen((prev) => !prev)}
-          >
-            Admin
+          <button className="admin-btn" onClick={() => setDropdownOpen((prev) => !prev)}>
+            Supervisor
           </button>
           {dropdownOpen && (
             <ul className="dropdown-menu">
-              <li onClick={() => navigate("/edit-profile")}>Edit Profile</li>
+              <li onClick={() => navigate("/edit_admin_profile")}>Edit Profile</li>
               <li onClick={() => navigate("/settings")}>Settings</li>
               <li onClick={() => navigate("/help-support")}>Help & Support</li>
               <li onClick={handleLogout} className="logout-item">
@@ -134,10 +111,7 @@ export default function Navbar() {
 
         {/* Notifications Dropdown */}
         <div className="notif-dropdown" ref={notifRef}>
-          <button
-            className="notif-btn"
-            onClick={() => setNotifOpen((prev) => !prev)}
-          >
+          <button className="notif-btn" onClick={() => setNotifOpen((prev) => !prev)}>
             <FaBell size={20} />
             {notifications.length > 0 && (
               <span className="notif-badge">{notifications.length}</span>
@@ -155,14 +129,10 @@ export default function Navbar() {
                       onClick={() => navigate(`/notifications?id=${notif.id}`)}
                       className="notif-item"
                     >
-                      <strong>{notif.elderly_name}</strong> -{" "}
-                      {notif.elderly_status}
+                      <strong>{notif.elderly_name}</strong> - {notif.elderly_status}
                     </li>
                   ))}
-                  <li
-                    className="view-all"
-                    onClick={() => navigate("/notifications")}
-                  >
+                  <li className="view-all" onClick={() => navigate("/notifications")}>
                     View All Notifications
                   </li>
                 </>
