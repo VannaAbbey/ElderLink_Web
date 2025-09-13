@@ -38,16 +38,40 @@ export default function Dashboard() {
     fetchCounts();
   }, []);
 
-  // ---------------- Houses Carousel ----------------
   const houses = [
-    { img: "/images/Sebastian.png", name: "St. Sebastian", desc: "Females with Psychological Needs" },
-    { img: "/images/Emmanuel.png", name: "St. Emmanuel", desc: "Females that are Bedridden" },
-    { img: "/images/Charbell.png", name: "St. Charbell", desc: "Males that are Bedridden" },
-    { img: "/images/Rose.png", name: "St. Rose of Lima", desc: "Females that are Abled" },
-    { img: "/images/Gabriel.png", name: "St. Gabriel", desc: "Males that are Abled" },
+    { 
+      img: "/images/HousesGallery/sebastiangallery.jpg", 
+      name: "St. Sebastian", 
+      shortTitle: "Women Receiving Psychological Support",
+      desc: "Women who may be experiencing mental health challenges and are provided with care, guidance, and a supportive environment to promote their emotional well-being and recovery." 
+    },
+    { 
+      img: "/images/HousesGallery/emmanuelgallery.jpg", 
+      name: "St. Emmanuel", 
+      shortTitle: "Women Requiring Full-Time Bed Care",
+      desc: "Women whose health conditions require them to remain bedridden, receiving attentive, compassionate care to support their daily needs, comfort, and quality of life." 
+    },
+    { 
+      img: "/images/HousesGallery/charbellgallery.jpg", 
+      name: "St. Charbell", 
+      shortTitle: "Men Requiring Full-Time Bed Care",
+      desc: "Men whose medical or physical conditions require them to stay in bed, where they are given specialized support, attentive assistance, and care with dignity and respect." 
+    },
+    { 
+      img: "/images/HousesGallery/rosegallery.jpg", 
+      name: "St. Rose of Lima", 
+      shortTitle: "Women Living Independently with Assistance",
+      desc: "Women who are physically able and mobile, supported with the necessary resources, companionship, and guidance to live meaningful and fulfilling lives within a caring environment." 
+    },
+    { 
+      img: "/images/HousesGallery/gabrielgallery.jpg", 
+      name: "St. Gabriel", 
+      shortTitle: "Men Living Independently with Assistance",
+      desc: "Men who are physically able and mobile, supported with opportunities, resources, and compassionate guidance to help them maintain independence and enjoy a dignified quality of life." 
+    },
   ];
 
-  const [current, setCurrent] = useState(1); // start with middle card
+  const [current, setCurrent] = useState(1);
 
   const prevIndex = () => (current - 1 + houses.length) % houses.length;
   const nextIndex = () => (current + 1) % houses.length;
@@ -59,8 +83,21 @@ export default function Dashboard() {
     <div className="dashboard-container">
       <Navbar />
 
-      {/* Overview */}
+      <div className="graces-gallery-container">
+        <div className="gallery-wrapper">
+          <div className="gallery-wrapper-holder">
+            <div id="slider-img-1"></div>
+            <div id="slider-img-2"></div>
+            <div id="slider-img-3"></div>
+            <div id="slider-img-4"></div>
+            <div id="slider-img-5"></div>
+            <div id="slider-img-6"></div>
+          </div>
+        </div>
+      </div>
+
       <h2 className="section-title">Overview</h2>
+      <div className="overview-cards"></div>
       <div className="overview-cards">
         <div className="overview-card">
           <h3>Total Elderly</h3>
@@ -76,26 +113,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Graces Gallery */}
-      <div className="graces-gallery-container">
-        <div className="gallery-wrapper">
-          <div className="gallery-wrapper-holder">
-            <div id="slider-img-1"></div>
-            <div id="slider-img-2"></div>
-            <div id="slider-img-3"></div>
-            <div id="slider-img-4"></div>
-            <div id="slider-img-5"></div>
-            <div id="slider-img-6"></div>
-          </div>
-        </div>
-      </div>
-
-      {/* Houses Carousel */}
       <h2 className="section-title">Houses</h2>
+      <div className="line"></div>
       <div className="houses-carousel">
-        <button className="carousel-btn prev" onClick={prevSlide}>
-          &lt;
-        </button>
+        <button className="carousel-btn prev" onClick={prevSlide}> &lt; </button>
         <div className="carousel-wrapper">
           {houses.map((house, index) => {
             let position = "side";
@@ -107,14 +128,13 @@ export default function Dashboard() {
               <div key={house.name} className={`house-card ${position}`}>
                 <img src={house.img} alt={house.name} />
                 <h3>{house.name}</h3>
-                <p>{house.desc}</p>
+                <h4 className="house-short-title">{house.shortTitle}</h4>
+                <p className="house-desc">{house.desc}</p>
               </div>
             );
           })}
         </div>
-        <button className="carousel-btn next" onClick={nextSlide}>
-          &gt;
-        </button>
+        <button className="carousel-btn next" onClick={nextSlide}> &gt; </button>
       </div>
     </div>
   );

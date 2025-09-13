@@ -98,11 +98,13 @@
   background-color: #fff;
   padding: 30px;
   border-radius: 12px;
-  width: 500px;
-  max-width: 90%;
+  width: 90%;
+  max-width: 500px;
   position: relative;
   box-shadow: 0 4px 12px rgba(0, 88, 142, 0.3);
+  box-sizing: border-box;
 }
+
 
 .overlay-close {
   position: absolute;
@@ -179,3 +181,4 @@
   background-color: #ccc;
   color: #333;
 }
+

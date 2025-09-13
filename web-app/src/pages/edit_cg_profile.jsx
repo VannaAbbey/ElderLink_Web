@@ -87,25 +87,36 @@ export default function EditCaregiverProfile() {
                 <th></th>
                 <th>Full Name</th>
                 <th>Email</th>
+                <th className="action-th">Action</th>
               </tr>
             </thead>
             <tbody>
-              {filteredCaregivers.map((cg) => (
-                <tr
-                  key={cg.id}
-                  className="caregiver-row"
-                  onClick={() => handleRowClick(cg.id)}
-                  style={{ cursor: "pointer" }}
+            {filteredCaregivers.map((cg) => (
+              <tr
+                key={cg.id}
+                className="caregiver-row"
+                onClick={() => handleRowClick(cg.id)}
+                style={{ cursor: "pointer" }}
+              >
+                <td>
+                  <FaUserCircle className="caregiver-icon" />
+                </td>
+                <td>
+                  {cg.user_fname} {cg.user_lname}
+                </td>
+                <td>{cg.user_email}</td>
+                <td
+                  className="action-cell"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/profileCaregiver/${cg.id}`);
+                  }}
+                  title="Edit"
                 >
-                  <td>
-                    <FaUserCircle className="caregiver-icon" />
-                  </td>
-                  <td>
-                    {cg.user_fname} {cg.user_lname}
-                  </td>
-                  <td>{cg.user_email}</td>
-                </tr>
-              ))}
+                  <span className="pencil-icon">✎</span>
+                </td>
+              </tr>
+            ))}
             </tbody>
           </table>
         )}

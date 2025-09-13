@@ -80,7 +80,6 @@
   vertical-align: middle;
 }
 
-/* --- Overlay Edit Form --- */
 .overlay {
   position: fixed;
   top: 0;
@@ -92,16 +91,28 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  padding: 20px; /* prevents sticking to screen edges */
+  box-sizing: border-box;
+}
+
+.edit-profile-title {
+  text-align: center;
+  width: 100%;
+  color: #00588E;
 }
 
 .overlay-content {
   background-color: #fff;
-  padding: 30px;
+  padding: 20px;
   border-radius: 12px;
-  width: 500px;
-  max-width: 90%;
+  width: 100%;
+  max-width: 450px;   
+  max-height: 90vh;   
+  overflow-y: auto;   
+  overflow-x: hidden; 
   position: relative;
   box-shadow: 0 4px 12px rgba(0, 88, 142, 0.3);
+  box-sizing: border-box; 
 }
 
 .overlay-close {
@@ -110,7 +121,7 @@
   right: 15px;
   font-size: 20px;
   cursor: pointer;
-  color: #333;
+  color: #00588E;
 }
 
 .image-upload-box {
@@ -124,6 +135,8 @@
   cursor: pointer;
   border-radius: 50%;
   overflow: hidden;
+  flex-shrink: 0; 
+  background-color: #f9f9f9; 
 }
 
 .preview-img {

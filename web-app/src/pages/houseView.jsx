@@ -13,6 +13,8 @@ import {
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import "./elderlyManagement.css";
+import EditElderlyOverlay from "./edit_elderly_profile"; // ✅ import overlay
+
 
 export default function HouseView({ houseId: propHouseId }) {
   const { houseId: paramHouseId } = useParams();
@@ -59,6 +61,18 @@ export default function HouseView({ houseId: propHouseId }) {
     H005: "House of St. Gabriel",
   };
 
+  const houseShortTitles = {
+  H001: "Women Receiving Psychological Support",
+  H002: "Women Requiring Full-Time Bed Care",
+  H003: "Men Requiring Full-Time Bed Care",
+  H004: "Women Living Independently with Assistance",
+  H005: "Men Living Independently with Assistance",
+};
+
+
+const [editElderlyId, setEditElderlyId] = useState(null);
+
+
   useEffect(() => {
     const fetchElderly = async () => {
       try {
@@ -76,22 +90,29 @@ export default function HouseView({ houseId: propHouseId }) {
   const elderlyInHouse = elderlyList.filter((e) => e.house_id === houseId);
 
   // Filtered + Sorted Elderly
-  const filteredElderly = elderlyInHouse
-    .filter((e) =>
-      `${e.elderly_fname} ${e.elderly_lname}`
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase())
-    )
-    .filter((e) => {
-      if (activeTab === "Alive") return e.elderly_status === "Alive";
-      if (activeTab === "Deceased") return e.elderly_status === "Deceased";
-      return true;
-    })
-    .sort((a, b) => {
-      const nameA = `${a.elderly_fname} ${a.elderly_lname}`.toLowerCase();
-      const nameB = `${b.elderly_fname} ${b.elderly_lname}`.toLowerCase();
-      return sortAsc ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
-    });
+const filteredElderly = elderlyInHouse
+  .filter((e) => {
+    const searchable = `
+      ${e.elderly_fname || ""} 
+      ${e.elderly_lname || ""} 
+      ${e.elderly_age || ""} 
+      ${e.elderly_mobilityStatus || ""} 
+      ${e.elderly_dietNotes || ""} 
+      ${e.elderly_condition || ""}
+    `.toLowerCase();
+
+    return searchable.includes(searchTerm.toLowerCase());
+  })
+  .filter((e) => {
+    if (activeTab === "Alive") return e.elderly_status === "Alive";
+    if (activeTab === "Deceased") return e.elderly_status === "Deceased";
+    return true;
+  })
+  .sort((a, b) => {
+    const nameA = `${a.elderly_fname} ${a.elderly_lname}`.toLowerCase();
+    const nameB = `${b.elderly_fname} ${b.elderly_lname}`.toLowerCase();
+    return sortAsc ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+  });
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -221,26 +242,34 @@ export default function HouseView({ houseId: propHouseId }) {
   };
 
   return (
-    <div className="elderly-profile-container wide-layout">
-      {/* Header */}
-      <div className="elderly-profile-header">
-        {!propHouseId && (
-          <button
-            className="back-btn"
-            onClick={() => navigate("/elderlyManagement")}
-          >
-            <MdArrowBack size={20} /> Back
-          </button>
-        )}
-        <div className="header-house">
-          <img
-            src={houseImages[houseId] || "/images/default-house.png"}
-            alt={houseNames[houseId]}
-            className="header-image"
-          />
-          <h1 className="header-title">{houseNames[houseId]}</h1>
-        </div>
-      </div>
+  <div className="elderly-profile-container wide-layout">
+  {/* Header */}
+  <div className="elderly-profile-header">
+    {!propHouseId && (
+      <button
+        className="back-btn"
+        onClick={() => navigate("/elderlyManagement")}
+      >
+        <MdArrowBack size={20} /> Back
+      </button>
+    )}
+
+    <div className="header-house">
+  <div className="header-top">
+    <img
+      src={houseImages[houseId] || "/images/default-house.png"}
+      alt={houseNames[houseId]}
+      className="header-image"
+    />
+    <h1 className="header-title">{houseNames[houseId]}</h1>
+  </div>
+  <p className="house-shortTitle">
+    {houseShortTitles[houseId] || "No short title available."}
+  </p>
+</div>
+  </div>
+
+
 
       {/* Search & Sort */}
       <div className="search-sort-row">
@@ -256,7 +285,7 @@ export default function HouseView({ houseId: propHouseId }) {
             className="sort-button"
             onClick={() => setSortAsc((prev) => !prev)}
           >
-            Sort {sortAsc ? "(A-Z) ▲" : "(Z-A) ▼"} <IoMdArrowDropdown size={20} />
+            Sort {sortAsc ? "(A-Z) ▲" : "(Z-A) ▼"}
           </button>
           {activeTab === "Alive" && (
             <button
@@ -304,61 +333,85 @@ export default function HouseView({ houseId: propHouseId }) {
           <p className="no-profiles">No profiles found.</p>
         ) : (
           <table className="elderly-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>Full Name</th>
-                <th>Age</th>
-                <th>Sex</th>
-                {showSelectPanel && <th>Select</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredElderly.map((elder) => {
-                const onRowClick = () => {
-                  if (showSelectPanel) {
-                    toggleSelect(elder.id);
-                  } else {
-                    navigate(`/profileElderly/${elder.id}`);
-                  }
-                };
+      <thead>
+        <tr>
+          <th className="icon-col"></th>
+          <th className="name-col">Full Name</th>
+          <th className="age-col">Age</th>
+          <th className="mobility-col">Mobility Status</th>
+          {showSelectPanel && <th className="select-col">Select</th>}
+          <th className="action-th">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {filteredElderly.map((elder) => {
+          const onRowClick = () => {
+            if (showSelectPanel) {
+              toggleSelect(elder.id);
+            } else {
+              navigate(`/profileElderly/${elder.id}`);
+            }
+          };
 
-                return (
-                  <tr
-                    key={elder.id}
-                    className={isSelected(elder.id) ? "selected-row" : ""}
-                    onClick={onRowClick}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td className="icon-cell">
-                      <FaUserCircle size={25} color="#4A90E2" />
-                    </td>
-                    <td className="name-cell">
-                      {elder.elderly_fname} {elder.elderly_lname}
-                    </td>
-                    <td className="age-cell">{elder.elderly_age ?? "—"}</td>
-                    <td className="sex-cell">{elder.elderly_sex || "—"}</td>
-                    {showSelectPanel && (
-                      <td
-                        className="select-cell"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected(elder.id)}
-                          onChange={() => toggleSelect(elder.id)}
-                        />
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          return (
+            <tr
+              key={elder.id}
+              className={isSelected(elder.id) ? "selected-row" : ""}
+              onClick={onRowClick}
+            >
+              <td className="icon-cell">
+                <FaUserCircle size={25} color="#4A90E2" />
+              </td>
+              <td className="name-cell">
+                {elder.elderly_fname} {elder.elderly_lname}
+              </td>
+              <td className="age-cell">{elder.elderly_age ?? "—"}</td>
+              <td className="mobility-cell">{elder.elderly_mobilityStatus || "—"}</td>
+              {showSelectPanel && (
+                <td
+                  className="select-cell"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected(elder.id)}
+                    onChange={() => toggleSelect(elder.id)}
+                  />
+                </td>
+              )}
+              <td
+    className="action-cell"
+    onClick={(e) => {
+      e.stopPropagation();
+      setEditElderlyId(elder.id); // ✅ open overlay instead of navigating
+    }}
+    title="Edit"
+  >
+    <span className="pencil-icon">✎</span>
+  </td>
+
+
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+    
         )}
+        {editElderlyId && (
+  <EditElderlyOverlay
+    elderId={editElderlyId}
+    onClose={() => setEditElderlyId(null)}
+    onUpdate={async () => {
+      const q = await getDocs(collection(db, "elderly"));
+      setElderlyList(q.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }}
+  />
+)}
+
       </div>
 
-      {/* Add Elderly Modal */}
+            {/* Add Elderly Modal */}
       {showOverlay && (
         <div className="overlay">
           <div className="overlay-content">
@@ -473,14 +526,68 @@ export default function HouseView({ houseId: propHouseId }) {
         </div>
       )}
 
-      {/* Switch House Modal */}
+      {/* Floating Select Panel */}
       {showSelectPanel && (
+        <div className="select-panel">
+          <div className="select-panel-header">
+            <strong>Switch House</strong>
+            <button className="select-panel-close" onClick={closeSelectPanel}>
+              ✕
+            </button>
+          </div>
+
+          <div className="select-panel-note">
+            Please select the elderly you want to allocate or change house.
+          </div>
+
+          <div className="selected-list-compact">
+            {selectedElderly.length === 0 ? (
+              <div className="no-selected">No elderly selected yet.</div>
+            ) : (
+              <ul>
+                {elderlyList
+                  .filter((e) => selectedElderly.includes(e.id))
+                  .map((e) => (
+                    <li key={e.id}>
+                      {e.elderly_fname} {e.elderly_lname}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="select-panel-actions">
+            <button
+              className="done-btn"
+              onClick={() => {
+                if (selectedElderly.length === 0) {
+                  alert("Please select at least one elderly.");
+                  return;
+                }
+                setShowAllocateModal(true);
+                setShowSelectPanel(false);
+              }}
+            >
+              Done
+            </button>
+            <button className="cancel-btn" onClick={closeSelectPanel}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Allocate Modal */}
+      {showAllocateModal && (
         <div className="overlay">
           <div className="overlay-content">
-            <span className="overlay-close" onClick={closeSelectPanel}>
+            <span
+              className="overlay-close"
+              onClick={() => setShowAllocateModal(false)}
+            >
               ✖
             </span>
-            <h2 className="overlay-header">Switch House</h2>
+            <h2 className="overlay-header">Allocate to New House</h2>
 
             <div className="form-group">
               <label>New House</label>
@@ -511,7 +618,10 @@ export default function HouseView({ houseId: propHouseId }) {
               <button className="save-btn" onClick={confirmAllocation}>
                 Confirm
               </button>
-              <button className="cancel-btn" onClick={closeSelectPanel}>
+              <button
+                className="cancel-btn"
+                onClick={() => setShowAllocateModal(false)}
+              >
                 Cancel
               </button>
             </div>
