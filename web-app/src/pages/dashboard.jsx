@@ -38,14 +38,40 @@ export default function Dashboard() {
     fetchCounts();
   }, []);
 
-  // ---------------- Houses Carousel ----------------
-  const houses = [
-    { img: "/images/Sebastian.png", name: "St. Sebastian", desc: "Females with Psychological Needs" },
-    { img: "/images/Emmanuel.png", name: "St. Emmanuel", desc: "Females that are Bedridden" },
-    { img: "/images/Charbell.png", name: "St. Charbell", desc: "Males that are Bedridden" },
-    { img: "/images/Rose.png", name: "St. Rose of Lima", desc: "Females that are Abled" },
-    { img: "/images/Gabriel.png", name: "St. Gabriel", desc: "Males that are Abled" },
-  ];
+// ---------------- Houses Carousel ----------------
+const houses = [
+  { 
+    img: "/images/Sebastian.png", 
+    name: "St. Sebastian", 
+    shortTitle: "Women Receiving Psychological Support",
+    desc: "Women who may be experiencing mental health challenges and are provided with care, guidance, and a supportive environment to promote their emotional well-being and recovery." 
+  },
+  { 
+    img: "/images/Emmanuel.png", 
+    name: "St. Emmanuel", 
+    shortTitle: "Women Requiring Full-Time Bed Care",
+    desc: "Women whose health conditions require them to remain bedridden, receiving attentive, compassionate care to support their daily needs, comfort, and quality of life." 
+  },
+  { 
+    img: "/images/Charbell.png", 
+    name: "St. Charbell", 
+    shortTitle: "Men Requiring Full-Time Bed Care",
+    desc: "Men whose medical or physical conditions require them to stay in bed, where they are given specialized support, attentive assistance, and care with dignity and respect." 
+  },
+  { 
+    img: "/images/Rose.png", 
+    name: "St. Rose of Lima", 
+    shortTitle: "Women Living Independently with Assistance",
+    desc: "Women who are physically able and mobile, supported with the necessary resources, companionship, and guidance to live meaningful and fulfilling lives within a caring environment." 
+  },
+  { 
+    img: "/images/Gabriel.png", 
+    name: "St. Gabriel", 
+    shortTitle: "Men Living Independently with Assistance",
+    desc: "Men who are physically able and mobile, supported with opportunities, resources, and compassionate guidance to help them maintain independence and enjoy a dignified quality of life." 
+  },
+];
+
 
   const [current, setCurrent] = useState(1); // start with middle card
 
@@ -91,31 +117,28 @@ export default function Dashboard() {
       </div>
 
       {/* Houses Carousel */}
-      <h2 className="section-title">Houses</h2>
-      <div className="houses-carousel">
-        <button className="carousel-btn prev" onClick={prevSlide}>
-          &lt;
-        </button>
-        <div className="carousel-wrapper">
-          {houses.map((house, index) => {
-            let position = "side";
-            if (index === current) position = "center";
-            else if (index === prevIndex()) position = "left";
-            else if (index === nextIndex()) position = "right";
+    <h2 className="section-title">Houses</h2>
+    <div className="houses-carousel">
+      <button className="carousel-btn prev" onClick={prevSlide}> &lt; </button>
+      <div className="carousel-wrapper">
+      {houses.map((house, index) => {
+        let position = "side";
+        if (index === current) position = "center";
+        else if (index === prevIndex()) position = "left";
+        else if (index === nextIndex()) position = "right";
 
-            return (
-              <div key={house.name} className={`house-card ${position}`}>
-                <img src={house.img} alt={house.name} />
-                <h3>{house.name}</h3>
-                <p>{house.desc}</p>
-              </div>
-            );
-          })}
-        </div>
-        <button className="carousel-btn next" onClick={nextSlide}>
-          &gt;
-        </button>
+        return (
+          <div key={house.name} className={`house-card ${position}`}>
+            <img src={house.img} alt={house.name} />
+            <h3>{house.name}</h3>
+            <h4 className="house-short-title">{house.shortTitle}</h4>
+            <p className="house-desc">{house.desc}</p>
+          </div>
+        );
+      })}
       </div>
+      <button className="carousel-btn next" onClick={nextSlide}> &gt; </button>
+    </div>
     </div>
   );
 }
