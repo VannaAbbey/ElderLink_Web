@@ -10,6 +10,9 @@ import {
   doc,
   updateDoc,
   deleteDoc,
+  orderBy,
+  writeBatch,
+  onSnapshot
 } from "firebase/firestore";
 import "./schedule.css";
 import Navbar from "./navbar";
@@ -27,10 +30,20 @@ export default function Schedule() {
   const [customDuration, setCustomDuration] = useState("");
   const [showOverlay, setShowOverlay] = useState(false);
   const [pendingDuration, setPendingDuration] = useState(6);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   const [viewMode, setViewMode] = useState("current");
   const [activeHouseId, setActiveHouseId] = useState(null);
-  const [activeShift, setActiveShift] = useState("Morning");
+
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // 3-shift schedule definitions
+  const shiftDefs = [
+    { name: "1st Shift (6:00 AM - 2:00 PM)", key: "1st", time_range: { start: "06:00", end: "14:00" } },
+    { name: "2nd Shift (2:00 PM - 10:00 PM)", key: "2nd", time_range: { start: "14:00", end: "22:00" } },
+    { name: "3rd Shift (10:00 PM - 6:00 AM)", key: "3rd", time_range: { start: "22:00", end: "06:00" } },
+  ];
+  const [activeShift, setActiveShift] = useState(shiftDefs[0].key);
 
   const [currentVersion, setCurrentVersion] = useState(0);
 
@@ -89,6 +102,47 @@ export default function Schedule() {
     checkAutoReshuffle();
   }, [assignments]); // runs whenever assignments are loaded/updated
 
+    // inside your Schedule component
+  useEffect(() => {
+    // build the query to only get current schedules
+    const q = query(
+      collection(db, "cg_house_assign"),
+      where("is_current", "==", true)
+    );
+
+    // attach real-time listener
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      setAssignments(data); // 🔹 update state immediately
+    });
+
+    // cleanup listener on unmount
+    return () => unsubscribe();
+  }, []); // 👈 runs only once when component mounts
+
+  useEffect(() => {
+  if (viewMode === "history") {
+    const q = query(
+      collection(db, "cg_house_assign"),
+      where("is_current", "==", false)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      setAssignments(data);
+    });
+
+    return () => unsubscribe();
+  }
+}, [viewMode]);
 
   // --- Loaders ---
   const loadStaticData = async () => {
@@ -157,177 +211,205 @@ export default function Schedule() {
     return res;
   };
 
-  // --- Core distribution logic (fixed) ---
-  const distributeCaregivers = async (months) => {
-    // deactivate previous current assignments
-    const allAssignSnap = await getDocs(collection(db, "cg_house_assign"));
-    const deactivate = allAssignSnap.docs.map((d) =>
-      updateDoc(doc(db, "cg_house_assign", d.id), { is_current: false })
+    // helper to fetch each caregiver's last house
+  const getLastHouseMap = async () => {
+    const snap = await getDocs(
+      query(collection(db, "cg_house_assign"), orderBy("created_at", "desc"))
     );
-    await Promise.all(deactivate);
 
-    const prevVersion = await getMaxVersion();
-    const nextVersion = prevVersion + 1;
-
-    const start_date = Timestamp.now();
-    const end_date = Timestamp.fromDate(getEndDate(months));
-
-    // shuffle caregivers for fairness
-    const pool = [...caregivers];
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
-
-    const totalCgs = pool.length;
-    const housesCount = houses.length || 1;
-    const base = Math.floor(totalCgs / housesCount);
-    let remainder = totalCgs % housesCount;
-
-    const perHouseCounts = houses.map((h) => {
-      const add = remainder > 0 ? 1 : 0;
-      remainder = Math.max(0, remainder - 1);
-      const count = Math.max(1, base + add);
-      return { house: h, count };
+    const lastMap = {};
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (!lastMap[data.caregiver_id]) {
+        lastMap[data.caregiver_id] = data.house_id;
+      }
     });
+    return lastMap;
+  };
 
-    let poolIdx = 0;
-    const assignedCaregivers = new Set(); // ensure each cg assigned to only 1 house
+const distributeCaregivers = async (months) => {
+  // 🔹 1. Deactivate *only* current assignments
+  const allAssignSnap = await getDocs(
+    query(collection(db, "cg_house_assign"), where("is_current", "==", true))
+  );
 
-    // For each house: pick unique caregivers, then split them into morning/night groups.
-    for (const { house, count } of perHouseCounts) {
-      const selected = [];
-      while (selected.length < count && assignedCaregivers.size < pool.length) {
-        const cg = pool[poolIdx++ % pool.length];
-        if (!assignedCaregivers.has(cg.id)) {
-          selected.push(cg);
-          assignedCaregivers.add(cg.id);
+  let batch = writeBatch(db);
+  let writeCount = 0;
+  const BATCH_SIZE = 200; // smaller batch size for better responsiveness
+
+  for (const d of allAssignSnap.docs) {
+    batch.update(doc(db, "cg_house_assign", d.id), { is_current: false });
+    writeCount++;
+    if (writeCount >= BATCH_SIZE) {
+      await batch.commit();
+      await new Promise(r => setTimeout(r, 0)); // yield to event loop
+      batch = writeBatch(db);
+      writeCount = 0;
+    }
+  }
+  if (writeCount > 0) {
+    await batch.commit();
+    await new Promise(r => setTimeout(r, 0));
+    batch = writeBatch(db);
+    writeCount = 0;
+  }
+
+  // 🔹 2. Continue with versioning, weights, etc.
+  const prevVersion = await getMaxVersion();
+  const nextVersion = prevVersion + 1;
+  const start_date = Timestamp.now();
+  const end_date = Timestamp.fromDate(getEndDate(months));
+
+  // 🔹 3. House weights
+  const weights = {
+    H002: 2,
+    H003: 2,
+    H001: 1,
+    H004: 1,
+    H005: 1,
+  };
+
+  const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+
+  // 🔹 4. Caregivers per house
+  const caregiversPerHouse = {};
+  for (const house of houses) {
+    caregiversPerHouse[house.house_id] = Math.max(
+      1,
+      Math.floor((caregivers.length * weights[house.house_id]) / totalWeight)
+    );
+  }
+
+  // 🔹 5. Last house history
+  const lastHouseMap = await getLastHouseMap();
+
+  // 🔹 6. Shuffle caregivers
+  const pool = [...caregivers].sort(() => Math.random() - 0.5);
+
+  // 🔹 7. Assign caregivers
+  let poolIdx = 0;
+  const houseAssignments = {};
+  for (const house of houses) {
+    const count = caregiversPerHouse[house.house_id];
+    houseAssignments[house.house_id] = [];
+
+    for (let i = 0; i < count && poolIdx < pool.length; i++) {
+      const cg = pool[poolIdx];
+      if (lastHouseMap[cg.id] === house.house_id) {
+        pool.push(pool.splice(poolIdx, 1)[0]);
+        i--;
+        continue;
+      }
+      houseAssignments[house.house_id].push(cg);
+      poolIdx++;
+    }
+  }
+
+  // 🔹 8. Save new assignments (reusing batch + writeCount)
+  for (const house of houses) {
+    const assignedCGs = houseAssignments[house.house_id];
+    if (!assignedCGs.length) continue;
+
+    const shiftCaregivers = splitIntoChunks(assignedCGs, 3);
+    const houseElders = elderlyList.filter((e) => e.house_id === house.house_id) || [];
+
+    for (let s = 0; s < 3; s++) {
+      const cgInShift = shiftCaregivers[s];
+      if (!cgInShift.length) continue;
+
+      const elderChunks = splitIntoChunks(houseElders, cgInShift.length);
+
+      for (let i = 0; i < cgInShift.length; i++) {
+        const cg = cgInShift[i];
+        const shift = shiftDefs[s].key;
+        const time_range = shiftDefs[s].time_range;
+
+        // --- Balanced day assignment algorithm ---
+        // Track how many caregivers are assigned to each day in this shift
+        if (!houseAssignments[house.house_id + '_' + shift + '_dayCounts']) {
+          houseAssignments[house.house_id + '_' + shift + '_dayCounts'] = daysOfWeek.map(() => 0);
+        }
+        const dayCounts = houseAssignments[house.house_id + '_' + shift + '_dayCounts'];
+
+        // For each caregiver, pick 5 days with the lowest current counts
+        let dayIndexes = daysOfWeek.map((_, idx) => idx);
+        dayIndexes.sort((a, b) => dayCounts[a] - dayCounts[b] || Math.random() - 0.5); // break ties randomly
+        const selectedIndexes = dayIndexes.slice(0, 5);
+        const days_assigned = selectedIndexes.map(idx => daysOfWeek[idx]);
+        // Update counts
+        selectedIndexes.forEach(idx => dayCounts[idx]++);
+
+        const assignRef = doc(collection(db, "cg_house_assign"));
+        batch.set(assignRef, {
+          caregiver_id: cg.id,
+          house_id: house.house_id,
+          shift,
+          days_assigned,
+          start_date,
+          end_date,
+          time_range,
+          is_absent: false,
+          absent_at: null,
+          is_current: true,
+          version: nextVersion,
+          created_at: Timestamp.now(),
+        });
+        writeCount++;
+
+        // link elders
+        const eldersForThisCG = elderChunks[i] || [];
+        for (const elder of eldersForThisCG) {
+          const elderRef = doc(collection(db, "elderly_caregiver_assign"));
+          batch.set(elderRef, {
+            caregiver_id: cg.id,
+            elderly_id: elder.id,
+            assigned_at: Timestamp.now(),
+            assign_version: nextVersion,
+            assign_id: assignRef.id,
+            status: "active",
+          });
+          writeCount++;
+        }
+
+        if (writeCount >= 450) {
+          await batch.commit();
+          batch = writeBatch(db);
+          writeCount = 0;
         }
       }
-
-      // group into morning and night caregivers
-      const morningCount = Math.ceil(selected.length / 2);
-      const morningCaregivers = selected.slice(0, morningCount);
-      const nightCaregivers = selected.slice(morningCount);
-
-      // all elderly for this house (same for both shifts)
-      const houseElders = elderlyList.filter((e) => e.house_id === house.house_id) || [];
-
-      // split elders among morning caregivers only (each morning caregiver gets a subset)
-      const morningChunks = splitIntoChunks(houseElders, Math.max(1, morningCaregivers.length));
-      // split elders among night caregivers only (each night caregiver gets a subset)
-      const nightChunks = splitIntoChunks(houseElders, Math.max(1, nightCaregivers.length));
-
-      const createPromises = [];
-
-      // create assignments for morning caregivers (they share ALL elders among themselves)
-      for (let i = 0; i < morningCaregivers.length; i++) {
-        const cg = morningCaregivers[i];
-        const shift = "Morning";
-        const time_range = { start: "08:00", end: "17:00" };
-        const shuffledDays = [...daysOfWeek].sort(() => 0.5 - Math.random());
-        const days_assigned = shuffledDays.slice(0, 5);
-
-        const payload = {
-          caregiver_id: cg.id,
-          house_id: house.house_id,
-          shift,
-          days_assigned,
-          start_date,
-          end_date,
-          time_range,
-          is_absent: false,
-          absent_at: null,
-          is_current: true,
-          version: nextVersion,
-          created_at: Timestamp.now(),
-        };
-
-        // create cg_house_assign and elderly_caregiver_assign entries for this chunk
-        const p = addDoc(collection(db, "cg_house_assign"), payload).then(async (ref) => {
-          const chunkElders = morningChunks[i] || [];
-          const eaPromises = (chunkElders || []).map((elder) =>
-            addDoc(collection(db, "elderly_caregiver_assign"), {
-              caregiver_id: cg.id,
-              elderly_id: elder.id,
-              assigned_at: Timestamp.now(),
-              assign_version: nextVersion,
-              assign_id: ref.id,
-              status: "active",
-            })
-          );
-          await Promise.all(eaPromises);
-        });
-
-        createPromises.push(p);
-      }
-
-      // create assignments for night caregivers (they also share ALL elders among themselves)
-      for (let i = 0; i < nightCaregivers.length; i++) {
-        const cg = nightCaregivers[i];
-        const shift = "Night";
-        const time_range = { start: "17:00", end: "08:00" };
-        const shuffledDays = [...daysOfWeek].sort(() => 0.5 - Math.random());
-        const days_assigned = shuffledDays.slice(0, 5);
-
-        const payload = {
-          caregiver_id: cg.id,
-          house_id: house.house_id,
-          shift,
-          days_assigned,
-          start_date,
-          end_date,
-          time_range,
-          is_absent: false,
-          absent_at: null,
-          is_current: true,
-          version: nextVersion,
-          created_at: Timestamp.now(),
-        };
-
-        const p = addDoc(collection(db, "cg_house_assign"), payload).then(async (ref) => {
-          const chunkElders = nightChunks[i] || [];
-          const eaPromises = (chunkElders || []).map((elder) =>
-            addDoc(collection(db, "elderly_caregiver_assign"), {
-              caregiver_id: cg.id,
-              elderly_id: elder.id,
-              assigned_at: Timestamp.now(),
-              assign_version: nextVersion,
-              assign_id: ref.id,
-              status: "active",
-            })
-          );
-          await Promise.all(eaPromises);
-        });
-
-        createPromises.push(p);
-      }
-
-      await Promise.all(createPromises);
     }
+  }
 
-    // activity log
-    await addDoc(collection(db, "activity_logs"), {
-      action: "Generate Schedule",
-      version: nextVersion,
-      time: Timestamp.now(),
-      created_by: "system",
-      details: { duration_months: months },
-    });
+  if (writeCount > 0) {
+    await batch.commit();
+  }
 
-    // reload data
-    await loadAllAssignments();
-    await loadAllElderlyAssigns();
-    await loadTempReassigns();
-
-    setCurrentVersion(nextVersion);
-    return true;
-  };
+  // 🔹 9. Activity log
+  await addDoc(collection(db, "activity_logs"), {
+    action: "Generate Schedule",
+    version: nextVersion,
+    time: Timestamp.now(),
+    created_by: "system",
+    details: { duration_months: months },
+  });
+};
 
   const confirmGenerate = async () => {
+    setIsGenerating(true); // Show loading spinner immediately
     setShowOverlay(false);
-    await distributeCaregivers(pendingDuration);
+    try {
+      await distributeCaregivers(pendingDuration);
+      setShowSuccess(true);
+    } catch (err) {
+      console.error("Error generating schedule:", err);
+      alert("Something went wrong. Please try again.");
+    } finally {
+      setIsGenerating(false); // Hide loading overlay
+    }
   };
+
+  const closeSuccess = () => setShowSuccess(false);
+
 
   const cancelGenerate = () => setShowOverlay(false);
 
@@ -550,20 +632,52 @@ export default function Schedule() {
     await loadAllAssignments();
   };
 
+  // Clear schedule handler: deletes all docs in cg_house_assign and elderly_caregiver_assign
+  const handleClearSchedule = async () => {
+    if (!window.confirm("Are you sure you want to clear the generated schedule? This will delete all assignments in the database, but not affect the table UI.")) return;
+    // Delete all docs in cg_house_assign
+    const cgSnap = await getDocs(collection(db, "cg_house_assign"));
+    const cgDeletes = cgSnap.docs.map((d) => deleteDoc(doc(db, "cg_house_assign", d.id)));
+    // Delete all docs in elderly_caregiver_assign
+    const eaSnap = await getDocs(collection(db, "elderly_caregiver_assign"));
+    const eaDeletes = eaSnap.docs.map((d) => deleteDoc(doc(db, "elderly_caregiver_assign", d.id)));
+    await Promise.all([...cgDeletes, ...eaDeletes]);
+    // Optionally reload assignments
+    await loadAllAssignments();
+    await loadAllElderlyAssigns();
+    alert("Schedule cleared from database.");
+  };
 
+  // Sort houses by house_id (H001 to H005)
+  const sortedHouses = [...houses].sort((a, b) => {
+    // Extract numeric part for comparison
+    const numA = parseInt(a.house_id.replace(/\D/g, ""), 10);
+    const numB = parseInt(b.house_id.replace(/\D/g, ""), 10);
+    return numA - numB;
+  });
 
   return (
     <div className="schedule-page">
 
       <Navbar /> {/* Always on top */}
     <main className="schedule-container">
-      
 
       <h2 className="page-title">Caregiver Scheduling</h2>
 
       <div style={{ marginBottom: 12 }}>
-        <button onClick={() => { setViewMode("current"); }} className={viewMode === "current" ? "active" : ""}>Current Schedule</button>
-        <button onClick={() => { setViewMode("previous"); }} className={viewMode === "previous" ? "active" : ""} style={{ marginLeft: 8 }}>Previous Schedules</button>
+        <button
+          onClick={() => { setViewMode("current"); }}
+          className={viewMode === "current" ? "active" : ""}
+        >
+          Current Schedule
+        </button>
+        <button
+          onClick={() => { setViewMode("previous"); }}
+          className={viewMode === "previous" ? "active" : ""}
+          style={{ marginLeft: 8 }}
+        >
+          Caregiver Schedule History
+        </button>
       </div>
 
       <div className="control-panel">
@@ -588,6 +702,7 @@ export default function Schedule() {
           }}
         />
         <button onClick={handleGenerateClick}>Generate Schedule</button>
+        <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
       </div>
 
       {showOverlay && (
@@ -600,8 +715,26 @@ export default function Schedule() {
         </div>
       )}
 
+      {isGenerating && (
+        <div className="popup-overlay">
+          <div className="popup-card">
+            <div className="loading-spinner"></div>
+            <p>Generating Schedule... Please wait</p>
+          </div>
+        </div>
+      )}
+
+      {showSuccess && (
+        <div className="overlay">
+          <div className="overlay-content">
+            <p>Generation of Schedule is <b>Successful!</b></p>
+            <button onClick={closeSuccess}>OK</button>
+          </div>
+        </div>
+      )}
+
       <div className="house-tabs">
-        {houses.map((h) => (
+        {sortedHouses.map((h) => (
           <button key={h.house_id} className={`house-tab ${activeHouseId === h.house_id ? "active" : ""}`} onClick={() => setActiveHouseId(h.house_id)}>
             {h.house_name}
           </button>
@@ -610,8 +743,8 @@ export default function Schedule() {
 
       <div className="table-container">
         <div className="shift-tabs">
-          {["Morning", "Night"].map((s) => (
-            <button key={s} className={`shift-tab ${activeShift === s ? "active-shift" : ""}`} onClick={() => setActiveShift(s)}>{s}</button>
+          {shiftDefs.map((s) => (
+            <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)}>{s.name}</button>
           ))}
         </div>
 
@@ -628,11 +761,16 @@ export default function Schedule() {
           <tbody>
             {filteredAssignments.map((a) => {
               const isAbsent = !!a.is_absent;
-              const elders = getDisplayedEldersFor(a.caregiver_id);
+              let elders = getDisplayedEldersFor(a.caregiver_id);
+              elders = elders.slice().sort((e1, e2) => {
+                const n1 = `${e1.elderly_fname} ${e1.elderly_lname}`.toLowerCase();
+                const n2 = `${e2.elderly_fname} ${e2.elderly_lname}`.toLowerCase();
+                return n1.localeCompare(n2);
+              });
               return (
                 <tr key={a.id} className={isAbsent ? "absent-row" : ""}>
                   <td>{caregiverName(a.caregiver_id)}</td>
-                  <td>{(a.days_assigned || []).join(", ")}</td>
+                  <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
                   <td>{a.time_range?.start} - {a.time_range?.end}</td>
                   <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
                   <td>
