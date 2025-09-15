@@ -21,6 +21,9 @@ import Schedule from "./pages/Schedule";
 import Accounts from "./pages/accounts";
 import EditAdminProfile from "./pages/edit_admin_profile";
 import EditElderlyProfile from "./pages/edit_elderly_profile";
+import EditCaregiverOverlay from "./pages/edit_cg_overlay"; // ✅ added
+import EditNurseOverlay from "./pages/edit_nurse_overlay"; // ✅ added
+
 
 // --- ProtectedRoute Component ---
 function ProtectedRoute({ user, children }) {
@@ -158,6 +161,10 @@ export default function App() {
         />
 
           <Route path="/edit_elderly_profile/:id" element={<EditElderlyProfile />} /> {/* ✅ new route */}
+                <Route path="/edit_caregiver_overlay/:id" element={<EditCaregiverOverlay />} /> {/* ✅ added */}
+                      <Route path="/edit_nurse_overlay/:id" element={<EditNurseOverlay />} /> {/* ✅ added */}
+                
+
 
 
         {/* Fallback Route */}

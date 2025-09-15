@@ -22,6 +22,7 @@ export default function EditElderlyOverlay({ elderId, onClose, onUpdate }) {
 
   useEffect(() => {
     if (!elderId) return;
+
     const fetchData = async () => {
       const docRef = doc(db, "elderly", elderId);
       const snap = await getDoc(docRef);
@@ -31,6 +32,7 @@ export default function EditElderlyOverlay({ elderId, onClose, onUpdate }) {
         setPreviewImage(data.elderly_profilePic || "");
       }
     };
+
     fetchData();
   }, [elderId]);
 
@@ -60,12 +62,23 @@ export default function EditElderlyOverlay({ elderId, onClose, onUpdate }) {
       const docRef = doc(db, "elderly", elderId);
       await updateDoc(docRef, { ...formData, elderly_profilePic: uploadedImageUrl });
 
-      onUpdate(); // refresh list
-      onClose(); // close modal
+      onUpdate();
+      onClose();
     } catch (err) {
       console.error("Error updating elderly:", err);
     }
   };
+
+  const fieldLabels = {
+    elderly_fname: "First Name",
+    elderly_lname: "Last Name",
+    elderly_bday: "Birthday",
+    elderly_age: "Age",
+    elderly_dietNotes: "Diet Notes",
+    elderly_condition: "Medical Condition",
+  };
+
+  const textFields = ["elderly_fname", "elderly_lname", "elderly_bday", "elderly_age", "elderly_dietNotes", "elderly_condition"];
 
   return (
     <div className="overlay">
@@ -92,18 +105,23 @@ export default function EditElderlyOverlay({ elderId, onClose, onUpdate }) {
         </div>
 
         {/* Form Fields */}
-        {["elderly_fname", "elderly_lname", "elderly_bday", "elderly_age", "elderly_dietNotes", "elderly_condition"].map((field) => (
+        {textFields.map((field) => (
           <div className="form-group" key={field}>
-            <label>{field.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</label>
+            <label>{fieldLabels[field]}</label>
             <input
               type={field === "elderly_age" ? "number" : field === "elderly_bday" ? "date" : "text"}
               name={field}
-              value={field === "elderly_bday" && formData[field]?.toDate ? formData[field].toDate().toISOString().split("T")[0] : formData[field] || ""}
+              value={
+                field === "elderly_bday" && formData[field]?.toDate
+                  ? formData[field].toDate().toISOString().split("T")[0]
+                  : formData[field] || ""
+              }
               onChange={handleChange}
             />
           </div>
         ))}
 
+        {/* Select Fields */}
         <div className="form-group">
           <label>Sex</label>
           <select name="elderly_sex" value={formData.elderly_sex} onChange={handleChange}>

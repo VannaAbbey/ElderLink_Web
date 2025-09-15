@@ -4,6 +4,9 @@ import { FaUserNurse, FaUserCircle } from "react-icons/fa"; // nurse + user icon
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import "./edit_nurse_profile.css";
+import EditNurseOverlay from "./edit_nurse_overlay.jsx";
+
+
 
 export default function EditNurseProfile() {
   const navigate = useNavigate();
@@ -11,6 +14,8 @@ export default function EditNurseProfile() {
   const [nurses, setNurses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortAsc, setSortAsc] = useState(true);
+  const [editNurseId, setEditNurseId] = useState(null);
+
 
   // Fetch nurses from Firestore
   useEffect(() => {
@@ -50,6 +55,8 @@ export default function EditNurseProfile() {
     navigate(`/profileNurse/${id}`);
   };
 
+  const totalNurses = nurses.length;
+
   return (
     <div className="nurse-list-container">
       {/* Header */}
@@ -59,6 +66,9 @@ export default function EditNurseProfile() {
           <h1 className="header-title">Nurses</h1>
         </div>
       </div>
+      <div className="header-title-wrapper">
+          <span className="total-nurse"> Total Number of Nurses: {totalNurses}</span>
+        </div>
 
       {/* Search + Sort */}
       <div className="search-sort-row">
@@ -91,6 +101,7 @@ export default function EditNurseProfile() {
                 <th></th>
                 <th>Full Name</th>
                 <th>Email</th>
+                <th className="action-th">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -106,11 +117,32 @@ export default function EditNurseProfile() {
                   </td>
                   <td>{`${nurse.user_fname} ${nurse.user_lname}`}</td>
                   <td>{nurse.user_email || "N/A"}</td>
+                  <td
+    className="action-cell"
+    onClick={(e) => {
+      e.stopPropagation();
+      setEditNurseId(nurse.id); // ✅ open overlay only
+    }}
+    title="Edit"
+  >
+    <span className="pencil-icon">✎</span>
+  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          
         )}
+        {editNurseId && (
+  <EditNurseOverlay
+    nurseId={editNurseId}     // pass the nurse id
+    onClose={() => setEditNurseId(null)} // close overlay
+    onUpdate={() => {
+      // refresh nurses list if needed
+      setEditNurseId(null);
+    }}
+  />
+)}
       </div>
     </div>
   );

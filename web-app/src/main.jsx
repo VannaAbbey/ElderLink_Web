@@ -19,6 +19,8 @@ import Schedule from "./pages/schedule.jsx";
 import Accounts from "./pages/accounts.jsx";
 import EditAdminProfile from "./pages/edit_admin_profile.jsx";
 import EditElderlyProfile from "./pages/edit_elderly_profile";
+import EditCaregiverOverlay from "./pages/edit_cg_overlay"; // ✅ added
+import EditNurseOverlay from "./pages/edit_nurse_overlay"; // ✅ added
 
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -42,6 +44,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <Route path="/schedule" element={<Schedule />} />
       <Route path="/accounts" element={<Accounts />} />
       <Route path="/edit_elderly_profile/:id" element={<EditElderlyProfile />} />
+      <Route path="/edit_caregiver_overlay/:id" element={<EditCaregiverOverlay />} /> {/* ✅ added */}
+      <Route path="/edit_nurse_overlay/:id" element={<EditNurseOverlay />} /> {/* ✅ added */}
+
+
       
 
     </Routes>
