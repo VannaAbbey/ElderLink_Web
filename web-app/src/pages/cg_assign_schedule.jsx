@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
-import { db } from "../firebase"; // adjust path if needed
+import { db } from "../firebase"; 
 
 export default function CgAssignSchedule() {
   const [assignments, setAssignments] = useState([]);

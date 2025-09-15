@@ -98,11 +98,19 @@
   background-color: #fff;
   padding: 30px;
   border-radius: 12px;
-  width: 500px;
-  max-width: 90%;
+  width: 90%;
+  max-width: 500px;
   position: relative;
   box-shadow: 0 4px 12px rgba(0, 88, 142, 0.3);
+  box-sizing: border-box;
 }
+
+.overlay h2 {
+  margin-top: 0;
+  color: #00588E;
+  text-align: center;
+}
+
 
 .overlay-close {
   position: absolute;
@@ -178,4 +186,17 @@
 .overlay-buttons button:last-child {
   background-color: #ccc;
   color: #333;
+}
+
+/* Make overlay content scrollable without visible scrollbar */
+.overlay-content {
+  max-height: 80vh;       /* Limit height so it scrolls if content is taller */
+  overflow-y: auto;       /* Enable vertical scrolling */
+  scrollbar-width: none;  /* Firefox */
+  -ms-overflow-style: none;  /* IE 10+ */
+}
+
+/* Chrome, Safari, Edge */
+.overlay-content::-webkit-scrollbar {
+  display: none;
 }

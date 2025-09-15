@@ -128,19 +128,19 @@ export default function ProfileNurse() {
         <div className="nurse-details">
           <p className="detail-item">
             <FaUser className="icon" />
-            <strong>Full Name: </strong> {nurse.user_fname} {nurse.user_lname}
+            <strong>Full Name: </strong> &nbsp; {nurse.user_fname} {nurse.user_lname}
           </p>
           <p className="detail-item">
             <MdCake className="icon" />
-            <strong>Birth Date: </strong> {formatDateInput(nurse.user_bday)}
+            <strong>Birth Date: </strong> &nbsp;{formatDateInput(nurse.user_bday)}
           </p>
           <p className="detail-item">
             <FaPhone className="icon" />
-            <strong>Contact Number (+63): </strong> {nurse.user_contactNum || "N/A"}
+            <strong>Contact Number (+63): </strong> &nbsp; {nurse.user_contactNum || "N/A"}
           </p>
           <p className="detail-item">
             <FaEnvelope className="icon" />
-            <strong>Email: </strong> {nurse.user_email}
+            <strong>Email: </strong> &nbsp; {nurse.user_email}
           </p>
         </div>
       </div>

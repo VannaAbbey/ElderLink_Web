@@ -1,4 +1,4 @@
-/* -------------------- Dashboard Container -------------------- */
+/* --- Dashboard Container --- */
 .dashboard-container {
   min-height: 100vh;
   font-family: 'Poppins', sans-serif;
@@ -8,7 +8,7 @@
   background-color: #F2FDFF;
 }
 
-/* -------------------- Section Titles -------------------- */
+/* --- Section Titles --- */
 .section-title {
   font-size: 1.1rem;
   font-weight: 600;
@@ -17,7 +17,7 @@
   max-width: 1100px;
 }
 
-/* -------------------- Overview Cards -------------------- */
+/* --- Overview Cards --- */
 .overview-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -52,36 +52,24 @@
   font-weight: 700;
 }
 
-/* -------------------- Graces Gallery -------------------- */
+/* --- Graces Gallery --- */
 .graces-gallery-container {
   position: relative;
   width: 100%;
   display: flex;
   justify-content: center;
-  margin: 0 0 50px;
+  margin: 0 50px;
+  margin-bottom: 30px;
 }
 
 .graces-gallery-container .gallery-wrapper {
   position: relative;
-  z-index: 2; /* keep card above blue strip */
-  width: 80%;
-  height: 30vh;
+  z-index: 2;
+  width: 100%;
+  height: 35vh;
   overflow: hidden;
   background: #fff;
-  border-radius: 12px;
   box-shadow: 10px 10px 30px rgba(0,0,0,0.1);
-}
-
-.graces-gallery-container::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 100%;
-  height: 40%; /* strip shorter than wrapper */
-  background: #00588E;
-  transform: translateY(-50%);
-  z-index: 1;
 }
 
 .graces-gallery-container .gallery-wrapper-holder {
@@ -101,7 +89,7 @@
   transition: all 0.5s ease;
 }
 
-/* Individual Slides */
+/* Individual Slides Images */
 #slider-img-1 { background-image: url(/images/GracesGallery/slider1.jpg); }
 #slider-img-2 { background-image: url(/images/GracesGallery/slider2.jpg); }
 #slider-img-3 { background-image: url(/images/GracesGallery/slider3.jpg); }
@@ -118,55 +106,58 @@
   100% { transform: translateX(-500%); }
 }
 
-/* -------------------- Houses Carousel -------------------- */
+/* --- Houses Carousel --- */
 .houses-carousel {
   position: relative;
   width: 100%;
   max-width: 1200px;
   margin-bottom: 50px;
-  overflow: visible;       /* allow cards to expand naturally */
-  height: auto;            /* auto height instead of fixed */
-  min-height: 400px;       /* keep baseline so cards don’t shrink too much */
+  overflow: visible;
+  height: auto;
+  min-height: 400px;
 }
 
 .carousel-wrapper {
   position: relative;
   width: 100%;
-  height: auto;            /* adapt to tallest card */
+  height: auto;
 }
 
 .house-card {
-  position: absolute; /* stack them */
+  position: absolute;
   top: 0;
   left: 50%;
   width: 280px;
-  height: auto;             /* grow with content */
-  min-height: 400px;        /* default baseline */
+  height: auto; 
+  min-height: 400px; 
   transform: translateX(-50%) scale(0.8);
   transition: transform 0.6s ease-in-out, opacity 0.6s ease-in-out;
   opacity: 0.5;
   background: #fff;
   border-radius: 12px;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.35);
   text-align: center;
   z-index: 1;
   pointer-events: none;
-  padding-bottom: 20px;     /* more breathing room for text */
+  padding-bottom: 20px;
 }
 
 .house-card.center {
   transform: translateX(-50%) scale(1);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.35);
   opacity: 1;
   z-index: 3;
 }
 
 .house-card.left {
   transform: translateX(-150%) scale(0.9);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.35);
   z-index: 2;
 }
 
 .house-card.right {
   transform: translateX(50%) scale(0.9);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.35);
   z-index: 2;
 }
 
@@ -181,7 +172,7 @@
   background: #f9f9f9;
 }
 
-/* House Titles & Descriptions */
+/* --- House Titles & Descriptions --- */
 .house-card h3 {
   font-size: 1.1rem;
   font-weight: 700;
@@ -197,17 +188,17 @@
 }
 
 .house-card p.house-desc {
-  font-size: 0.9rem;      /* slightly larger for readability */
+  font-size: 0.9rem; 
   color: #444;
   line-height: 1.4;
   padding: 0 12px;
-  white-space: normal;    /* allow wrapping */
-  overflow: visible;      /* don’t cut text */
-  text-overflow: unset;   /* disable ellipsis */
+  white-space: normal; 
+  overflow: visible; 
+  text-overflow: unset; 
   text-align: justify;
 }
 
-/* Carousel Buttons */
+/* --- Carousel Buttons --- */
 .carousel-btn {
   background-color: #1e3a8a;
   color: #fff;
@@ -238,11 +229,26 @@
   z-index: 10;
 }
 
-/* Disable hover transformations on house-card */
+/* --- Disable Hover for House --- */
 .house-card:hover {
   transform: inherit;
   opacity: inherit;
   box-shadow: 0 4px 15px rgba(0,0,0,0.15);
 }
 
+.section-title {
+  display: flex;
+  align-items: center;
+  font-size: 1.5rem;
+  color: #333;
+  width: 100%;
+}
 
+.section-title::after {
+  content: "";
+  flex-grow: 1;
+  height: 2px;
+  background-color: #00436B;
+  margin-left: 15px;
+  border-radius: 2px;
+}

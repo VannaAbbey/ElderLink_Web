@@ -128,22 +128,6 @@ export default function Navbar() {
                     >
                       Edit Profile
                     </li>
-                    <li
-                      onClick={() => {
-                        navigate("/settings");
-                        setMenuOpen(false);
-                      }}
-                    >
-                      Settings
-                    </li>
-                    <li
-                      onClick={() => {
-                        navigate("/help-support");
-                        setMenuOpen(false);
-                      }}
-                    >
-                      Help & Support
-                    </li>
                     <li onClick={handleLogout} className="logout-item">
                       Logout
                     </li>
@@ -209,8 +193,6 @@ export default function Navbar() {
             {dropdownOpen && (
               <ul className="dropdown-menu">
                 <li onClick={() => navigate("/edit_admin_profile")}>Edit Profile</li>
-                <li onClick={() => navigate("/settings")}>Settings</li>
-                <li onClick={() => navigate("/help-support")}>Help & Support</li>
                 <li onClick={handleLogout} className="logout-item">Logout</li>
               </ul>
             )}

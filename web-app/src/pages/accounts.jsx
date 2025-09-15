@@ -5,7 +5,7 @@ import EditNurseProfile from "./edit_nurse_profile";
 import "./accounts.css"; 
 
 export default function Accounts() {
-  const [activeTab, setActiveTab] = useState("caregiver"); // default tab
+  const [activeTab, setActiveTab] = useState("caregiver");
 
   return (
     <div>
@@ -16,18 +16,12 @@ export default function Accounts() {
 
         {/* --- Tabs --- */}
         <div className="accounts-tabs">
-          <button
-            onClick={() => setActiveTab("caregiver")}
-            className={`accounts-tab ${activeTab === "caregiver" ? "active" : ""}`}
-          >
-            Caregivers
+          <button onClick={() => setActiveTab("caregiver")}
+            className={`accounts-tab ${activeTab === "caregiver" ? "active" : ""}`}> Caregivers
           </button>
 
-          <button
-            onClick={() => setActiveTab("nurse")}
-            className={`accounts-tab ${activeTab === "nurse" ? "active" : ""}`}
-          >
-            Nurses
+          <button onClick={() => setActiveTab("nurse")}
+            className={`accounts-tab ${activeTab === "nurse" ? "active" : ""}`}> Nurses
           </button>
         </div>
 

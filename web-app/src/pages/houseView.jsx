@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MdArrowBack } from "react-icons/md";
 import { FaHeartbeat, FaUserSlash, FaUserCircle } from "react-icons/fa";
-import { IoMdArrowDropdown } from "react-icons/io";
 import {
   collection,
   getDocs,
@@ -13,8 +12,7 @@ import {
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import "./elderlyManagement.css";
-import EditElderlyOverlay from "./edit_elderly_profile"; // ✅ import overlay
-
+import EditElderlyOverlay from "./edit_elderly_profile";
 
 export default function HouseView({ houseId: propHouseId }) {
   const { houseId: paramHouseId } = useParams();
@@ -90,22 +88,29 @@ const [editElderlyId, setEditElderlyId] = useState(null);
   const elderlyInHouse = elderlyList.filter((e) => e.house_id === houseId);
 
   // Filtered + Sorted Elderly
-  const filteredElderly = elderlyInHouse
-    .filter((e) =>
-      `${e.elderly_fname} ${e.elderly_lname}`
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase())
-    )
-    .filter((e) => {
-      if (activeTab === "Alive") return e.elderly_status === "Alive";
-      if (activeTab === "Deceased") return e.elderly_status === "Deceased";
-      return true;
-    })
-    .sort((a, b) => {
-      const nameA = `${a.elderly_fname} ${a.elderly_lname}`.toLowerCase();
-      const nameB = `${b.elderly_fname} ${b.elderly_lname}`.toLowerCase();
-      return sortAsc ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
-    });
+const filteredElderly = elderlyInHouse
+  .filter((e) => {
+    const searchable = `
+      ${e.elderly_fname || ""} 
+      ${e.elderly_lname || ""} 
+      ${e.elderly_age || ""} 
+      ${e.elderly_mobilityStatus || ""} 
+      ${e.elderly_dietNotes || ""} 
+      ${e.elderly_condition || ""}
+    `.toLowerCase();
+
+    return searchable.includes(searchTerm.toLowerCase());
+  })
+  .filter((e) => {
+    if (activeTab === "Alive") return e.elderly_status === "Alive";
+    if (activeTab === "Deceased") return e.elderly_status === "Deceased";
+    return true;
+  })
+  .sort((a, b) => {
+    const nameA = `${a.elderly_fname} ${a.elderly_lname}`.toLowerCase();
+    const nameB = `${b.elderly_fname} ${b.elderly_lname}`.toLowerCase();
+    return sortAsc ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+  });
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -234,19 +239,14 @@ const [editElderlyId, setEditElderlyId] = useState(null);
     setSelectedElderly([]);
   };
 
+  const totalElderlyInHouse = elderlyList.filter(
+    (e) => e.house_id === houseId && e.elderly_status === "Alive"
+  ).length;
+
   return (
   <div className="elderly-profile-container wide-layout">
   {/* Header */}
   <div className="elderly-profile-header">
-    {!propHouseId && (
-      <button
-        className="back-btn"
-        onClick={() => navigate("/elderlyManagement")}
-      >
-        <MdArrowBack size={20} /> Back
-      </button>
-    )}
-
     <div className="header-house">
   <div className="header-top">
     <img
@@ -259,10 +259,11 @@ const [editElderlyId, setEditElderlyId] = useState(null);
   <p className="house-shortTitle">
     {houseShortTitles[houseId] || "No short title available."}
   </p>
+  <div className="header-title-wrapper">
+    <span className="total-elderly"> Total Number of Alive Elderly: {totalElderlyInHouse}</span>
+  </div>
 </div>
   </div>
-
-
 
       {/* Search & Sort */}
       <div className="search-sort-row">
@@ -278,7 +279,7 @@ const [editElderlyId, setEditElderlyId] = useState(null);
             className="sort-button"
             onClick={() => setSortAsc((prev) => !prev)}
           >
-            Sort {sortAsc ? "(A-Z) ▲" : "(Z-A) ▼"} <IoMdArrowDropdown size={20} />
+            Sort {sortAsc ? "(A-Z) ▲" : "(Z-A) ▼"}
           </button>
           {activeTab === "Alive" && (
             <button
@@ -404,7 +405,7 @@ const [editElderlyId, setEditElderlyId] = useState(null);
 
       </div>
 
-      {/* Add Elderly Modal */}
+            {/* Add Elderly Modal */}
       {showOverlay && (
         <div className="overlay">
           <div className="overlay-content">
@@ -519,14 +520,68 @@ const [editElderlyId, setEditElderlyId] = useState(null);
         </div>
       )}
 
-      {/* Switch House Modal */}
+      {/* Floating Select Panel */}
       {showSelectPanel && (
+        <div className="select-panel">
+          <div className="select-panel-header">
+            <strong>Switch House</strong>
+            <button className="select-panel-close" onClick={closeSelectPanel}>
+              ✕
+            </button>
+          </div>
+
+          <div className="select-panel-note">
+            Please select the elderly you want to allocate or change house.
+          </div>
+
+          <div className="selected-list-compact">
+            {selectedElderly.length === 0 ? (
+              <div className="no-selected">No elderly selected yet.</div>
+            ) : (
+              <ul>
+                {elderlyList
+                  .filter((e) => selectedElderly.includes(e.id))
+                  .map((e) => (
+                    <li key={e.id}>
+                      {e.elderly_fname} {e.elderly_lname}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="select-panel-actions">
+            <button
+              className="done-btn"
+              onClick={() => {
+                if (selectedElderly.length === 0) {
+                  alert("Please select at least one elderly.");
+                  return;
+                }
+                setShowAllocateModal(true);
+                setShowSelectPanel(false);
+              }}
+            >
+              Done
+            </button>
+            <button className="cancel-btn" onClick={closeSelectPanel}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Allocate Modal */}
+      {showAllocateModal && (
         <div className="overlay">
           <div className="overlay-content">
-            <span className="overlay-close" onClick={closeSelectPanel}>
+            <span
+              className="overlay-close"
+              onClick={() => setShowAllocateModal(false)}
+            >
               ✖
             </span>
-            <h2 className="overlay-header">Switch House</h2>
+            <h2 className="overlay-header">Allocate to New House</h2>
 
             <div className="form-group">
               <label>New House</label>
@@ -557,7 +612,10 @@ const [editElderlyId, setEditElderlyId] = useState(null);
               <button className="save-btn" onClick={confirmAllocation}>
                 Confirm
               </button>
-              <button className="cancel-btn" onClick={closeSelectPanel}>
+              <button
+                className="cancel-btn"
+                onClick={() => setShowAllocateModal(false)}
+              >
                 Cancel
               </button>
             </div>

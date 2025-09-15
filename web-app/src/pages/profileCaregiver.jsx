@@ -128,19 +128,19 @@ export default function ProfileCaregiver() {
         <div className="caregiver-details">
           <p className="detail-item">
             <FaUser className="icon" />
-            <strong>Full Name: </strong> {caregiver.user_fname} {caregiver.user_lname}
+            <strong>Full Name: </strong> &nbsp; {caregiver.user_fname} {caregiver.user_lname}
           </p>
           <p className="detail-item">
             <MdCake className="icon" />
-            <strong>Birth Date: </strong> {formatDateInput(caregiver.user_bday)}
+            <strong>Birth Date: </strong> &nbsp; {formatDateInput(caregiver.user_bday)}
           </p>
           <p className="detail-item">
             <FaPhone className="icon" />
-            <strong>Contact Number (+63): </strong> {caregiver.user_contactNum || "N/A"}
+            <strong>Contact Number (+63): </strong> &nbsp; {caregiver.user_contactNum || "N/A"}
           </p>
           <p className="detail-item">
             <FaEnvelope className="icon" />
-            <strong>Email: </strong> {caregiver.user_email}
+            <strong>Email: </strong> &nbsp; {caregiver.user_email}
           </p>
         </div>
       </div>
