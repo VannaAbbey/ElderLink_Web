@@ -359,7 +359,7 @@ const distributeCaregivers = async (months) => {
         // link elders
         const eldersForThisCG = elderChunks[i] || [];
         for (const elder of eldersForThisCG) {
-          const elderRef = doc(collection(db, ""));
+          const elderRef = doc(collection(db, "elderly_caregiver_assign"));
           batch.set(elderRef, {
             caregiver_id: cg.id,
             elderly_id: elder.id,
@@ -639,8 +639,8 @@ const distributeCaregivers = async (months) => {
     const cgSnap = await getDocs(collection(db, "cg_house_assign"));
     const cgDeletes = cgSnap.docs.map((d) => deleteDoc(doc(db, "cg_house_assign", d.id)));
     // Delete all docs in elderly_caregiver_assign
-    const eaSnap = await getDocs(collection(db, ""));
-    const eaDeletes = eaSnap.docs.map((d) => deleteDoc(doc(db, "", d.id)));
+    const eaSnap = await getDocs(collection(db, "elderly_caregiver_assign"));
+    const eaDeletes = eaSnap.docs.map((d) => deleteDoc(doc(db, "elderly_caregiver_assign", d.id)));
     await Promise.all([...cgDeletes, ...eaDeletes]);
     // Optionally reload assignments
     await loadAllAssignments();
