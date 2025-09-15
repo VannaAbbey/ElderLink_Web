@@ -20,6 +20,7 @@ import Notifications from "./pages/Notifications";
 import Schedule from "./pages/Schedule";
 import Accounts from "./pages/accounts";
 import EditAdminProfile from "./pages/edit_admin_profile";
+import EditElderlyProfile from "./pages/edit_elderly_profile";
 
 // --- ProtectedRoute Component ---
 function ProtectedRoute({ user, children }) {
@@ -155,6 +156,9 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+          <Route path="/edit_elderly_profile/:id" element={<EditElderlyProfile />} /> {/* ✅ new route */}
+
 
         {/* Fallback Route */}
         <Route

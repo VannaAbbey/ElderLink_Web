@@ -13,6 +13,8 @@ import {
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import "./elderlyManagement.css";
+import EditElderlyOverlay from "./edit_elderly_profile"; // ✅ import overlay
+
 
 export default function HouseView({ houseId: propHouseId }) {
   const { houseId: paramHouseId } = useParams();
@@ -58,6 +60,18 @@ export default function HouseView({ houseId: propHouseId }) {
     H004: "House of St. Rose of Lima",
     H005: "House of St. Gabriel",
   };
+
+  const houseShortTitles = {
+  H001: "Women Receiving Psychological Support",
+  H002: "Women Requiring Full-Time Bed Care",
+  H003: "Men Requiring Full-Time Bed Care",
+  H004: "Women Living Independently with Assistance",
+  H005: "Men Living Independently with Assistance",
+};
+
+
+const [editElderlyId, setEditElderlyId] = useState(null);
+
 
   useEffect(() => {
     const fetchElderly = async () => {
@@ -221,26 +235,34 @@ export default function HouseView({ houseId: propHouseId }) {
   };
 
   return (
-    <div className="elderly-profile-container wide-layout">
-      {/* Header */}
-      <div className="elderly-profile-header">
-        {!propHouseId && (
-          <button
-            className="back-btn"
-            onClick={() => navigate("/elderlyManagement")}
-          >
-            <MdArrowBack size={20} /> Back
-          </button>
-        )}
-        <div className="header-house">
-          <img
-            src={houseImages[houseId] || "/images/default-house.png"}
-            alt={houseNames[houseId]}
-            className="header-image"
-          />
-          <h1 className="header-title">{houseNames[houseId]}</h1>
-        </div>
-      </div>
+  <div className="elderly-profile-container wide-layout">
+  {/* Header */}
+  <div className="elderly-profile-header">
+    {!propHouseId && (
+      <button
+        className="back-btn"
+        onClick={() => navigate("/elderlyManagement")}
+      >
+        <MdArrowBack size={20} /> Back
+      </button>
+    )}
+
+    <div className="header-house">
+  <div className="header-top">
+    <img
+      src={houseImages[houseId] || "/images/default-house.png"}
+      alt={houseNames[houseId]}
+      className="header-image"
+    />
+    <h1 className="header-title">{houseNames[houseId]}</h1>
+  </div>
+  <p className="house-shortTitle">
+    {houseShortTitles[houseId] || "No short title available."}
+  </p>
+</div>
+  </div>
+
+
 
       {/* Search & Sort */}
       <div className="search-sort-row">
@@ -304,58 +326,82 @@ export default function HouseView({ houseId: propHouseId }) {
           <p className="no-profiles">No profiles found.</p>
         ) : (
           <table className="elderly-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>Full Name</th>
-                <th>Age</th>
-                <th>Sex</th>
-                {showSelectPanel && <th>Select</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredElderly.map((elder) => {
-                const onRowClick = () => {
-                  if (showSelectPanel) {
-                    toggleSelect(elder.id);
-                  } else {
-                    navigate(`/profileElderly/${elder.id}`);
-                  }
-                };
+      <thead>
+        <tr>
+          <th className="icon-col"></th>
+          <th className="name-col">Full Name</th>
+          <th className="age-col">Age</th>
+          <th className="mobility-col">Mobility Status</th>
+          {showSelectPanel && <th className="select-col">Select</th>}
+          <th className="action-th">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {filteredElderly.map((elder) => {
+          const onRowClick = () => {
+            if (showSelectPanel) {
+              toggleSelect(elder.id);
+            } else {
+              navigate(`/profileElderly/${elder.id}`);
+            }
+          };
 
-                return (
-                  <tr
-                    key={elder.id}
-                    className={isSelected(elder.id) ? "selected-row" : ""}
-                    onClick={onRowClick}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td className="icon-cell">
-                      <FaUserCircle size={25} color="#4A90E2" />
-                    </td>
-                    <td className="name-cell">
-                      {elder.elderly_fname} {elder.elderly_lname}
-                    </td>
-                    <td className="age-cell">{elder.elderly_age ?? "—"}</td>
-                    <td className="sex-cell">{elder.elderly_sex || "—"}</td>
-                    {showSelectPanel && (
-                      <td
-                        className="select-cell"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected(elder.id)}
-                          onChange={() => toggleSelect(elder.id)}
-                        />
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          return (
+            <tr
+              key={elder.id}
+              className={isSelected(elder.id) ? "selected-row" : ""}
+              onClick={onRowClick}
+            >
+              <td className="icon-cell">
+                <FaUserCircle size={25} color="#4A90E2" />
+              </td>
+              <td className="name-cell">
+                {elder.elderly_fname} {elder.elderly_lname}
+              </td>
+              <td className="age-cell">{elder.elderly_age ?? "—"}</td>
+              <td className="mobility-cell">{elder.elderly_mobilityStatus || "—"}</td>
+              {showSelectPanel && (
+                <td
+                  className="select-cell"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected(elder.id)}
+                    onChange={() => toggleSelect(elder.id)}
+                  />
+                </td>
+              )}
+              <td
+    className="action-cell"
+    onClick={(e) => {
+      e.stopPropagation();
+      setEditElderlyId(elder.id); // ✅ open overlay instead of navigating
+    }}
+    title="Edit"
+  >
+    <span className="pencil-icon">✎</span>
+  </td>
+
+
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+    
         )}
+        {editElderlyId && (
+  <EditElderlyOverlay
+    elderId={editElderlyId}
+    onClose={() => setEditElderlyId(null)}
+    onUpdate={async () => {
+      const q = await getDocs(collection(db, "elderly"));
+      setElderlyList(q.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }}
+  />
+)}
+
       </div>
 
       {/* Add Elderly Modal */}

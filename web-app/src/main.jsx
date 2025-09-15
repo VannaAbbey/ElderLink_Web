@@ -18,6 +18,7 @@ import Notifications from "./pages/notifications.jsx";
 import Schedule from "./pages/schedule.jsx";
 import Accounts from "./pages/accounts.jsx";
 import EditAdminProfile from "./pages/edit_admin_profile.jsx";
+import EditElderlyProfile from "./pages/edit_elderly_profile";
 
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -40,6 +41,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <Route path="/notifications" element={<Notifications />} />
       <Route path="/schedule" element={<Schedule />} />
       <Route path="/accounts" element={<Accounts />} />
+      <Route path="/edit_elderly_profile/:id" element={<EditElderlyProfile />} />
+      
+
     </Routes>
   </BrowserRouter>
 );
