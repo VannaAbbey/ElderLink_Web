@@ -81,7 +81,7 @@
   background-color: white;
   border-radius: 10px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  max-width: 1250px; /* Narrow width for breathing space */
+  max-width: 1300px; /* Narrow width for breathing space */
   width: 100%;
   margin: 0 auto; /* Center container on page */
   padding: 15px;
@@ -101,8 +101,6 @@
   border-collapse: collapse;
   margin: 0;
 }
-
-
 
 .schedule-table th,
 .schedule-table td {
@@ -282,35 +280,167 @@
   100% { transform: rotate(360deg); }
 }
 
-.day-buttons {
+/* Day Tabs - match the same design as shift tabs */
+.day-tabs {
   display: flex;
-  gap: 10px;
-  margin: 8px 0px;
+  gap: 5px;
+  margin: 10px 0; /* space between shift tabs and day tabs */
+  padding: 0;
 }
 
-.day-btn {
-  padding: 8px 18px;
-  border: 1px solid #4c7b94;
-  background: #1874a5;
-  color: rgb(249, 248, 248);
-  border-radius: 4px;
+.day-tab {
+  padding: 12px 44px;
+  border-radius: 10px 10px 0 0;
+  border: none;
+  background-color: #ece8e8;
   cursor: pointer;
-  font-size: 14px;
-  font-weight: bold;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
   transition: all 0.2s;
 }
 
-.day-btn:hover {
-  background: #0d344d;
-  color: #fff;
+.day-tab.active-day {
+  background-color: #216386;
+  color: white;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+  font-weight: bold;
 }
 
-.day-buttons-wrapper {
+.button-toggle {
+  display: flex;
+  gap: 12px;          /* spacing between buttons */
+  margin-bottom: 24px; /* space from table */
+}
+
+.toggle-btn {
+  padding: 7px 15px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;         /* rounded edges */
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #fff;                /* text always white */
+  background-color: #216386;  /* blue-500 */
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.toggle-btn:hover:not(:disabled) {
+  background-color: #2563eb;  /* blue-600 */
+  transform: translateY(-1px);
+}
+
+.toggle-btn:active:not(:disabled) {
+  background-color: #1d4ed8;  /* blue-700 */
+  transform: translateY(0);
+}
+
+.toggle-btn:disabled {
+  background-color: #9ca3af; /* gray-400 when disabled */
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+/* Container for positioning the Save button */
+.save-container {
+  margin-top: 20px;
+  text-align: right; /* aligns the button to the right */
+}
+
+/* Styling for the Save button */
+.save-btn {
+  padding: 6px 18px;
+  font-size: 15px;
+  font-weight: bold;
+  background-color: #007bff; /* blue primary color */
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.save-btn:hover:not(:disabled) {
+  background-color: #0056b3; /* darker blue on hover */
+}
+
+.save-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.schedule-table select {
+  width: auto;       /* shrink to fit content */
+  min-width: 120px;  /* but keep a decent size */
+  font-size: 14px;
+}
+
+.schedule-table select {
+  max-width: 150px;   /* or adjust to fit nicely */
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+/* If you want all columns aligned better */
+.schedule-table td {
+  vertical-align: middle;
+  text-align: center;
+  padding: 6px;
+}
+
+/* Prevent nurse names from wrapping */
+.schedule-table td:first-child,
+.schedule-table th:first-child {
+  white-space: nowrap;   /* keep in one line */
+  text-align: left;      /* align nicely */
+  padding: 6px 12px;
+  max-width: 200px;      /* optional: constrain column */
+  overflow: hidden;      /* if too long, hide */
+  text-overflow: ellipsis; /* add ... if truncated */
+}
+
+/* ✅ Day Tabs - same look as House/Shift Tabs */
+.day-tabs {
+  display: flex;
+  gap: 5px;
+  margin: 10px 0; /* space between shift tabs and day tabs */
+  padding: 0;
+}
+
+.day-tab {
+  padding: 12px 44px; /* same as shift-tab */
+  border-radius: 10px 10px 0 0;
+  border: none;
+  background-color: #ece8e8;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s;
+}
+
+.day-tab.active {
+  background-color: #216386;
+  color: white;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+  font-weight: bold;
+}
+
+.toggle-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 12px;
 }
 
-.day-buttons-label {
-  font-size: 14px;
-  display: block;
-  margin: 10px 0px;
+.toggle-buttons {
+  display: flex;
+  gap: 8px;
 }
+
+.schedule-inline {
+  font-size: 14px;
+  color: #333;
+}
+.schedule-inline strong {
+  color: #000;
+}
+

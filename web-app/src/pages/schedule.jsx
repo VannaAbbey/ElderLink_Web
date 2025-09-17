@@ -36,7 +36,10 @@ export default function Schedule() {
   const [activeHouseId, setActiveHouseId] = useState(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [activeDay, setActiveDay] = useState(null); // null = show all days
+  const [activeDay, setActiveDay] = useState("Monday");
+
+  const [scheduleInfo, setScheduleInfo] = useState(null);
+  const [daysLeft, setDaysLeft] = useState(null);
 
 
   // 3-shift schedule definitions
@@ -104,7 +107,7 @@ export default function Schedule() {
     checkAutoReshuffle();
   }, [assignments]); // runs whenever assignments are loaded/updated
 
-  // inside your Schedule component
+    // inside your Schedule component
   useEffect(() => {
     // build the query to only get current schedules
     const q = query(
@@ -127,24 +130,49 @@ export default function Schedule() {
   }, []); // 👈 runs only once when component mounts
 
   useEffect(() => {
-    if (viewMode === "history") {
-      const q = query(
-        collection(db, "cg_house_assign"),
-        where("is_current", "==", false)
-      );
+  if (viewMode === "history") {
+    const q = query(
+      collection(db, "cg_house_assign"),
+      where("is_current", "==", false)
+    );
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
 
-        setAssignments(data);
-      });
+      setAssignments(data);
+    });
 
-      return () => unsubscribe();
-    }
-  }, [viewMode]);
+    return () => unsubscribe();
+  }
+}, [viewMode]);
+
+  useEffect(() => {
+  if (!assignments || assignments.length === 0) {
+    setScheduleInfo(null);
+    setDaysLeft(null);
+    return;
+  }
+
+  // Get the first current assignment (they share same start/end dates)
+  const currentAssign = assignments.find(a => a.is_current);
+  if (!currentAssign) return;
+
+  const start = currentAssign.start_date?.toDate();
+  const end = currentAssign.end_date?.toDate();
+
+  setScheduleInfo({ start, end });
+
+  // Compute countdown days
+  if (end) {
+    const today = new Date();
+    const diffMs = end.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    setDaysLeft(diffDays > 0 ? diffDays : 0);
+  }
+}, [assignments]);
 
   // --- Loaders ---
   const loadStaticData = async () => {
@@ -160,7 +188,11 @@ export default function Schedule() {
     setHouses(houseList);
     setElderlyList(elderly);
 
-    if (!activeHouseId && houseList.length) setActiveHouseId(houseList[0].house_id);
+    // Set H001 (St. Sebastian) as default house if present
+    if (!activeHouseId && houseList.length) {
+      const defaultHouse = houseList.find(h => h.house_id === "H001") || houseList[0];
+      setActiveHouseId(defaultHouse.house_id);
+    }
 
     const v = await getMaxVersion();
     setCurrentVersion(v);
@@ -213,7 +245,7 @@ export default function Schedule() {
     return res;
   };
 
-  // helper to fetch each caregiver's last house
+    // helper to fetch each caregiver's last house
   const getLastHouseMap = async () => {
     const snap = await getDocs(
       query(collection(db, "cg_house_assign"), orderBy("created_at", "desc"))
@@ -229,172 +261,249 @@ export default function Schedule() {
     return lastMap;
   };
 
-  const distributeCaregivers = async (months) => {
-    // 🔹 1. Deactivate *only* current assignments
-    const allAssignSnap = await getDocs(
-      query(collection(db, "cg_house_assign"), where("is_current", "==", true))
-    );
+const distributeCaregivers = async (months) => {
+  // 🔹 1. Deactivate *only* current assignments (same as before)
+  const allAssignSnap = await getDocs(
+    query(collection(db, "cg_house_assign"), where("is_current", "==", true))
+  );
 
-    let batch = writeBatch(db);
-    let writeCount = 0;
-    const BATCH_SIZE = 200; // smaller batch size for better responsiveness
+  let batch = writeBatch(db);
+  let writeCount = 0;
+  const BATCH_SIZE = 450; // commit threshold (adjust if needed)
 
-    for (const d of allAssignSnap.docs) {
-      batch.update(doc(db, "cg_house_assign", d.id), { is_current: false });
-      writeCount++;
-      if (writeCount >= BATCH_SIZE) {
-        await batch.commit();
-        await new Promise(r => setTimeout(r, 0)); // yield to event loop
-        batch = writeBatch(db);
-        writeCount = 0;
-      }
-    }
-    if (writeCount > 0) {
+  for (const d of allAssignSnap.docs) {
+    batch.update(doc(db, "cg_house_assign", d.id), { is_current: false });
+    writeCount++;
+    if (writeCount >= BATCH_SIZE) {
       await batch.commit();
-      await new Promise(r => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
       batch = writeBatch(db);
       writeCount = 0;
     }
+  }
+  if (writeCount > 0) {
+    await batch.commit();
+    await new Promise((r) => setTimeout(r, 0));
+    batch = writeBatch(db);
+    writeCount = 0;
+  }
 
-    // 🔹 2. Continue with versioning, weights, etc.
-    const prevVersion = await getMaxVersion();
-    const nextVersion = prevVersion + 1;
-    const start_date = Timestamp.now();
-    const end_date = Timestamp.fromDate(getEndDate(months));
+  // 🔹 2. Versioning + dates
+  const prevVersion = await getMaxVersion();
+  const nextVersion = prevVersion + 1;
+  const start_date = Timestamp.now();
+  const end_date = Timestamp.fromDate(getEndDate(months));
 
-    // 🔹 3. House weights
-    const weights = {
-      H002: 2,
-      H003: 2,
-      H001: 1,
-      H004: 1,
-      H005: 1,
-    };
+  // 🔹 3. House weights (same)
+  const weights = {
+    H002: 2,
+    H003: 2,
+    H001: 1,
+    H004: 1,
+    H005: 1,
+  };
+  const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
 
-    const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+  // 🔹 4. Caregivers per house (proportional)
+  const caregiversPerHouse = {};
+  for (const house of houses) {
+    const w = weights[house.house_id] || 1;
+    caregiversPerHouse[house.house_id] = Math.max(
+      1,
+      Math.floor((caregivers.length * w) / totalWeight)
+    );
+  }
 
-    // 🔹 4. Caregivers per house
-    const caregiversPerHouse = {};
-    for (const house of houses) {
-      caregiversPerHouse[house.house_id] = Math.max(
-        1,
-        Math.floor((caregivers.length * weights[house.house_id]) / totalWeight)
-      );
+  // 🔹 5. Last-house history (avoid repeating)
+  const lastHouseMap = await getLastHouseMap();
+
+  // 🔹 6. Shuffle caregivers pool
+  const pool = [...caregivers].sort(() => Math.random() - 0.5);
+
+  // 🔹 7. Assign caregivers to houses (weighted)
+  let poolIdx = 0;
+  const houseAssignments = {}; // houseId -> array of caregiver objects
+  for (const house of houses) {
+    const count = caregiversPerHouse[house.house_id] || 1;
+    houseAssignments[house.house_id] = [];
+
+    for (let i = 0; i < count && poolIdx < pool.length; i++) {
+      const cg = pool[poolIdx];
+      // Avoid giving caregiver the same last house when possible
+      if (lastHouseMap[cg.id] === house.house_id) {
+        pool.push(pool.splice(poolIdx, 1)[0]); // move to end
+        i--;
+        continue;
+      }
+      houseAssignments[house.house_id].push(cg);
+      poolIdx++;
     }
+  }
 
-    // 🔹 5. Last house history
-    const lastHouseMap = await getLastHouseMap();
+  // If any caregivers remain in pool (not enough weight slots) assign them to houses round-robin
+  if (poolIdx < pool.length) {
+    const remaining = pool.slice(poolIdx);
+    const houseIds = houses.map((h) => h.house_id);
+    let rIdx = 0;
+    for (const cg of remaining) {
+      const hid = houseIds[rIdx % houseIds.length];
+      houseAssignments[hid] = houseAssignments[hid] || [];
+      houseAssignments[hid].push(cg);
+      rIdx++;
+    }
+  }
 
-    // 🔹 6. Shuffle caregivers
-    const pool = [...caregivers].sort(() => Math.random() - 0.5);
+  // Helper: ensure dayCounts container for each house+shift
+  const ensureDayCounts = (obj, key) => {
+    if (!obj[key]) obj[key] = daysOfWeek.map(() => 0);
+    return obj[key];
+  };
 
-    // 🔹 7. Assign caregivers
-    let poolIdx = 0;
-    const houseAssignments = {};
-    for (const house of houses) {
-      const count = caregiversPerHouse[house.house_id];
-      houseAssignments[house.house_id] = [];
+  // 🔹 8. For each house: split into shifts, assign days per caregiver, THEN distribute elderly per day
+  for (const house of houses) {
+    const assignedCGs = houseAssignments[house.house_id] || [];
+    if (!assignedCGs.length) continue;
 
-      for (let i = 0; i < count && poolIdx < pool.length; i++) {
-        const cg = pool[poolIdx];
-        if (lastHouseMap[cg.id] === house.house_id) {
-          pool.push(pool.splice(poolIdx, 1)[0]);
-          i--;
-          continue;
+    // split caregivers into 3 shift groups as evenly as possible
+    const shiftCaregivers = splitIntoChunks(assignedCGs, 3);
+
+    // house elders (all elderly that belong to this house)
+    const houseElders = elderlyList.filter((e) => e.house_id === house.house_id) || [];
+
+    // We'll keep references to assignRef IDs per caregiver so we can relate per-day elder assignments
+    const assignRefsByCaregiver = {}; // caregiverId -> { assignRef, shift, days_assigned }
+
+    for (let s = 0; s < 3; s++) {
+      const cgInShift = shiftCaregivers[s] || [];
+      if (!cgInShift.length) continue;
+
+      // day counts keyed by house_shift to balance days across caregivers in same house+shift
+      const dayCountsKey = `${house.house_id}_${shiftDefs[s].key}_dayCounts`;
+      const dayCounts = ensureDayCounts(houseAssignments, dayCountsKey);
+
+      // For each caregiver in this shift: pick 5 least-loaded days (balanced)
+      for (let i = 0; i < cgInShift.length; i++) {
+        const cg = cgInShift[i];
+        // choose 5 days with smallest counts
+        let dayIndexes = daysOfWeek.map((_, idx) => idx);
+        dayIndexes.sort((a, b) => dayCounts[a] - dayCounts[b] || Math.random() - 0.5);
+        const selectedIndexes = dayIndexes.slice(0, 5);
+        const days_assigned = selectedIndexes.map((idx) => daysOfWeek[idx]);
+        // update day counts
+        selectedIndexes.forEach((idx) => (dayCounts[idx]++));
+        // create cg_house_assign doc for the caregiver/shift
+        const shift = shiftDefs[s].key;
+        const time_range = shiftDefs[s].time_range;
+
+        const assignRef = doc(collection(db, "cg_house_assign"));
+        batch.set(assignRef, {
+          caregiver_id: cg.id,
+          house_id: house.house_id,
+          shift,
+          days_assigned,
+          start_date,
+          end_date,
+          time_range,
+          is_absent: false,
+          absent_at: null,
+          is_current: true,
+          version: nextVersion,
+          created_at: Timestamp.now(),
+        });
+        writeCount++;
+
+        // Save the assignRef for later linking per-day elder assignment
+        assignRefsByCaregiver[cg.id] = {
+          assignRefId: assignRef.id,
+          shift,
+          days_assigned,
+        };
+
+        // commit batch if needed
+        if (writeCount >= BATCH_SIZE) {
+          await batch.commit();
+          batch = writeBatch(db);
+          writeCount = 0;
         }
-        houseAssignments[house.house_id].push(cg);
-        poolIdx++;
       }
     }
 
-    // 🔹 8. Save new assignments (reusing batch + writeCount)
-    for (const house of houses) {
-      const assignedCGs = houseAssignments[house.house_id];
-      if (!assignedCGs.length) continue;
+    // --- Now: per-day distribution of elders among active caregivers (house-level, per shift) ---
+    // For each day of the week, for each shift, find the caregivers active that day+shift and split the houseElders among them.
+    for (let s = 0; s < 3; s++) {
+      const shiftKey = shiftDefs[s].key;
+      // list caregivers in this house & shift from assignRefsByCaregiver
+      const cgIdsInShift = Object.keys(assignRefsByCaregiver).filter(
+        (cid) => assignRefsByCaregiver[cid].shift === shiftKey
+      );
 
-      const shiftCaregivers = splitIntoChunks(assignedCGs, 3);
-      const houseElders = elderlyList.filter((e) => e.house_id === house.house_id) || [];
+      if (cgIdsInShift.length === 0) continue;
 
-      for (let s = 0; s < 3; s++) {
-        const cgInShift = shiftCaregivers[s];
-        if (!cgInShift.length) continue;
+      // For each day
+      for (const day of daysOfWeek) {
+        // caregivers active that day
+        const activeCgIds = cgIdsInShift.filter((cid) =>
+          (assignRefsByCaregiver[cid].days_assigned || []).map(d => d.toLowerCase()).includes(day.toLowerCase())
+        );
 
-        const elderChunks = splitIntoChunks(houseElders, cgInShift.length);
+        if (activeCgIds.length === 0) {
+          // no caregivers for this shift/day -> skip (no assignment)
+          continue;
+        }
 
-        for (let i = 0; i < cgInShift.length; i++) {
-          const cg = cgInShift[i];
-          const shift = shiftDefs[s].key;
-          const time_range = shiftDefs[s].time_range;
+        // split the house elders among active caregivers for this day
+        const elderChunks = splitIntoChunks(houseElders, activeCgIds.length);
 
-          // --- Balanced day assignment algorithm ---
-          // Track how many caregivers are assigned to each day in this shift
-          if (!houseAssignments[house.house_id + '_' + shift + '_dayCounts']) {
-            houseAssignments[house.house_id + '_' + shift + '_dayCounts'] = daysOfWeek.map(() => 0);
-          }
-          const dayCounts = houseAssignments[house.house_id + '_' + shift + '_dayCounts'];
+        // create elderly_caregiver_assign entries per caregiver for this day
+        for (let i = 0; i < activeCgIds.length; i++) {
+          const targetCgId = activeCgIds[i];
+          const elderChunk = elderChunks[i] || [];
 
-          // For each caregiver, pick 5 days with the lowest current counts
-          let dayIndexes = daysOfWeek.map((_, idx) => idx);
-          dayIndexes.sort((a, b) => dayCounts[a] - dayCounts[b] || Math.random() - 0.5); // break ties randomly
-          const selectedIndexes = dayIndexes.slice(0, 5);
-          const days_assigned = selectedIndexes.map(idx => daysOfWeek[idx]);
-          // Update counts
-          selectedIndexes.forEach(idx => dayCounts[idx]++);
+          // If no elders assigned to this chunk, skip
+          if (!elderChunk.length) continue;
 
-          const assignRef = doc(collection(db, "cg_house_assign"));
-          batch.set(assignRef, {
-            caregiver_id: cg.id,
-            house_id: house.house_id,
-            shift,
-            days_assigned,
-            start_date,
-            end_date,
-            time_range,
-            is_absent: false,
-            absent_at: null,
-            is_current: true,
-            version: nextVersion,
-            created_at: Timestamp.now(),
-          });
-          writeCount++;
+          // Use previously created assignRefId for the caregiver
+          const assignId = assignRefsByCaregiver[targetCgId].assignRefId;
 
-          // link elders
-          const eldersForThisCG = elderChunks[i] || [];
-          for (const elder of eldersForThisCG) {
+          for (const elder of elderChunk) {
             const elderRef = doc(collection(db, "elderly_caregiver_assign"));
             batch.set(elderRef, {
-              caregiver_id: cg.id,
+              caregiver_id: targetCgId,
               elderly_id: elder.id,
               assigned_at: Timestamp.now(),
               assign_version: nextVersion,
-              assign_id: assignRef.id,
+              assign_id: assignId,
               status: "active",
+              day, // day string (e.g., "Monday") — indicates the day this link applies to
             });
             writeCount++;
-          }
 
-          if (writeCount >= 450) {
-            await batch.commit();
-            batch = writeBatch(db);
-            writeCount = 0;
+            if (writeCount >= BATCH_SIZE) {
+              await batch.commit();
+              batch = writeBatch(db);
+              writeCount = 0;
+            }
           }
         }
       }
     }
+  } // end houses loop
 
-    if (writeCount > 0) {
-      await batch.commit();
-    }
+  // final commit if anything left
+  if (writeCount > 0) {
+    await batch.commit();
+  }
 
-    // 🔹 9. Activity log
-    await addDoc(collection(db, "activity_logs"), {
-      action: "Generate Schedule",
-      version: nextVersion,
-      time: Timestamp.now(),
-      created_by: "system",
-      details: { duration_months: months },
-    });
-  };
+  // 🔹 9. Activity log
+  await addDoc(collection(db, "activity_logs"), {
+    action: "Generate Schedule (per-day elder distribution)",
+    version: nextVersion,
+    time: Timestamp.now(),
+    created_by: "system",
+    details: { duration_months: months },
+  });
+};
+
 
   const confirmGenerate = async () => {
     setIsGenerating(true); // Show loading spinner immediately
@@ -569,20 +678,44 @@ export default function Schedule() {
   };
 
 
-  // show elders for UI, accounting for temporary reassigns for today
   const getDisplayedEldersFor = (caregiverId) => {
-    const base = elderlyAssigns
-      .filter((ea) => ea.caregiver_id === caregiverId && ea.assign_version === currentVersion)
-      .map((ea) => ea.elderly_id);
+  const base = elderlyAssigns
+    .filter(
+      (ea) =>
+        ea.caregiver_id === caregiverId &&
+        ea.assign_version === currentVersion &&
+        ea.day === activeDay // 🔹 only show elderly for the currently selected day
+    )
+    .map((ea) => ea.elderly_id);
 
-    const today = new Date().toISOString().slice(0, 10);
-    const toTemp = tempReassigns.filter((t) => t.to_caregiver_id === caregiverId && t.date === today && t.assign_version === currentVersion).map((t) => t.elderly_id);
-    const fromTemp = tempReassigns.filter((t) => t.from_caregiver_id === caregiverId && t.date === today && t.assign_version === currentVersion).map((t) => t.elderly_id);
+  const today = new Date().toISOString().slice(0, 10);
 
-    const finalIds = base.filter((id) => !fromTemp.includes(id)).concat(toTemp);
-    const elders = finalIds.map((id) => elderlyList.find((e) => e.id === id)).filter(Boolean);
-    return elders;
-  };
+  const toTemp = tempReassigns
+    .filter(
+      (t) =>
+        t.to_caregiver_id === caregiverId &&
+        t.date === today &&
+        t.assign_version === currentVersion
+    )
+    .map((t) => t.elderly_id);
+
+  const fromTemp = tempReassigns
+    .filter(
+      (t) =>
+        t.from_caregiver_id === caregiverId &&
+        t.date === today &&
+        t.assign_version === currentVersion
+    )
+    .map((t) => t.elderly_id);
+
+  const finalIds = base.filter((id) => !fromTemp.includes(id)).concat(toTemp);
+  const elders = finalIds
+    .map((id) => elderlyList.find((e) => e.id === id))
+    .filter(Boolean);
+
+  return elders;
+};
+
 
   const caregiverName = (id) => {
     const c = caregivers.find((cg) => cg.id === id);
@@ -594,7 +727,7 @@ export default function Schedule() {
     if (viewMode === "previous" && a.is_current) return false;
     if (activeHouseId && a.house_id !== activeHouseId) return false;
     if (activeShift && a.shift !== activeShift) return false;
-    if (activeDay && !a.days_assigned?.includes(activeDay)) return false; // ✅ filter by day
+    if (activeDay && !(a.days_assigned || []).includes(activeDay)) return false; // ✅ filter by day
     return true;
   });
 
@@ -663,149 +796,163 @@ export default function Schedule() {
     <div className="schedule-page">
 
       <Navbar /> {/* Always on top */}
-      <main className="schedule-container">
+    <main className="schedule-container">
 
-        <h2 className="page-title">Caregiver Scheduling</h2>
+      <h2 className="page-title">Caregiver Scheduling</h2>
 
-        <div style={{ marginBottom: 12 }}>
+      <div className="toggle-header">
+        <div className="toggle-buttons">
           <button
             onClick={() => { setViewMode("current"); }}
-            className={viewMode === "current" ? "active" : ""}
+            className={`toggle-btn ${viewMode === "current" ? "active" : ""}`}
           >
             Current Schedule
           </button>
           <button
             onClick={() => { setViewMode("previous"); }}
-            className={viewMode === "previous" ? "active" : ""}
+            className={`toggle-btn ${viewMode === "previous" ? "active" : ""}`}
             style={{ marginLeft: 8 }}
           >
             Caregiver Schedule History
           </button>
         </div>
 
-        <div className="control-panel">
-          <label>Duration (Months):</label>
-          <select value={duration} onChange={(e) => {
-            const val = parseInt(e.target.value);
-            setDuration(val);
-            localStorage.setItem("schedule_duration", val); // save selection
-          }}>
-            <option value={3}>3 Months</option>
-            <option value={6}>6 Months</option>
-            <option value={12}>12 Months</option>
-          </select>
-          <input
-            type="number"
-            placeholder="Custom Months"
-            value={customDuration}
-            onChange={(e) => {
-              const val = e.target.value;
-              setCustomDuration(val);
-              localStorage.setItem("schedule_custom", val); // save custom input
-            }}
-          />
-          <button onClick={handleGenerateClick}>Generate Schedule</button>
-          <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
+        {scheduleInfo && (
+          <div className="schedule-inline">
+            <span>
+              <strong>Schedule:</strong>{" "}
+              {scheduleInfo.start?.toLocaleDateString()} → {scheduleInfo.end?.toLocaleDateString()}
+            </span>
+            <span style={{ marginLeft: 12 }}>
+              <strong>Days Left:</strong> {daysLeft} {daysLeft === 1 ? "day" : "days"}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="control-panel">
+        <label>Duration (Months):</label>
+        <select value={duration} onChange={(e) => {
+          const val = parseInt(e.target.value);
+          setDuration(val);
+          localStorage.setItem("schedule_duration", val); // save selection
+        }}>
+          <option value={3}>3 Months</option>
+          <option value={6}>6 Months</option>
+          <option value={12}>12 Months</option>
+        </select>
+        <input
+          type="number"
+          placeholder="Custom Months"
+          value={customDuration}
+          onChange={(e) => {
+            const val = e.target.value;
+            setCustomDuration(val);
+            localStorage.setItem("schedule_custom", val); // save custom input
+          }}
+        />
+        <button onClick={handleGenerateClick}>Generate Schedule</button>
+        <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
+      </div>
+
+      {showOverlay && (
+        <div className="overlay">
+          <div className="overlay-content">
+            <p>Are you sure you want to generate schedule for {pendingDuration} month(s)?</p>
+            <button onClick={confirmGenerate}>Yes, Generate</button>
+            <button onClick={cancelGenerate}>Cancel</button>
+          </div>
         </div>
+      )}
 
-        {showOverlay && (
-          <div className="overlay">
-            <div className="overlay-content">
-              <p>Are you sure you want to generate schedule for {pendingDuration} month(s)?</p>
-              <button onClick={confirmGenerate}>Yes, Generate</button>
-              <button onClick={cancelGenerate}>Cancel</button>
-            </div>
+      {isGenerating && (
+        <div className="popup-overlay">
+          <div className="popup-card">
+            <div className="loading-spinner"></div>
+            <p>Generating Schedule... Please wait</p>
           </div>
-        )}
+        </div>
+      )}
 
-        {isGenerating && (
-          <div className="popup-overlay">
-            <div className="popup-card">
-              <div className="loading-spinner"></div>
-              <p>Generating Schedule... Please wait</p>
-            </div>
+      {showSuccess && (
+        <div className="overlay">
+          <div className="overlay-content">
+            <p>Generation of Schedule is <b>Successful!</b></p>
+            <button onClick={closeSuccess}>OK</button>
           </div>
-        )}
+        </div>
+      )}
 
-        {showSuccess && (
-          <div className="overlay">
-            <div className="overlay-content">
-              <p>Generation of Schedule is <b>Successful!</b></p>
-              <button onClick={closeSuccess}>OK</button>
-            </div>
-          </div>
-        )}
+      <div className="house-tabs">
+        {sortedHouses.map((h) => (
+          <button key={h.house_id} className={`house-tab ${activeHouseId === h.house_id ? "active" : ""}`} onClick={() => setActiveHouseId(h.house_id)}>
+            {h.house_name}
+          </button>
+        ))}
+      </div>
 
-        <div className="house-tabs">
-          {sortedHouses.map((h) => (
-            <button key={h.house_id} className={`house-tab ${activeHouseId === h.house_id ? "active" : ""}`} onClick={() => setActiveHouseId(h.house_id)}>
-              {h.house_name}
-            </button>
+      <div className="table-container">
+        <div className="shift-tabs">
+          {shiftDefs.map((s) => (
+            <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)}>{s.name}</button>
           ))}
         </div>
 
-        <div className="table-container">
-          <div className="shift-tabs">
-            {shiftDefs.map((s) => (
-              <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)}>{s.name}</button>
-            ))}
-          </div>
+        {/* ✅ New Days-of-Week tabs */}
+      <div className="day-tabs">
+        {daysOfWeek.map((day) => (
+          <button
+            key={day}
+            className={`day-tab ${activeDay === day ? "active" : ""}`}
+            onClick={() => setActiveDay(day)}
+          >
+            {day}
+          </button>
+        ))}
+      </div>
 
-          {/* <-- Add Mon-Sun buttons here */}
-          <div className="days-of-week-buttons">
-            {daysOfWeek.map((day) => (
-              <button
-                key={day}
-                className={`day-btn ${activeDay === day ? "active-day" : ""}`}
-                onClick={() => setActiveDay(day)} // toggle
-              >
-                {day.slice(0, 3)}
-              </button>
-            ))}
-          </div>
-
-          <table className="schedule-table">
-            <thead>
-              <tr>
-                <th>Caregiver Name</th>
-                <th>Days</th>
-                <th>Time</th>
-                <th>Elderly Assigned</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAssignments.map((a) => {
-                const isAbsent = !!a.is_absent;
-                let elders = getDisplayedEldersFor(a.caregiver_id);
-                elders = elders.slice().sort((e1, e2) => {
-                  const n1 = `${e1.elderly_fname} ${e1.elderly_lname}`.toLowerCase();
-                  const n2 = `${e2.elderly_fname} ${e2.elderly_lname}`.toLowerCase();
-                  return n1.localeCompare(n2);
-                });
-                return (
-                  <tr key={a.id} className={isAbsent ? "absent-row" : ""}>
-                    <td>{caregiverName(a.caregiver_id)}</td>
-                    <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
-                    <td>{a.time_range?.start} - {a.time_range?.end}</td>
-                    <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
-                    <td>
-                      {isAbsent ? (
-                        <>
-                          <span className="absent-text">Marked Absent Today</span>
-                          <button onClick={() => unmarkAbsent(a.id)} className="unabsent-btn">Unmark</button>
-                        </>
-                      ) : (
-                        <button onClick={() => markAbsent(a.id)} className="absent-btn">Mark as Absent</button>
-                      )}
-                      <button onClick={() => openRestDayModal(a.id, a.caregiver_id)} className="restday-btn">Set Rest Days</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <table className="schedule-table">
+          <thead>
+            <tr>
+              <th>Caregiver Name</th>
+              <th>Days</th>
+              <th>Time</th>
+              <th>Elderly Assigned</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredAssignments.map((a) => {
+              const isAbsent = !!a.is_absent;
+              let elders = getDisplayedEldersFor(a.caregiver_id);
+              elders = elders.slice().sort((e1, e2) => {
+                const n1 = `${e1.elderly_fname} ${e1.elderly_lname}`.toLowerCase();
+                const n2 = `${e2.elderly_fname} ${e2.elderly_lname}`.toLowerCase();
+                return n1.localeCompare(n2);
+              });
+              return (
+                <tr key={a.id} className={isAbsent ? "absent-row" : ""}>
+                  <td>{caregiverName(a.caregiver_id)}</td>
+                  <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
+                  <td>{a.time_range?.start} - {a.time_range?.end}</td>
+                  <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
+                  <td>
+                    {isAbsent ? (
+                      <>
+                        <span className="absent-text">Marked Absent Today</span>
+                        <button onClick={() => unmarkAbsent(a.id)} className="unabsent-btn">Unmark</button>
+                      </>
+                    ) : (
+                      <button onClick={() => markAbsent(a.id)} className="absent-btn">Mark as Absent</button>
+                    )}
+                    <button onClick={() => openRestDayModal(a.id, a.caregiver_id)} className="restday-btn">Set Rest Days</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       </main>
       {showRestDayModal && (
         <div className="modal-overlay">
