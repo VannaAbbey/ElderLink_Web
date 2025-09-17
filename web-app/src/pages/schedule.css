@@ -281,3 +281,36 @@
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+.day-buttons {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0px;
+}
+
+.day-btn {
+  padding: 8px 18px;
+  border: 1px solid #4c7b94;
+  background: #1874a5;
+  color: rgb(249, 248, 248);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.day-btn:hover {
+  background: #0d344d;
+  color: #fff;
+}
+
+.day-buttons-wrapper {
+  margin-bottom: 12px;
+}
+
+.day-buttons-label {
+  font-size: 14px;
+  display: block;
+  margin: 10px 0px;
+}

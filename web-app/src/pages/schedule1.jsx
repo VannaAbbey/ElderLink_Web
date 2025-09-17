@@ -36,8 +36,6 @@ export default function Schedule() {
   const [activeHouseId, setActiveHouseId] = useState(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [activeDay, setActiveDay] = useState(null); // null = show all days
-
 
   // 3-shift schedule definitions
   const shiftDefs = [
@@ -104,7 +102,7 @@ export default function Schedule() {
     checkAutoReshuffle();
   }, [assignments]); // runs whenever assignments are loaded/updated
 
-  // inside your Schedule component
+    // inside your Schedule component
   useEffect(() => {
     // build the query to only get current schedules
     const q = query(
@@ -127,24 +125,24 @@ export default function Schedule() {
   }, []); // 👈 runs only once when component mounts
 
   useEffect(() => {
-    if (viewMode === "history") {
-      const q = query(
-        collection(db, "cg_house_assign"),
-        where("is_current", "==", false)
-      );
+  if (viewMode === "history") {
+    const q = query(
+      collection(db, "cg_house_assign"),
+      where("is_current", "==", false)
+    );
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
 
-        setAssignments(data);
-      });
+      setAssignments(data);
+    });
 
-      return () => unsubscribe();
-    }
-  }, [viewMode]);
+    return () => unsubscribe();
+  }
+}, [viewMode]);
 
   // --- Loaders ---
   const loadStaticData = async () => {
@@ -213,7 +211,7 @@ export default function Schedule() {
     return res;
   };
 
-  // helper to fetch each caregiver's last house
+    // helper to fetch each caregiver's last house
   const getLastHouseMap = async () => {
     const snap = await getDocs(
       query(collection(db, "cg_house_assign"), orderBy("created_at", "desc"))
@@ -229,172 +227,172 @@ export default function Schedule() {
     return lastMap;
   };
 
-  const distributeCaregivers = async (months) => {
-    // 🔹 1. Deactivate *only* current assignments
-    const allAssignSnap = await getDocs(
-      query(collection(db, "cg_house_assign"), where("is_current", "==", true))
-    );
+const distributeCaregivers = async (months) => {
+  // 🔹 1. Deactivate *only* current assignments
+  const allAssignSnap = await getDocs(
+    query(collection(db, "cg_house_assign"), where("is_current", "==", true))
+  );
 
-    let batch = writeBatch(db);
-    let writeCount = 0;
-    const BATCH_SIZE = 200; // smaller batch size for better responsiveness
+  let batch = writeBatch(db);
+  let writeCount = 0;
+  const BATCH_SIZE = 200; // smaller batch size for better responsiveness
 
-    for (const d of allAssignSnap.docs) {
-      batch.update(doc(db, "cg_house_assign", d.id), { is_current: false });
-      writeCount++;
-      if (writeCount >= BATCH_SIZE) {
-        await batch.commit();
-        await new Promise(r => setTimeout(r, 0)); // yield to event loop
-        batch = writeBatch(db);
-        writeCount = 0;
-      }
-    }
-    if (writeCount > 0) {
+  for (const d of allAssignSnap.docs) {
+    batch.update(doc(db, "cg_house_assign", d.id), { is_current: false });
+    writeCount++;
+    if (writeCount >= BATCH_SIZE) {
       await batch.commit();
-      await new Promise(r => setTimeout(r, 0));
+      await new Promise(r => setTimeout(r, 0)); // yield to event loop
       batch = writeBatch(db);
       writeCount = 0;
     }
+  }
+  if (writeCount > 0) {
+    await batch.commit();
+    await new Promise(r => setTimeout(r, 0));
+    batch = writeBatch(db);
+    writeCount = 0;
+  }
 
-    // 🔹 2. Continue with versioning, weights, etc.
-    const prevVersion = await getMaxVersion();
-    const nextVersion = prevVersion + 1;
-    const start_date = Timestamp.now();
-    const end_date = Timestamp.fromDate(getEndDate(months));
+  // 🔹 2. Continue with versioning, weights, etc.
+  const prevVersion = await getMaxVersion();
+  const nextVersion = prevVersion + 1;
+  const start_date = Timestamp.now();
+  const end_date = Timestamp.fromDate(getEndDate(months));
 
-    // 🔹 3. House weights
-    const weights = {
-      H002: 2,
-      H003: 2,
-      H001: 1,
-      H004: 1,
-      H005: 1,
-    };
+  // 🔹 3. House weights
+  const weights = {
+    H002: 2,
+    H003: 2,
+    H001: 1,
+    H004: 1,
+    H005: 1,
+  };
 
-    const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+  const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
 
-    // 🔹 4. Caregivers per house
-    const caregiversPerHouse = {};
-    for (const house of houses) {
-      caregiversPerHouse[house.house_id] = Math.max(
-        1,
-        Math.floor((caregivers.length * weights[house.house_id]) / totalWeight)
-      );
-    }
+  // 🔹 4. Caregivers per house
+  const caregiversPerHouse = {};
+  for (const house of houses) {
+    caregiversPerHouse[house.house_id] = Math.max(
+      1,
+      Math.floor((caregivers.length * weights[house.house_id]) / totalWeight)
+    );
+  }
 
-    // 🔹 5. Last house history
-    const lastHouseMap = await getLastHouseMap();
+  // 🔹 5. Last house history
+  const lastHouseMap = await getLastHouseMap();
 
-    // 🔹 6. Shuffle caregivers
-    const pool = [...caregivers].sort(() => Math.random() - 0.5);
+  // 🔹 6. Shuffle caregivers
+  const pool = [...caregivers].sort(() => Math.random() - 0.5);
 
-    // 🔹 7. Assign caregivers
-    let poolIdx = 0;
-    const houseAssignments = {};
-    for (const house of houses) {
-      const count = caregiversPerHouse[house.house_id];
-      houseAssignments[house.house_id] = [];
+  // 🔹 7. Assign caregivers
+  let poolIdx = 0;
+  const houseAssignments = {};
+  for (const house of houses) {
+    const count = caregiversPerHouse[house.house_id];
+    houseAssignments[house.house_id] = [];
 
-      for (let i = 0; i < count && poolIdx < pool.length; i++) {
-        const cg = pool[poolIdx];
-        if (lastHouseMap[cg.id] === house.house_id) {
-          pool.push(pool.splice(poolIdx, 1)[0]);
-          i--;
-          continue;
-        }
-        houseAssignments[house.house_id].push(cg);
-        poolIdx++;
+    for (let i = 0; i < count && poolIdx < pool.length; i++) {
+      const cg = pool[poolIdx];
+      if (lastHouseMap[cg.id] === house.house_id) {
+        pool.push(pool.splice(poolIdx, 1)[0]);
+        i--;
+        continue;
       }
+      houseAssignments[house.house_id].push(cg);
+      poolIdx++;
     }
+  }
 
-    // 🔹 8. Save new assignments (reusing batch + writeCount)
-    for (const house of houses) {
-      const assignedCGs = houseAssignments[house.house_id];
-      if (!assignedCGs.length) continue;
+  // 🔹 8. Save new assignments (reusing batch + writeCount)
+  for (const house of houses) {
+    const assignedCGs = houseAssignments[house.house_id];
+    if (!assignedCGs.length) continue;
 
-      const shiftCaregivers = splitIntoChunks(assignedCGs, 3);
-      const houseElders = elderlyList.filter((e) => e.house_id === house.house_id) || [];
+    const shiftCaregivers = splitIntoChunks(assignedCGs, 3);
+    const houseElders = elderlyList.filter((e) => e.house_id === house.house_id) || [];
 
-      for (let s = 0; s < 3; s++) {
-        const cgInShift = shiftCaregivers[s];
-        if (!cgInShift.length) continue;
+    for (let s = 0; s < 3; s++) {
+      const cgInShift = shiftCaregivers[s];
+      if (!cgInShift.length) continue;
 
-        const elderChunks = splitIntoChunks(houseElders, cgInShift.length);
+      const elderChunks = splitIntoChunks(houseElders, cgInShift.length);
 
-        for (let i = 0; i < cgInShift.length; i++) {
-          const cg = cgInShift[i];
-          const shift = shiftDefs[s].key;
-          const time_range = shiftDefs[s].time_range;
+      for (let i = 0; i < cgInShift.length; i++) {
+        const cg = cgInShift[i];
+        const shift = shiftDefs[s].key;
+        const time_range = shiftDefs[s].time_range;
 
-          // --- Balanced day assignment algorithm ---
-          // Track how many caregivers are assigned to each day in this shift
-          if (!houseAssignments[house.house_id + '_' + shift + '_dayCounts']) {
-            houseAssignments[house.house_id + '_' + shift + '_dayCounts'] = daysOfWeek.map(() => 0);
-          }
-          const dayCounts = houseAssignments[house.house_id + '_' + shift + '_dayCounts'];
+        // --- Balanced day assignment algorithm ---
+        // Track how many caregivers are assigned to each day in this shift
+        if (!houseAssignments[house.house_id + '_' + shift + '_dayCounts']) {
+          houseAssignments[house.house_id + '_' + shift + '_dayCounts'] = daysOfWeek.map(() => 0);
+        }
+        const dayCounts = houseAssignments[house.house_id + '_' + shift + '_dayCounts'];
 
-          // For each caregiver, pick 5 days with the lowest current counts
-          let dayIndexes = daysOfWeek.map((_, idx) => idx);
-          dayIndexes.sort((a, b) => dayCounts[a] - dayCounts[b] || Math.random() - 0.5); // break ties randomly
-          const selectedIndexes = dayIndexes.slice(0, 5);
-          const days_assigned = selectedIndexes.map(idx => daysOfWeek[idx]);
-          // Update counts
-          selectedIndexes.forEach(idx => dayCounts[idx]++);
+        // For each caregiver, pick 5 days with the lowest current counts
+        let dayIndexes = daysOfWeek.map((_, idx) => idx);
+        dayIndexes.sort((a, b) => dayCounts[a] - dayCounts[b] || Math.random() - 0.5); // break ties randomly
+        const selectedIndexes = dayIndexes.slice(0, 5);
+        const days_assigned = selectedIndexes.map(idx => daysOfWeek[idx]);
+        // Update counts
+        selectedIndexes.forEach(idx => dayCounts[idx]++);
 
-          const assignRef = doc(collection(db, "cg_house_assign"));
-          batch.set(assignRef, {
+        const assignRef = doc(collection(db, "cg_house_assign"));
+        batch.set(assignRef, {
+          caregiver_id: cg.id,
+          house_id: house.house_id,
+          shift,
+          days_assigned,
+          start_date,
+          end_date,
+          time_range,
+          is_absent: false,
+          absent_at: null,
+          is_current: true,
+          version: nextVersion,
+          created_at: Timestamp.now(),
+        });
+        writeCount++;
+
+        // link elders
+        const eldersForThisCG = elderChunks[i] || [];
+        for (const elder of eldersForThisCG) {
+          const elderRef = doc(collection(db, "elderly_caregiver_assign"));
+          batch.set(elderRef, {
             caregiver_id: cg.id,
-            house_id: house.house_id,
-            shift,
-            days_assigned,
-            start_date,
-            end_date,
-            time_range,
-            is_absent: false,
-            absent_at: null,
-            is_current: true,
-            version: nextVersion,
-            created_at: Timestamp.now(),
+            elderly_id: elder.id,
+            assigned_at: Timestamp.now(),
+            assign_version: nextVersion,
+            assign_id: assignRef.id,
+            status: "active",
           });
           writeCount++;
+        }
 
-          // link elders
-          const eldersForThisCG = elderChunks[i] || [];
-          for (const elder of eldersForThisCG) {
-            const elderRef = doc(collection(db, "elderly_caregiver_assign"));
-            batch.set(elderRef, {
-              caregiver_id: cg.id,
-              elderly_id: elder.id,
-              assigned_at: Timestamp.now(),
-              assign_version: nextVersion,
-              assign_id: assignRef.id,
-              status: "active",
-            });
-            writeCount++;
-          }
-
-          if (writeCount >= 450) {
-            await batch.commit();
-            batch = writeBatch(db);
-            writeCount = 0;
-          }
+        if (writeCount >= 450) {
+          await batch.commit();
+          batch = writeBatch(db);
+          writeCount = 0;
         }
       }
     }
+  }
 
-    if (writeCount > 0) {
-      await batch.commit();
-    }
+  if (writeCount > 0) {
+    await batch.commit();
+  }
 
-    // 🔹 9. Activity log
-    await addDoc(collection(db, "activity_logs"), {
-      action: "Generate Schedule",
-      version: nextVersion,
-      time: Timestamp.now(),
-      created_by: "system",
-      details: { duration_months: months },
-    });
-  };
+  // 🔹 9. Activity log
+  await addDoc(collection(db, "activity_logs"), {
+    action: "Generate Schedule",
+    version: nextVersion,
+    time: Timestamp.now(),
+    created_by: "system",
+    details: { duration_months: months },
+  });
+};
 
   const confirmGenerate = async () => {
     setIsGenerating(true); // Show loading spinner immediately
@@ -594,7 +592,6 @@ export default function Schedule() {
     if (viewMode === "previous" && a.is_current) return false;
     if (activeHouseId && a.house_id !== activeHouseId) return false;
     if (activeShift && a.shift !== activeShift) return false;
-    if (activeDay && !a.days_assigned?.includes(activeDay)) return false; // ✅ filter by day
     return true;
   });
 
@@ -663,149 +660,136 @@ export default function Schedule() {
     <div className="schedule-page">
 
       <Navbar /> {/* Always on top */}
-      <main className="schedule-container">
+    <main className="schedule-container">
 
-        <h2 className="page-title">Caregiver Scheduling</h2>
+      <h2 className="page-title">Caregiver Scheduling</h2>
 
-        <div style={{ marginBottom: 12 }}>
-          <button
-            onClick={() => { setViewMode("current"); }}
-            className={viewMode === "current" ? "active" : ""}
-          >
-            Current Schedule
-          </button>
-          <button
-            onClick={() => { setViewMode("previous"); }}
-            className={viewMode === "previous" ? "active" : ""}
-            style={{ marginLeft: 8 }}
-          >
-            Caregiver Schedule History
-          </button>
+      <div style={{ marginBottom: 12 }}>
+        <button
+          onClick={() => { setViewMode("current"); }}
+          className={viewMode === "current" ? "active" : ""}
+        >
+          Current Schedule
+        </button>
+        <button
+          onClick={() => { setViewMode("previous"); }}
+          className={viewMode === "previous" ? "active" : ""}
+          style={{ marginLeft: 8 }}
+        >
+          Caregiver Schedule History
+        </button>
+      </div>
+
+      <div className="control-panel">
+        <label>Duration (Months):</label>
+        <select value={duration} onChange={(e) => {
+          const val = parseInt(e.target.value);
+          setDuration(val);
+          localStorage.setItem("schedule_duration", val); // save selection
+        }}>
+          <option value={3}>3 Months</option>
+          <option value={6}>6 Months</option>
+          <option value={12}>12 Months</option>
+        </select>
+        <input
+          type="number"
+          placeholder="Custom Months"
+          value={customDuration}
+          onChange={(e) => {
+            const val = e.target.value;
+            setCustomDuration(val);
+            localStorage.setItem("schedule_custom", val); // save custom input
+          }}
+        />
+        <button onClick={handleGenerateClick}>Generate Schedule</button>
+        <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
+      </div>
+
+      {showOverlay && (
+        <div className="overlay">
+          <div className="overlay-content">
+            <p>Are you sure you want to generate schedule for {pendingDuration} month(s)?</p>
+            <button onClick={confirmGenerate}>Yes, Generate</button>
+            <button onClick={cancelGenerate}>Cancel</button>
+          </div>
         </div>
+      )}
 
-        <div className="control-panel">
-          <label>Duration (Months):</label>
-          <select value={duration} onChange={(e) => {
-            const val = parseInt(e.target.value);
-            setDuration(val);
-            localStorage.setItem("schedule_duration", val); // save selection
-          }}>
-            <option value={3}>3 Months</option>
-            <option value={6}>6 Months</option>
-            <option value={12}>12 Months</option>
-          </select>
-          <input
-            type="number"
-            placeholder="Custom Months"
-            value={customDuration}
-            onChange={(e) => {
-              const val = e.target.value;
-              setCustomDuration(val);
-              localStorage.setItem("schedule_custom", val); // save custom input
-            }}
-          />
-          <button onClick={handleGenerateClick}>Generate Schedule</button>
-          <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
+      {isGenerating && (
+        <div className="popup-overlay">
+          <div className="popup-card">
+            <div className="loading-spinner"></div>
+            <p>Generating Schedule... Please wait</p>
+          </div>
         </div>
+      )}
 
-        {showOverlay && (
-          <div className="overlay">
-            <div className="overlay-content">
-              <p>Are you sure you want to generate schedule for {pendingDuration} month(s)?</p>
-              <button onClick={confirmGenerate}>Yes, Generate</button>
-              <button onClick={cancelGenerate}>Cancel</button>
-            </div>
+      {showSuccess && (
+        <div className="overlay">
+          <div className="overlay-content">
+            <p>Generation of Schedule is <b>Successful!</b></p>
+            <button onClick={closeSuccess}>OK</button>
           </div>
-        )}
+        </div>
+      )}
 
-        {isGenerating && (
-          <div className="popup-overlay">
-            <div className="popup-card">
-              <div className="loading-spinner"></div>
-              <p>Generating Schedule... Please wait</p>
-            </div>
-          </div>
-        )}
+      <div className="house-tabs">
+        {sortedHouses.map((h) => (
+          <button key={h.house_id} className={`house-tab ${activeHouseId === h.house_id ? "active" : ""}`} onClick={() => setActiveHouseId(h.house_id)}>
+            {h.house_name}
+          </button>
+        ))}
+      </div>
 
-        {showSuccess && (
-          <div className="overlay">
-            <div className="overlay-content">
-              <p>Generation of Schedule is <b>Successful!</b></p>
-              <button onClick={closeSuccess}>OK</button>
-            </div>
-          </div>
-        )}
-
-        <div className="house-tabs">
-          {sortedHouses.map((h) => (
-            <button key={h.house_id} className={`house-tab ${activeHouseId === h.house_id ? "active" : ""}`} onClick={() => setActiveHouseId(h.house_id)}>
-              {h.house_name}
-            </button>
+      <div className="table-container">
+        <div className="shift-tabs">
+          {shiftDefs.map((s) => (
+            <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)}>{s.name}</button>
           ))}
         </div>
 
-        <div className="table-container">
-          <div className="shift-tabs">
-            {shiftDefs.map((s) => (
-              <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)}>{s.name}</button>
-            ))}
-          </div>
-
-          {/* <-- Add Mon-Sun buttons here */}
-          <div className="days-of-week-buttons">
-            {daysOfWeek.map((day) => (
-              <button
-                key={day}
-                className={`day-btn ${activeDay === day ? "active-day" : ""}`}
-                onClick={() => setActiveDay(day)} // toggle
-              >
-                {day.slice(0, 3)}
-              </button>
-            ))}
-          </div>
-
-          <table className="schedule-table">
-            <thead>
-              <tr>
-                <th>Caregiver Name</th>
-                <th>Days</th>
-                <th>Time</th>
-                <th>Elderly Assigned</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAssignments.map((a) => {
-                const isAbsent = !!a.is_absent;
-                let elders = getDisplayedEldersFor(a.caregiver_id);
-                elders = elders.slice().sort((e1, e2) => {
-                  const n1 = `${e1.elderly_fname} ${e1.elderly_lname}`.toLowerCase();
-                  const n2 = `${e2.elderly_fname} ${e2.elderly_lname}`.toLowerCase();
-                  return n1.localeCompare(n2);
-                });
-                return (
-                  <tr key={a.id} className={isAbsent ? "absent-row" : ""}>
-                    <td>{caregiverName(a.caregiver_id)}</td>
-                    <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
-                    <td>{a.time_range?.start} - {a.time_range?.end}</td>
-                    <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
-                    <td>
-                      {isAbsent ? (
-                        <>
-                          <span className="absent-text">Marked Absent Today</span>
-                          <button onClick={() => unmarkAbsent(a.id)} className="unabsent-btn">Unmark</button>
-                        </>
-                      ) : (
-                        <button onClick={() => markAbsent(a.id)} className="absent-btn">Mark as Absent</button>
-                      )}
-                      <button onClick={() => openRestDayModal(a.id, a.caregiver_id)} className="restday-btn">Set Rest Days</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <table className="schedule-table">
+          <thead>
+            <tr>
+              <th>Caregiver Name</th>
+              <th>Days</th>
+              <th>Time</th>
+              <th>Elderly Assigned</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredAssignments.map((a) => {
+              const isAbsent = !!a.is_absent;
+              let elders = getDisplayedEldersFor(a.caregiver_id);
+              elders = elders.slice().sort((e1, e2) => {
+                const n1 = `${e1.elderly_fname} ${e1.elderly_lname}`.toLowerCase();
+                const n2 = `${e2.elderly_fname} ${e2.elderly_lname}`.toLowerCase();
+                return n1.localeCompare(n2);
+              });
+              return (
+                <tr key={a.id} className={isAbsent ? "absent-row" : ""}>
+                  <td>{caregiverName(a.caregiver_id)}</td>
+                  <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
+                  <td>{a.time_range?.start} - {a.time_range?.end}</td>
+                  <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
+                  <td>
+                    {isAbsent ? (
+                      <>
+                        <span className="absent-text">Marked Absent Today</span>
+                        <button onClick={() => unmarkAbsent(a.id)} className="unabsent-btn">Unmark</button>
+                      </>
+                    ) : (
+                      <button onClick={() => markAbsent(a.id)} className="absent-btn">Mark as Absent</button>
+                    )}
+                    <button onClick={() => openRestDayModal(a.id, a.caregiver_id)} className="restday-btn">Set Rest Days</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       </main>
       {showRestDayModal && (
         <div className="modal-overlay">
