@@ -98,7 +98,13 @@ export default function Navbar() {
           className={location.pathname.startsWith("/schedule") ? "active" : ""}
           onClick={() => { navigate("/schedule"); setMenuOpen(false); }}
         >
-          Schedule
+          Caregiver Schedule
+        </li>
+        <li
+          className={location.pathname.startsWith("/nurse-schedule") ? "active" : ""}
+          onClick={() => { navigate("/nurse-schedule"); setMenuOpen(false); }}
+        >
+          Nurse Schedule
         </li>
         <li
           className={location.pathname.startsWith("/accounts") ? "active" : ""}
