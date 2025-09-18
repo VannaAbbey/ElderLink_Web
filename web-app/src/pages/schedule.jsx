@@ -12,6 +12,7 @@ import {
   deleteDoc,
   orderBy,
   writeBatch,
+  limit,
   onSnapshot
 } from "firebase/firestore";
 import "./schedule.css";
@@ -148,6 +149,16 @@ export default function Schedule() {
     return () => unsubscribe();
   }
 }, [viewMode]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "elderly_caregiver_assign"),
+      (snapshot) => {
+        setElderlyAssigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
+    );
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
   if (!assignments || assignments.length === 0) {
@@ -487,7 +498,8 @@ const distributeCaregivers = async (months) => {
         }
       }
     }
-  } // end houses loop
+  }
+
 
   // final commit if anything left
   if (writeCount > 0) {
@@ -684,7 +696,7 @@ const distributeCaregivers = async (months) => {
       (ea) =>
         ea.caregiver_id === caregiverId &&
         ea.assign_version === currentVersion &&
-        ea.day === activeDay // 🔹 only show elderly for the currently selected day
+        ea.day?.toLowerCase() === activeDay.toLowerCase()
     )
     .map((ea) => ea.elderly_id);
 
@@ -727,7 +739,7 @@ const distributeCaregivers = async (months) => {
     if (viewMode === "previous" && a.is_current) return false;
     if (activeHouseId && a.house_id !== activeHouseId) return false;
     if (activeShift && a.shift !== activeShift) return false;
-    if (activeDay && !(a.days_assigned || []).includes(activeDay)) return false; // ✅ filter by day
+    if (activeDay && !(a.days_assigned || []).map(d => d.toLowerCase()).includes(activeDay.toLowerCase())) return false;
     return true;
   });
 
@@ -768,21 +780,35 @@ const distributeCaregivers = async (months) => {
     await loadAllAssignments();
   };
 
-  // Clear schedule handler: deletes all docs in cg_house_assign and elderly_caregiver_assign
+  const deleteCollection = async (collectionName) => {
+    const snap = await getDocs(collection(db, collectionName));
+    const batch = writeBatch(db);
+
+    snap.docs.forEach((docSnap) => {
+      batch.delete(doc(db, collectionName, docSnap.id));
+    });
+
+    await batch.commit();
+    console.log(`${collectionName} cleared`);
+  };
+
   const handleClearSchedule = async () => {
-    if (!window.confirm("Are you sure you want to clear the generated schedule? This will delete all assignments in the database, but not affect the table UI.")) return;
-    // Delete all docs in cg_house_assign
-    const cgSnap = await getDocs(collection(db, "cg_house_assign"));
-    const cgDeletes = cgSnap.docs.map((d) => deleteDoc(doc(db, "cg_house_assign", d.id)));
-    // Delete all docs in elderly_caregiver_assign
-    const eaSnap = await getDocs(collection(db, "elderly_caregiver_assign"));
-    const eaDeletes = eaSnap.docs.map((d) => deleteDoc(doc(db, "elderly_caregiver_assign", d.id)));
-    await Promise.all([...cgDeletes, ...eaDeletes]);
-    // Optionally reload assignments
+  if (!window.confirm("Are you sure you want to clear the generated schedule? This will delete all assignments in the database...")) return;
+
+  try {
+    // delete both collections
+    await deleteCollection("cg_house_assign");
+    await deleteCollection("elderly_caregiver_assign");
+
+    alert("Schedule cleared!");
+    // reload state so UI updates
     await loadAllAssignments();
     await loadAllElderlyAssigns();
-    alert("Schedule cleared from database.");
-  };
+  } catch (err) {
+    console.error("Error clearing schedule:", err);
+    alert("Failed to clear schedule.");
+  }
+};
 
   // Sort houses by house_id (H001 to H005)
   const sortedHouses = [...houses].sort((a, b) => {
@@ -915,7 +941,7 @@ const distributeCaregivers = async (months) => {
           <thead>
             <tr>
               <th>Caregiver Name</th>
-              <th>Days</th>
+              <th>Work Days</th>
               <th>Time</th>
               <th>Elderly Assigned</th>
               <th>Action</th>
