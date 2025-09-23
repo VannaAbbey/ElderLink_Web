@@ -11,17 +11,10 @@ import {
 } from "firebase/firestore";
 import "./schedule.css";
 import Navbar from "./navbar";
-import * as ScheduleAPI from "../services/scheduleApi";
-import { 
-  detectUnassignedCaregivers,
-  generateCaregiverRecommendations,
-  integrateNewCaregiver
-} from "../services/scheduleApi";
-// import { 
-//   markCaregiverAbsentWithEmergencyCheck, 
-//   activateEmergencyCoverage,
-//   checkEmergencyNeedsAndDonors 
-// } from "../services/scheduleApi";
+import * as ScheduleService from "../services/scheduleService";
+import * as NewCaregiverService from "../services/newCaregiverService";
+import * as EmergencyService from "../services/emergencyService";
+import * as AbsenceService from "../services/absenceService";
 
 
 export default function Schedule() {
@@ -60,6 +53,7 @@ export default function Schedule() {
     workDays: []
   });
   const [systemRecommendations, setSystemRecommendations] = useState([]);
+  const [selectedRecommendation, setSelectedRecommendation] = useState(null);
   
   // ========== DAYS OF WEEK TABS - COMMENT OUT BELOW LINES TO REMOVE ==========
   const [activeDay, setActiveDay] = useState("Monday");
@@ -87,6 +81,30 @@ export default function Schedule() {
   const [currentVersion, setCurrentVersion] = useState(0);
 
   const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+  // Validation function to check if rest days are consecutive
+  const areWorkDaysConsecutive = (workDays) => {
+    if (workDays.length !== 5) return false;
+    
+    // Get rest days (days not in workDays)
+    const restDays = daysOfWeek.filter(day => !workDays.includes(day));
+    
+    if (restDays.length !== 2) return false; // Should have exactly 2 rest days
+    
+    // Convert rest day names to indices
+    const restDayIndices = restDays.map(day => daysOfWeek.indexOf(day)).sort((a, b) => a - b);
+    
+    // Check if the 2 rest days are consecutive
+    const [firstRest, secondRest] = restDayIndices;
+    
+    // Two cases for consecutive rest days:
+    // 1. Normal consecutive (e.g., Saturday=5, Sunday=6)
+    // 2. Wrap-around consecutive (e.g., Sunday=6, Monday=0)
+    const isNormalConsecutive = (secondRest - firstRest === 1);
+    const isWrapAroundConsecutive = (firstRest === 0 && secondRest === 6); // Sunday and Saturday
+    
+    return isNormalConsecutive || isWrapAroundConsecutive;
+  };
 
   // Custom alert function to replace native alert()
   const showAlert = (message, title = "Notification") => {
@@ -266,7 +284,7 @@ export default function Schedule() {
   // --- Loaders ---
   const loadStaticData = async () => {
     try {
-      const data = await ScheduleAPI.fetchStaticData();
+      const data = await ScheduleService.fetchStaticData();
       setCaregivers(data.caregivers);
       setHouses(data.houses);
       setElderlyList(data.elderly);
@@ -277,7 +295,7 @@ export default function Schedule() {
         setActiveHouseId(defaultHouse.house_id);
       }
 
-      const v = await ScheduleAPI.getMaxVersion();
+      const v = await ScheduleService.getMaxVersion();
       setCurrentVersion(v);
     } catch (error) {
       console.error("Error loading static data:", error);
@@ -288,7 +306,7 @@ export default function Schedule() {
   const loadAllAssignments = async () => {
     try {
       const isCurrent = viewMode === "current";
-      const data = await ScheduleAPI.fetchAssignments(isCurrent);
+      const data = await ScheduleService.fetchAssignments(isCurrent);
       setAssignments(data);
     } catch (error) {
       console.error("Error loading assignments:", error);
@@ -297,7 +315,7 @@ export default function Schedule() {
 
   const loadAllElderlyAssigns = async () => {
     try {
-      const data = await ScheduleAPI.fetchElderlyAssignments();
+      const data = await ScheduleService.fetchElderlyAssignments();
       setElderlyAssigns(data);
     } catch (error) {
       console.error("Error loading elderly assignments:", error);
@@ -306,7 +324,7 @@ export default function Schedule() {
 
   const loadTempReassigns = async () => {
     try {
-      const data = await ScheduleAPI.fetchTempReassignments();
+      const data = await ScheduleService.fetchTempReassignments();
       setTempReassigns(data);
     } catch (error) {
       console.error("Error loading temp reassignments:", error);
@@ -316,7 +334,7 @@ export default function Schedule() {
   // Schedule generation function - now uses API service
   const handleScheduleGeneration = async (months) => {
     try {
-      const result = await ScheduleAPI.generateSchedule(months, {
+      const result = await ScheduleService.generateSchedule(months, {
         caregivers,
         houses,
         elderly: elderlyList
@@ -366,7 +384,7 @@ export default function Schedule() {
       console.log(`👵 Current elderly assignments count: ${elderlyAssigns.length}`);
       console.log(`🔄 Current temp reassignments count: ${tempReassigns.length}`);
       
-      const emergencyCheck = await checkEmergencyNeedsAndDonors(selectedDateStr, assignments, elderlyAssigns, tempReassigns);
+      const emergencyCheck = await EmergencyService.checkEmergencyNeedsAndDonors(selectedDateStr, assignments, elderlyAssigns, tempReassigns);
       console.log("🔍 Emergency check result:", emergencyCheck);
       
       if (!emergencyCheck.hasEmergency) {
@@ -419,7 +437,7 @@ export default function Schedule() {
         };
       });
       
-      const result = await activateEmergencyCoverage(selectedDateStr, assignments, elderlyAssigns, tempReassigns, donorChoices);
+      const result = await EmergencyService.activateEmergencyCoverage(selectedDateStr, assignments, elderlyAssigns, tempReassigns, donorChoices);
       
       if (result.success) {
         if (result.emergencyReassignments?.length > 0) {
@@ -452,8 +470,11 @@ export default function Schedule() {
   // New Caregiver Integration functions
   const handleNewCaregiverIntegration = async () => {
     try {
-      // First detect unassigned caregivers
-      const unassigned = await detectUnassignedCaregivers();
+      // Refresh static data first to ensure we have latest caregiver info
+      await loadStaticData();
+      
+      // Then detect unassigned caregivers
+      const unassigned = await NewCaregiverService.detectUnassignedCaregivers();
       
       if (unassigned.length === 0) {
         showAlert("All caregivers are already assigned to the current schedule.", "No Unassigned Caregivers");
@@ -471,11 +492,12 @@ export default function Schedule() {
 
   const handleCaregiverSelection = async (caregiverId) => {
     setSelectedNewCaregiver(caregiverId);
+    setSelectedRecommendation(null); // Reset selected recommendation
     
     if (integrationMode === 'auto') {
       // Generate system recommendations
       try {
-        const recommendations = await generateCaregiverRecommendations(caregiverId, assignments, houses);
+        const recommendations = await NewCaregiverService.generateCaregiverRecommendations(caregiverId, assignments, houses);
         setSystemRecommendations(recommendations);
       } catch (error) {
         console.error("Error generating recommendations:", error);
@@ -493,9 +515,13 @@ export default function Schedule() {
     try {
       let assignmentData;
       
-      if (integrationMode === 'auto' && systemRecommendations.length > 0) {
-        // Use the first (best) recommendation
-        assignmentData = systemRecommendations[0];
+      if (integrationMode === 'auto') {
+        if (!selectedRecommendation) {
+          showAlert("Please select a system recommendation first.", "No Recommendation Selected");
+          return;
+        }
+        // Use the selected recommendation
+        assignmentData = selectedRecommendation;
       } else if (integrationMode === 'manual') {
         // Validate manual assignment
         if (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length === 0) {
@@ -509,14 +535,18 @@ export default function Schedule() {
       }
 
       // Execute the integration
-      const result = await integrateNewCaregiver(selectedNewCaregiver, assignmentData, assignments, elderlyAssigns);
+      const result = await NewCaregiverService.integrateNewCaregiver(selectedNewCaregiver, assignmentData, assignments, elderlyAssigns, houses);
       
       if (result.success) {
-        showAlert(`Successfully integrated caregiver into the schedule!\n\nAssigned to: ${assignmentData.house}\nShift: ${assignmentData.shift}\nWork Days: ${assignmentData.workDays.join(', ')}`, "Integration Successful");
-        
-        // Refresh data
+        // Refresh all data including caregivers list FIRST
+        await loadStaticData(); // This will refresh the caregivers list so names show properly
         await loadAllAssignments();
         await loadAllElderlyAssigns();
+        
+        // Small delay to ensure data is fully loaded
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        showAlert(`Successfully integrated caregiver into the schedule!\n\nAssigned to: ${assignmentData.house}\nShift: ${assignmentData.shift}\nWork Days: ${assignmentData.workDays.join(', ')}`, "Integration Successful");
         
         // Reset modal state
         setShowNewCaregiverModal(false);
@@ -524,6 +554,7 @@ export default function Schedule() {
         setIntegrationMode('auto');
         setManualAssignment({ house: '', shift: '', workDays: [] });
         setSystemRecommendations([]);
+        setSelectedRecommendation(null);
         
       } else {
         showAlert(result.message || "Failed to integrate caregiver.", "Integration Failed");
@@ -541,6 +572,7 @@ export default function Schedule() {
     setIntegrationMode('auto');
     setManualAssignment({ house: '', shift: '', workDays: [] });
     setSystemRecommendations([]);
+    setSelectedRecommendation(null);
     setUnassignedCaregivers([]);
   };
 
@@ -567,7 +599,7 @@ export default function Schedule() {
       console.log(`Marking absent for exact date: ${selectedDateStr} (${dayName})`);
       
       // Use new emergency coverage function
-      const result = await markCaregiverAbsentWithEmergencyCheck(
+      const result = await AbsenceService.markCaregiverAbsentWithEmergencyCheck(
         pendingAbsentAssignment.assignDocId, 
         assignments, 
         elderlyAssigns, 
@@ -624,16 +656,16 @@ export default function Schedule() {
 
   // --- Optional: reset absences automatically on component mount ---
   useEffect(() => {
-    const resetDailyAbsences = async () => {
+    const resetAbsences = async () => {
       try {
-        await ScheduleAPI.resetDailyAbsences();
+        await AbsenceService.resetDailyAbsences();
         await loadAllAssignments();
       } catch (error) {
         console.error("Error resetting daily absences:", error);
       }
     };
 
-    resetDailyAbsences();
+    resetAbsences();
   }, []);
 
   // Check if caregiver is providing emergency coverage
@@ -722,7 +754,16 @@ export default function Schedule() {
   console.log(`Final elderly IDs for ${caregiverId}: ${finalIds.length}`, finalIds);
   
   const elders = finalIds
-    .map((id) => elderlyList.find((e) => e.id === id))
+    .map((id) => {
+      const elderly = elderlyList.find((e) => e.id === id);
+      if (!elderly) {
+        console.warn(`⚠️ Elderly not found: ${id}. Available elderly:`, 
+          elderlyList.slice(0, 3).map(e => ({ id: e.id, name: `${e.elderly_fname} ${e.elderly_lname}` }))
+        );
+        return { id: id, elderly_fname: "Unknown", elderly_lname: `(${id.substring(0, 8)}...)` };
+      }
+      return elderly;
+    })
     .filter(Boolean);
 
   console.log(`Final elderly objects for ${caregiverId}:`, elders.map(e => `${e.elderly_fname} ${e.elderly_lname}`));
@@ -734,7 +775,16 @@ export default function Schedule() {
 
   const caregiverName = (id) => {
     const c = caregivers.find((cg) => cg.id === id);
-    return c ? `${c.user_fname} ${c.user_lname}` : "Unknown";
+    if (c) {
+      return `${c.user_fname} ${c.user_lname}`;
+    } else {
+      // Enhanced debugging for missing caregivers
+      console.warn(`⚠️ Caregiver not found: ${id}`);
+      console.log(`Available caregivers (${caregivers.length}):`, 
+        caregivers.slice(0, 3).map(cg => ({ id: cg.id, name: `${cg.user_fname} ${cg.user_lname}` }))
+      );
+      return `Unknown (${id.substring(0, 8)}...)`;
+    }
   };
 
   // Get emergency coverage assignments for display
@@ -882,7 +932,7 @@ export default function Schedule() {
     if (!window.confirm("Are you sure you want to clear the generated schedule? This will delete all assignments in the database...")) return;
 
     try {
-      const result = await ScheduleAPI.clearSchedule();
+      const result = await ScheduleService.clearSchedule();
       if (result.success) {
         showAlert("Schedule cleared successfully!", "Success");
         // reload state so UI updates
@@ -895,6 +945,36 @@ export default function Schedule() {
     } catch (error) {
       console.error("Error clearing schedule:", error);
       showAlert(`Failed to clear schedule: ${error.message || "Unknown error occurred"}`, "Error");
+    }
+  };
+
+  const handleCleanupOrphanedAssignments = async () => {
+    if (!window.confirm("This will remove assignments for caregivers/elderly that no longer exist in the system. Are you sure?")) return;
+
+    try {
+      // Clean up both caregiver and elderly assignments
+      const [caregiverResult, elderlyResult] = await Promise.all([
+        ScheduleService.findOrphanedAssignments(true),
+        ScheduleService.findOrphanedElderlyAssignments(true)
+      ]);
+      
+      const totalCleaned = caregiverResult.count + elderlyResult.count;
+      
+      if (totalCleaned > 0) {
+        showAlert(
+          `Successfully cleaned up:\n• ${caregiverResult.count} orphaned caregiver assignment(s)\n• ${elderlyResult.count} orphaned elderly assignment(s)\n\nThe "Unknown" entries should now be gone.`, 
+          "Cleanup Complete"
+        );
+        // Reload data to reflect changes
+        await loadStaticData();
+        await loadAllAssignments();
+        await loadAllElderlyAssigns();
+      } else {
+        showAlert("No orphaned assignments found. All assignments have valid caregivers and elderly.", "Nothing to Clean");
+      }
+    } catch (error) {
+      console.error("Error cleaning up orphaned assignments:", error);
+      showAlert(`Failed to clean up assignments: ${error.message || "Unknown error occurred"}`, "Error");
     }
   };
 
@@ -966,6 +1046,7 @@ export default function Schedule() {
         />
         <button onClick={handleGenerateClick}>Generate Schedule</button>
         <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
+        <button onClick={handleCleanupOrphanedAssignments} style={{ marginLeft: 8, background: '#dc3545', color: 'white' }}>🧹 Fix Unknown</button>
         <button onClick={handleEmergencyCoverage} style={{ marginLeft: 8, background: '#f39c12', color: 'white' }}>🚨 Emergency Coverage</button>
         <button onClick={handleNewCaregiverIntegration} style={{ marginLeft: 8, background: '#28a745', color: 'white' }}>👥 Add New Caregiver</button>
       </div>
@@ -1277,8 +1358,7 @@ export default function Schedule() {
                       className={`caregiver-item ${selectedNewCaregiver === caregiver.id ? 'selected' : ''}`}
                       onClick={() => handleCaregiverSelection(caregiver.id)}
                     >
-                      <span className="caregiver-name">{caregiver.first_name} {caregiver.last_name}</span>
-                      <span className="caregiver-info">ID: {caregiver.id}</span>
+                      <span className="caregiver-name">{caregiver.user_fname} {caregiver.user_lname}</span>
                     </div>
                   ))}
                 </div>
@@ -1295,20 +1375,30 @@ export default function Schedule() {
                           type="radio" 
                           value="auto" 
                           checked={integrationMode === 'auto'}
-                          onChange={(e) => setIntegrationMode(e.target.value)}
+                          onChange={(e) => {
+                            setIntegrationMode(e.target.value);
+                            setSelectedRecommendation(null);
+                          }}
                         />
-                        <span>🤖 Automatic (System Recommendation)</span>
-                        <small>System analyzes current schedule and recommends optimal placement</small>
+                        <div className="mode-option-content">
+                          <span>🤖 Automatic (System Recommendation)</span>
+                          <small>System analyzes current schedule and recommends optimal placement</small>
+                        </div>
                       </label>
                       <label className="mode-option">
                         <input 
                           type="radio" 
                           value="manual" 
                           checked={integrationMode === 'manual'}
-                          onChange={(e) => setIntegrationMode(e.target.value)}
+                          onChange={(e) => {
+                            setIntegrationMode(e.target.value);
+                            setSelectedRecommendation(null);
+                          }}
                         />
-                        <span>✋ Manual Assignment</span>
-                        <small>Manually choose house, shift, and work days</small>
+                        <div className="mode-option-content">
+                          <span>✋ Manual Assignment</span>
+                          <small>Manually choose house, shift, and work days</small>
+                        </div>
                       </label>
                     </div>
                   </div>
@@ -1316,22 +1406,36 @@ export default function Schedule() {
                   {/* Automatic Recommendations */}
                   {integrationMode === 'auto' && systemRecommendations.length > 0 && (
                     <div className="recommendations">
-                      <h4>System Recommendations:</h4>
-                      {systemRecommendations.slice(0, 3).map((rec, index) => (
-                        <div key={index} className="recommendation-item">
+                      <h4>System Recommendations: (Select one to proceed)</h4>
+                      {systemRecommendations.map((rec, index) => (
+                        <div 
+                          key={index} 
+                          className={`recommendation-item ${selectedRecommendation === rec ? 'selected' : ''}`}
+                          onClick={() => setSelectedRecommendation(rec)}
+                          style={{ cursor: 'pointer', border: selectedRecommendation === rec ? '2px solid #007bff' : '1px solid #ddd' }}
+                        >
                           <div className="rec-header">
-                            <span className="rec-rank">#{index + 1} {index === 0 ? '(Best)' : ''}</span>
-                            <span className="rec-score">Score: {rec.score}%</span>
+                            <span className="rec-rank">
+                              {selectedRecommendation === rec ? '✓ Selected' : `Option #${index + 1}`}
+                            </span>
+                            <span className="rec-coverage">Fixes {rec.weakSlotsCovered}/{rec.totalWeakSlots} gaps</span>
                           </div>
                           <div className="rec-details">
-                            <strong>{rec.house}</strong> - {rec.shift} Shift
+                            <strong>{rec.houseName}</strong> - {rec.shift} Shift
                             <div className="rec-days">Work Days: {rec.workDays.join(', ')}</div>
-                            <div className="rec-reason">
-                              <small>{rec.reason}</small>
+                            <div className="rec-explanation">
+                              <small>{rec.explanation}</small>
                             </div>
                           </div>
                         </div>
                       ))}
+                      {!selectedRecommendation && (
+                        <div className="selection-reminder">
+                          <small style={{ color: '#dc3545', fontStyle: 'italic' }}>
+                            Please click on one of the recommendations above to select it.
+                          </small>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1400,6 +1504,16 @@ export default function Schedule() {
                             ))}
                           </div>
                           <small>Selected: {manualAssignment.workDays.length}/5 days</small>
+                          {manualAssignment.workDays.length === 5 && !areWorkDaysConsecutive(manualAssignment.workDays) && (
+                            <small style={{ color: '#dc3545', display: 'block', marginTop: '4px', fontWeight: 'bold' }}>
+                              ⚠️ Rest days must be consecutive (2 consecutive days off)
+                            </small>
+                          )}
+                          {manualAssignment.workDays.length === 5 && areWorkDaysConsecutive(manualAssignment.workDays) && (
+                            <small style={{ color: '#28a745', display: 'block', marginTop: '4px', fontWeight: 'bold' }}>
+                              ✓ Rest days are consecutive
+                            </small>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1412,7 +1526,9 @@ export default function Schedule() {
               <button 
                 className="execute-integration-btn" 
                 onClick={executeNewCaregiverIntegration}
-                disabled={!selectedNewCaregiver || (integrationMode === 'manual' && (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length !== 5))}
+                disabled={!selectedNewCaregiver || 
+                  (integrationMode === 'auto' && !selectedRecommendation) ||
+                  (integrationMode === 'manual' && (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length !== 5 || !areWorkDaysConsecutive(manualAssignment.workDays)))}
               >
                 Integrate Caregiver
               </button>
