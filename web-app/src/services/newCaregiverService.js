@@ -28,7 +28,7 @@ export const detectUnassignedCaregivers = async () => {
     
     // Get current assignments
     const currentAssignments = await getDocs(
-      query(collection(db, "cg_house_assign_v2"), where("is_current", "==", true))
+      query(collection(db, "cg_house_assign"), where("is_current", "==", true))
     );
     
     const assignedCaregiverIds = new Set();
@@ -343,7 +343,7 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     const time_range = shiftDef ? shiftDef.time_range : { start: "06:00", end: "14:00" }; // fallback to 1st shift
     
     // Create new assignment document
-    const newAssignmentRef = doc(collection(db, "cg_house_assign_v2"));
+    const newAssignmentRef = doc(collection(db, "cg_house_assign"));
     const assignmentDoc = {
       caregiver_id: caregiverId,
       house_id: assignmentData.house,
@@ -554,7 +554,7 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     // Deactivate conflicting assignments
     for (const deactivation of assignmentsToDeactivate) {
       console.log(`🗑️ Deactivating assignment ${deactivation.id}`);
-      batch.update(doc(db, "elderly_caregiver_assign_v2", deactivation.id), {
+      batch.update(doc(db, "elderly_caregiver_assign", deactivation.id), {
         status: "redistributed",
         deactivated_at: Timestamp.now(),
         deactivation_reason: deactivation.reason,
@@ -606,7 +606,7 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     console.log(`  - Existing caregiver assignments updated: ${elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id !== caregiverId).length}`);
     
     // Log the integration activity with detailed distribution info
-    await addDoc(collection(db, "activity_logs_v2"), {
+    await addDoc(collection(db, "activity_logs"), {
       action: "New Caregiver Integration with Complete Elderly Redistribution",
       caregiver_id: caregiverId,
       assignment_details: assignmentData,

@@ -242,7 +242,7 @@ export const fetchStaticData = async () => {
 export const fetchAssignments = async (isCurrent = true) => {
   try {
     const q = query(
-      collection(db, "cg_house_assign_v2"), 
+      collection(db, "cg_house_assign"), 
       where("is_current", "==", isCurrent)
     );
     const snap = await getDocs(q);
@@ -257,7 +257,7 @@ export const fetchElderlyAssignments = async () => {
   try {
     const snap = await getDocs(
       query(
-        collection(db, "elderly_caregiver_assign_v2"),
+        collection(db, "elderly_caregiver_assign"),
         where("status", "==", "active")
       )
     );
@@ -280,7 +280,7 @@ export const fetchTempReassignments = async () => {
 
 export const getMaxVersion = async () => {
   try {
-    const snap = await getDocs(collection(db, "cg_house_assign_v2"));
+    const snap = await getDocs(collection(db, "cg_house_assign"));
     if (snap.empty) return 0;
     const versions = snap.docs.map((d) => d.data().version || 0);
     return Math.max(...versions);
@@ -293,7 +293,7 @@ export const getMaxVersion = async () => {
 const getLastHouseMap = async () => {
   try {
     const snap = await getDocs(
-      query(collection(db, "cg_house_assign_v2"), orderBy("created_at", "desc"))
+      query(collection(db, "cg_house_assign"), orderBy("created_at", "desc"))
     );
 
     const lastMap = {};
@@ -323,14 +323,14 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
 
     // 🔹 1. Deactivate current assignments
     const allAssignSnap = await getDocs(
-      query(collection(db, "cg_house_assign_v2"), where("is_current", "==", true))
+      query(collection(db, "cg_house_assign"), where("is_current", "==", true))
     );
 
     let batch = writeBatch(db);
     let writeCount = 0;
 
     for (const d of allAssignSnap.docs) {
-      batch.update(doc(db, "cg_house_assign_v2", d.id), { is_current: false });
+      batch.update(doc(db, "cg_house_assign", d.id), { is_current: false });
       writeCount++;
       if (writeCount >= BATCH_SIZE) {
         await batch.commit();
@@ -629,11 +629,11 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
           
           console.log(`✅ ${cg.user_fname} ${cg.user_lname}: ${days_assigned.join(', ')}`);
           
-          // create cg_house_assign_v2 doc for the caregiver/shift
+          // create cg_house_assign doc for the caregiver/shift
           const shift = shiftDefs[s].key;
           const time_range = shiftDefs[s].time_range;
 
-          const assignRef = doc(collection(db, "cg_house_assign_v2"));
+          const assignRef = doc(collection(db, "cg_house_assign"));
           batch.set(assignRef, {
             caregiver_id: cg.id,
             house_id: house.house_id,
@@ -733,7 +733,7 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
             for (const elder of sortedHouseElders) {
               assignedElderlyIds.add(elder.id);
               
-              const elderRef = doc(collection(db, "elderly_caregiver_assign_v2"));
+              const elderRef = doc(collection(db, "elderly_caregiver_assign"));
               batch.set(elderRef, {
                 caregiver_id: caregiver.caregiver_id,
                 elderly_id: elder.id,
@@ -787,7 +787,7 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
               for (const elder of elderlyChunk) {
                 assignedElderlyIds.add(elder.id);
                 
-                const elderRef = doc(collection(db, "elderly_caregiver_assign_v2"));
+                const elderRef = doc(collection(db, "elderly_caregiver_assign"));
                 batch.set(elderRef, {
                   caregiver_id: caregiver.caregiver_id,
                   elderly_id: elder.id,
@@ -855,7 +855,7 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
             // Assign these elderly to this caregiver for their working days
             for (const day of caregiver.days_assigned) {
               for (const elder of elderBatch) {
-                const elderRef = doc(collection(db, "elderly_caregiver_assign_v2"));
+                const elderRef = doc(collection(db, "elderly_caregiver_assign"));
                 batch.set(elderRef, {
                   caregiver_id: caregiver.id,
                   elderly_id: elder.id,
@@ -897,7 +897,7 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
     }
 
     // Activity log
-    await addDoc(collection(db, "activity_logs_v2"), {
+    await addDoc(collection(db, "activity_logs"), {
       action: "Generate Schedule (Enhanced with House-Based Elderly Distribution)",
       version: nextVersion,
       time: Timestamp.now(),
@@ -983,8 +983,8 @@ export const clearSchedule = async () => {
     // Clear all schedule-related collections sequentially to be safe
     console.log("Starting schedule cleanup...");
     
-    await deleteCollection("cg_house_assign_v2");
-    await deleteCollection("elderly_caregiver_assign_v2");
+    await deleteCollection("cg_house_assign");
+    await deleteCollection("elderly_caregiver_assign");
     await deleteCollection("temp_reassignments");
 
     console.log("All schedule collections cleared successfully");
@@ -1019,7 +1019,7 @@ export const findOrphanedAssignments = async (shouldDelete = false) => {
       const batch = writeBatch(db);
       
       orphanedAssignments.forEach(assignment => {
-        const assignmentRef = doc(db, "cg_house_assign_v2", assignment.id);
+        const assignmentRef = doc(db, "cg_house_assign", assignment.id);
         batch.delete(assignmentRef);
       });
       
@@ -1065,7 +1065,7 @@ export const findOrphanedElderlyAssignments = async (shouldDelete = false) => {
       const batch = writeBatch(db);
       
       orphanedElderlyAssignments.forEach(assignment => {
-        const assignmentRef = doc(db, "elderly_caregiver_assign_v2", assignment.id);
+        const assignmentRef = doc(db, "elderly_caregiver_assign", assignment.id);
         batch.delete(assignmentRef);
       });
       
@@ -1209,7 +1209,7 @@ export const createElderlyAssignmentsBatch = async (elderlyAssignments, batch, w
   console.log(`📝 Creating ${elderlyAssignments.length} elderly assignments in batch`);
   
   for (const assignment of elderlyAssignments) {
-    const elderRef = doc(collection(db, "elderly_caregiver_assign_v2"));
+    const elderRef = doc(collection(db, "elderly_caregiver_assign"));
     currentBatch.set(elderRef, assignment);
     currentWriteCount++;
     

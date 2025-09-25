@@ -65,7 +65,7 @@ export const markCaregiverAbsent = async (
     console.log(`Target Date: ${useDateStr}, Day: ${dayName}`);
 
     // 1. Mark the caregiver as absent for the target date only
-    await updateDoc(doc(db, "cg_house_assign_v2", assignDocId), {
+    await updateDoc(doc(db, "cg_house_assign", assignDocId), {
       is_absent: true,
       absent_at: Timestamp.now(),
       absent_for_date: useDateStr
@@ -195,7 +195,7 @@ export const unmarkCaregiverAbsent = async (assignDocId, assignments) => {
     const todayStr = new Date().toISOString().slice(0, 10);
 
     // 1. Clear absence for today only
-    await updateDoc(doc(db, "cg_house_assign_v2", assignDocId), {
+    await updateDoc(doc(db, "cg_house_assign", assignDocId), {
       is_absent: false,
       absent_at: null,
       absent_for_date: null,
@@ -224,12 +224,12 @@ export const unmarkCaregiverAbsent = async (assignDocId, assignments) => {
 export const resetDailyAbsences = async () => {
   try {
     const todayStr = new Date().toISOString().slice(0, 10);
-    const snap = await getDocs(collection(db, "cg_house_assign_v2"));
+    const snap = await getDocs(collection(db, "cg_house_assign"));
 
     const resetPromises = snap.docs
       .filter((d) => d.data().is_absent && d.data().absent_for_date !== todayStr)
       .map((d) =>
-        updateDoc(doc(db, "cg_house_assign_v2", d.id), {
+        updateDoc(doc(db, "cg_house_assign", d.id), {
           is_absent: false,
           absent_at: null,
           absent_for_date: null,

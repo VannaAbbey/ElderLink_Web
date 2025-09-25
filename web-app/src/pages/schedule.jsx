@@ -178,7 +178,7 @@ export default function Schedule() {
   useEffect(() => {
     // build the query to only get current schedules
     const q = query(
-      collection(db, "cg_house_assign_v2"),
+      collection(db, "cg_house_assign"),
       where("is_current", "==", true)
     );
 
@@ -199,7 +199,7 @@ export default function Schedule() {
   useEffect(() => {
   if (viewMode === "history") {
     const q = query(
-      collection(db, "cg_house_assign_v2"),
+      collection(db, "cg_house_assign"),
       where("is_current", "==", false)
     );
 
@@ -218,7 +218,7 @@ export default function Schedule() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
-      collection(db, "elderly_caregiver_assign_v2"),
+      collection(db, "elderly_caregiver_assign"),
       (snapshot) => {
         setElderlyAssigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
       }
