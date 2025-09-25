@@ -469,6 +469,7 @@ export default function Schedule() {
 
   // New Caregiver Integration functions
   const handleNewCaregiverIntegration = async () => {
+    console.log(`%c🔧 TEST: Console logging is working! Button clicked.`, 'color: red; font-size: 14px; font-weight: bold;');
     try {
       // Refresh static data first to ensure we have latest caregiver info
       await loadStaticData();
@@ -538,15 +539,28 @@ export default function Schedule() {
       const result = await NewCaregiverService.integrateNewCaregiver(selectedNewCaregiver, assignmentData, assignments, elderlyAssigns, houses);
       
       if (result.success) {
+        console.log(`✅ Integration successful: ${result.elderlyAssigned} elderly assigned to new caregiver, ${result.totalElderlyRedistributed} total redistributed`);
+      console.log(`%c🎉 INTEGRATION COMPLETED SUCCESSFULLY!`, 'color: green; font-size: 16px; font-weight: bold;');
+      console.log(`%cNew caregiver assignments: ${result.elderlyAssigned}`, 'color: green; font-weight: bold;');
+      console.log(`%cTotal redistributed: ${result.totalElderlyRedistributed}`, 'color: blue; font-weight: bold;');
+        
+        // Force a complete data refresh with proper timing
+        console.log("🔄 Refreshing all schedule data after integration...");
+        
+        // Wait a bit for database operations to fully complete
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         // Refresh all data including caregivers list FIRST
         await loadStaticData(); // This will refresh the caregivers list so names show properly
         await loadAllAssignments();
         await loadAllElderlyAssigns();
         
-        // Small delay to ensure data is fully loaded
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Additional delay to ensure UI state is fully updated
+        await new Promise(resolve => setTimeout(resolve, 200));
         
-        showAlert(`Successfully integrated caregiver into the schedule!\n\nAssigned to: ${assignmentData.house}\nShift: ${assignmentData.shift}\nWork Days: ${assignmentData.workDays.join(', ')}`, "Integration Successful");
+        console.log("✅ Data refresh completed after caregiver integration");
+        
+        showAlert(`Successfully integrated caregiver into the schedule!\n\nAssigned to: ${assignmentData.house}\nShift: ${assignmentData.shift}\nWork Days: ${assignmentData.workDays.join(', ')}\n\nTotal elderly redistributed: ${result.totalElderlyRedistributed}\nNew caregiver assigned: ${result.elderlyAssigned} elderly`, "Integration Successful");
         
         // Reset modal state
         setShowNewCaregiverModal(false);
@@ -996,7 +1010,7 @@ export default function Schedule() {
 
       <div className="toggle-header">
         <div className="toggle-buttons">
-          <button
+          {/* <button
             className={`toggle-btn ${viewMode === "current" ? "active" : ""}`}
           >
             Current Schedule
@@ -1007,7 +1021,7 @@ export default function Schedule() {
             style={{ marginLeft: 8 }}
           >
             Caregiver Schedule History
-          </button>
+          </button> */}
         </div>
 
         {scheduleInfo && (
@@ -1016,7 +1030,7 @@ export default function Schedule() {
               <strong>Schedule:</strong>{" "}
               {scheduleInfo.start?.toLocaleDateString()} → {scheduleInfo.end?.toLocaleDateString()}
             </span>
-            <span style={{ marginLeft: 12 }}>
+            <span>
               <strong>Days Left:</strong> {daysLeft} {daysLeft === 1 ? "day" : "days"}
             </span>
           </div>
@@ -1038,15 +1052,26 @@ export default function Schedule() {
           type="number"
           placeholder="Custom Months"
           value={customDuration}
+          min="1"
+          max="36"
+          onKeyDown={(e) => {
+            // Prevent typing letters, special characters (except backspace, delete, arrow keys, tab)
+            if (!/[0-9]/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
+              e.preventDefault();
+            }
+          }}
           onChange={(e) => {
             const val = e.target.value;
-            setCustomDuration(val);
-            localStorage.setItem("schedule_custom", val); // save custom input
+            // Only allow positive numbers
+            if (val === '' || (parseInt(val) > 0 && parseInt(val) <= 36)) {
+              setCustomDuration(val);
+              localStorage.setItem("schedule_custom", val); // save custom input
+            }
           }}
         />
         <button onClick={handleGenerateClick}>Generate Schedule</button>
         <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
-        <button onClick={handleCleanupOrphanedAssignments} style={{ marginLeft: 8, background: '#dc3545', color: 'white' }}>🧹 Fix Unknown</button>
+        {/* <button onClick={handleCleanupOrphanedAssignments} style={{ marginLeft: 8, background: '#dc3545', color: 'white' }}>🧹 Fix Unknown</button> */}
         <button onClick={handleEmergencyCoverage} style={{ marginLeft: 8, background: '#f39c12', color: 'white' }}>🚨 Emergency Coverage</button>
         <button onClick={handleNewCaregiverIntegration} style={{ marginLeft: 8, background: '#28a745', color: 'white' }}>👥 Add New Caregiver</button>
       </div>
@@ -1205,7 +1230,7 @@ export default function Schedule() {
               return (
                 <tr key={a.id} className={rowClassName}>
                   <td>
-                    {isEmergency && <span className="emergency-badge">🚨 EMERGENCY</span>}
+                    {isEmergency && <span className="emergency-badge">🚨</span>}
                     {caregiverName(a.caregiver_id)}
                   </td>
                   <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>

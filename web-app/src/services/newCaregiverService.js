@@ -15,6 +15,9 @@ import {
   Timestamp 
 } from "firebase/firestore";
 
+// Import shared elderly distribution functions from scheduleService
+import { distributeElderlyForDayShift, createElderlyAssignmentsBatch } from './scheduleService.js';
+
 // Detect caregivers not assigned to current schedule
 export const detectUnassignedCaregivers = async () => {
   try {
@@ -92,7 +95,8 @@ export const generateCaregiverRecommendations = async (caregiverId, assignments,
               weakSlotsCovered: coverageImprovement.weakSlotsCovered,
               totalWeakSlots: weakSlots.length,
               improvementScore: coverageImprovement.score,
-              // Step 4: Generate clear explanation
+              startDay: pattern.startDay,
+              endDay: pattern.days[pattern.days.length - 1],
               explanation: generateCoverageExplanation(coverageImprovement, house.house_name, shift, pattern.days)
             };
             
@@ -295,12 +299,12 @@ const generateCoverageExplanation = (improvement, houseName, shift, workDays) =>
   return explanations.join('. ');
 };
 
-
-
 // Integrate new caregiver into existing schedule
 export const integrateNewCaregiver = async (caregiverId, assignmentData, currentAssignments, elderlyAssignments, houses) => {
   try {
     console.log(`🔗 Integrating caregiver ${caregiverId} into existing schedule`);
+    console.log(`%c🚀 NEW CAREGIVER INTEGRATION STARTED`, 'color: green; font-size: 16px; font-weight: bold;');
+    console.log(`%cCaregiver ID: ${caregiverId}`, 'color: blue; font-weight: bold;');
     
     // Validate that the caregiver exists in the users collection
     const allCaregivers = await getDocs(
@@ -328,6 +332,16 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     const batch = writeBatch(db);
     let writeCount = 0;
     
+    // Map shift to time range (same as main schedule generator)
+    const shiftDefs = [
+      { name: "1st Shift (6:00 AM - 2:00 PM)", key: "1st", time_range: { start: "06:00", end: "14:00" } },
+      { name: "2nd Shift (2:00 PM - 10:00 PM)", key: "2nd", time_range: { start: "14:00", end: "22:00" } },
+      { name: "3rd Shift (10:00 PM - 6:00 AM)", key: "3rd", time_range: { start: "22:00", end: "06:00" } },
+    ];
+    
+    const shiftDef = shiftDefs.find(s => s.key === assignmentData.shift);
+    const time_range = shiftDef ? shiftDef.time_range : { start: "06:00", end: "14:00" }; // fallback to 1st shift
+    
     // Create new assignment document
     const newAssignmentRef = doc(collection(db, "cg_house_assign_v2"));
     const assignmentDoc = {
@@ -339,6 +353,7 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
       version: version,
       start_date: startDate,
       end_date: endDate,
+      time_range: time_range, // 🔧 Added missing time_range field
       created_at: Timestamp.now(),
       daily_absent: {}, // Initialize empty absent tracking
       integration_type: "manual_addition", // Mark as manually added
@@ -383,25 +398,80 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     
     console.log(`🏠 House ${assignmentData.house}: ${allHouseCaregivers.length} total caregivers, ${elderlyList.length} elderly`);
     
-    // Apply the same distribution logic as the main schedule generator - PER DAY AND SHIFT
+    // PROPER ELDERLY REDISTRIBUTION: When adding a new caregiver, we need to 
+    // redistribute ALL elderly assignments for the affected day/shift/house combinations
     let elderlyAssignmentsToCreate = [];
+    let assignmentsToDeactivate = [];
     
-    // For each work day, create daily assignments using the same logic as main scheduler
+    // Prepare metadata for elderly assignment creation (identical structure to main generator)
+    const assignmentMetadata = {
+      version: version,
+      assign_id: newAssignmentId,
+      house_id: assignmentData.house,
+      house_name: houses.find(h => h.house_id === assignmentData.house)?.house_name || assignmentData.house
+    };
+    
+    // For each work day, properly redistribute existing elderly assignments
     for (const workDay of assignmentData.workDays) {
-      console.log(`📅 Processing ${workDay} for caregiver integration...`);
+      console.log(`📅 Processing ${workDay} for complete elderly redistribution...`);
       
-      // Find existing elderly assignments for this day/shift/house
+      // STEP 1: Find ALL existing elderly assignments for this day/shift/house
+      // Must filter by current version to avoid deactivating old assignments
       const existingDayAssignments = elderlyAssignments.filter(ea => 
         ea.house_id === assignmentData.house &&
         ea.shift === assignmentData.shift &&
-        ea.day === workDay
+        ea.day === workDay &&
+        ea.status === "active" &&
+        ea.assign_version === version  // Only get current version assignments
       );
       
-      // Find caregivers working this day/shift (including the new one)
-      const workingCaregivers = allHouseCaregivers.filter(cg => {
-        if (cg.caregiver_id === caregiverId) return true; // New caregiver is always working
+      console.log(`📋 Found ${existingDayAssignments.length} existing elderly assignments for ${workDay} ${assignmentData.shift} shift (version ${version})`);
+      
+      // Debug: Log which assignments we found
+      if (existingDayAssignments.length > 0) {
+        console.log(`🔍 Existing assignments to deactivate:`);
+        existingDayAssignments.forEach((assignment, idx) => {
+          console.log(`  ${idx + 1}. ID: ${assignment.id}, Caregiver: ${assignment.caregiver_id}, Elderly: ${assignment.elderly_id}`);
+        });
+      }
+      
+      // STEP 2: Collect all elderly currently assigned to this day/shift/house
+      const elderlyToRedistribute = [];
+      const existingElderlyIds = new Set();
+      
+      for (const assignment of existingDayAssignments) {
+        if (!existingElderlyIds.has(assignment.elderly_id)) {
+          existingElderlyIds.add(assignment.elderly_id);
+          
+          // Find the elderly details from our elderly list
+          const elderlyDetails = elderlyList.find(e => e.id === assignment.elderly_id);
+          if (elderlyDetails) {
+            elderlyToRedistribute.push(elderlyDetails);
+          }
+        }
         
-        // Check if existing caregiver works this day/shift
+        // Mark this assignment for deactivation
+        assignmentsToDeactivate.push({
+          id: assignment.id,
+          reason: `complete_redistribution_new_caregiver_${caregiverId}_${workDay}`
+        });
+      }
+      
+      console.log(`👥 Will redistribute ${elderlyToRedistribute.length} elderly among caregivers`);
+      
+      // STEP 3: Identify ALL caregivers working this day/shift (including new one)
+      const workingCaregivers = [];
+      
+      // Add new caregiver first
+      workingCaregivers.push({
+        caregiver_id: caregiverId,
+        caregiver_name: `${caregiverData.user_fname} ${caregiverData.user_lname}`.toLowerCase(),
+        user_fname: caregiverData.user_fname,
+        user_lname: caregiverData.user_lname
+      });
+      
+      // Add existing caregivers working this day/shift
+      for (const cg of houseCaregivers) {
         const existingAssignment = currentAssignments.find(assign => 
           assign.caregiver_id === cg.caregiver_id && 
           assign.house_id === assignmentData.house &&
@@ -411,133 +481,79 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
           assign.days_assigned.includes(workDay)
         );
         
-        return !!existingAssignment;
-      });
-      
-      console.log(`� ${workDay}: ${workingCaregivers.length} caregivers working, ${elderlyList.length} elderly, ${existingDayAssignments.length} existing assignments`);
-      
-      if (workingCaregivers.length === 1) {
-        // Single caregiver gets ALL elderly in the house for this day
-        console.log(`👤 Single caregiver scenario: ${caregiverId} gets all ${elderlyList.length} elderly on ${workDay}`);
-        
-        for (const elderly of elderlyList) {
-          elderlyAssignmentsToCreate.push({
-            caregiver_id: caregiverId,
-            elderly_id: elderly.id,
-            assigned_at: Timestamp.now(),
-            assign_version: version,
-            assign_id: newAssignmentId,
-            status: "active",
-            day: workDay,
-            shift: assignmentData.shift,
-            house_id: assignmentData.house,
-            house_name: houses.find(h => h.house_id === assignmentData.house)?.house_name || assignmentData.house,
-            assignment_type: "integration_single_caregiver_gets_all_house_elderly_per_day",
-            caregiver_name: `${caregiverData.user_fname} ${caregiverData.user_lname}`.toLowerCase(),
-            elderly_name: `${elderly.elderly_fname} ${elderly.elderly_lname}`.toLowerCase(),
-            debug_info: `${workDay}_${assignmentData.shift}_integration_single_cg_all_elderly`,
-            integration_type: "single_caregiver_gets_all"
-          });
-        }
-        
-      } else if (workingCaregivers.length > 1) {
-        // Multiple caregivers: Distribute elderly among all working caregivers for this day
-        console.log(`👥 Multiple caregivers on ${workDay}: ${workingCaregivers.length} caregivers, distributing ${elderlyList.length} elderly`);
-        
-        // Create balanced chunks for each working caregiver
-        const elderlyChunks = Array.from({ length: workingCaregivers.length }, () => []);
-        
-        // Distribute elderly round-robin to ensure balanced assignment
-        for (let i = 0; i < elderlyList.length; i++) {
-          const chunkIndex = i % workingCaregivers.length;
-          elderlyChunks[chunkIndex].push(elderlyList[i]);
-        }
-        
-        // Find the new caregiver's index and assign their chunk
-        const newCaregiverIndex = workingCaregivers.findIndex(cg => cg.caregiver_id === caregiverId);
-        
-        if (newCaregiverIndex >= 0) {
-          const elderlyChunk = elderlyChunks[newCaregiverIndex];
-          
-          console.log(`👤 New caregiver gets ${elderlyChunk.length} elderly on ${workDay}: ${elderlyChunk.map(e => `${e.elderly_fname} ${e.elderly_lname}`).join(', ')}`);
-          
-          for (const elderly of elderlyChunk) {
-            elderlyAssignmentsToCreate.push({
-              caregiver_id: caregiverId,
-              elderly_id: elderly.id,
-              assigned_at: Timestamp.now(),
-              assign_version: version,
-              assign_id: newAssignmentId,
-              status: "active",
-              day: workDay,
-              shift: assignmentData.shift,
-              house_id: assignmentData.house,
-              house_name: houses.find(h => h.house_id === assignmentData.house)?.house_name || assignmentData.house,
-              assignment_type: "integration_multiple_caregivers_split_house_elderly_per_day",
-              caregiver_name: `${caregiverData.user_fname} ${caregiverData.user_lname}`.toLowerCase(),
-              elderly_name: `${elderly.elderly_fname} ${elderly.elderly_lname}`.toLowerCase(),
-              debug_info: `${workDay}_${assignmentData.shift}_integration_multi_cg_split_elderly`,
-              integration_type: "multiple_caregiver_daily_split"
+        if (existingAssignment) {
+          // Get caregiver details from users collection for proper redistribution
+          const existingCaregiverDoc = allCaregivers.docs.find(doc => doc.id === cg.caregiver_id);
+          if (existingCaregiverDoc) {
+            const cgData = existingCaregiverDoc.data();
+            workingCaregivers.push({
+              caregiver_id: cg.caregiver_id,
+              caregiver_name: `${cgData.user_fname} ${cgData.user_lname}`.toLowerCase(),
+              user_fname: cgData.user_fname,
+              user_lname: cgData.user_lname
             });
           }
         }
       }
-    }
-    
-    console.log(`📊 Created ${elderlyAssignmentsToCreate.length} elderly assignments across ${assignmentData.workDays.length} work days`);
-    
-    // Handle conflicts: For multiple caregiver scenarios, we need to clean up existing
-    // elderly assignments that might now be redistributed due to the new caregiver
-    let assignmentsToDeactivate = [];
-    
-    if (elderlyAssignmentsToCreate.length > 0) {
-      console.log(`🔄 Need to redistribute elderly assignments due to new caregiver integration`);
       
-      // For each work day, find assignments that need to be updated due to redistribution
-      for (const workDay of assignmentData.workDays) {
-        // Find existing active assignments for this day/shift/house
-        const dayAssignments = elderlyAssignments.filter(ea => 
-          ea.house_id === assignmentData.house &&
-          ea.shift === assignmentData.shift &&
-          ea.day === workDay &&
-          ea.status === "active"
+      console.log(`👥 ${workDay}: ${workingCaregivers.length} total caregivers will handle ${elderlyToRedistribute.length} elderly`);
+      
+      // STEP 4: Use shared distribution function to redistribute ALL elderly among ALL caregivers
+      if (elderlyToRedistribute.length > 0 && workingCaregivers.length > 0) {
+        const redistributedAssignments = distributeElderlyForDayShift(
+          elderlyToRedistribute, 
+          workingCaregivers, 
+          workDay, 
+          assignmentData.shift, 
+          assignmentMetadata
         );
         
-        // Find caregivers working this day/shift (including new one)
-        const workingCaregivers = allHouseCaregivers.filter(cg => {
-          if (cg.caregiver_id === caregiverId) return true;
-          
-          const existingAssignment = currentAssignments.find(assign => 
-            assign.caregiver_id === cg.caregiver_id && 
-            assign.house_id === assignmentData.house &&
-            assign.shift === assignmentData.shift &&
-            assign.is_current &&
-            assign.days_assigned && 
-            assign.days_assigned.includes(workDay)
-          );
-          
-          return !!existingAssignment;
+        // All redistributed assignments need to be created (not just for new caregiver)
+        redistributedAssignments.forEach(assignment => {
+          assignment.integration_type = "complete_redistribution_with_new_caregiver";
+          assignment.redistribution_trigger = `new_caregiver_${caregiverId}_added`;
         });
         
-        // If there are multiple caregivers now, we need to redistribute
-        if (workingCaregivers.length > 1 && dayAssignments.length > 0) {
-          console.log(`🧹 ${workDay}: Found ${dayAssignments.length} existing assignments to redistribute among ${workingCaregivers.length} caregivers`);
-          
-          // Mark existing assignments as needing update (deactivate them)
-          for (const assignment of dayAssignments) {
-            assignmentsToDeactivate.push({
-              id: assignment.id,
-              reason: `redistribution_due_to_new_caregiver_${caregiverId}_${workDay}`
-            });
-          }
-        }
+        elderlyAssignmentsToCreate.push(...redistributedAssignments);
+        
+        console.log(`✅ Created ${redistributedAssignments.length} redistributed assignments for ${workDay}`);
+      } else if (elderlyToRedistribute.length === 0) {
+        console.log(`ℹ️ No existing elderly assignments found for ${workDay} - new caregiver will be available but unassigned`);
       }
     }
+    
+    console.log(`📊 Created ${elderlyAssignmentsToCreate.length} elderly assignments for complete redistribution across ${assignmentData.workDays.length} work days`);
+    
+    // Debug: Log assignments per caregiver to verify distribution
+    const assignmentsByCaregiver = {};
+    elderlyAssignmentsToCreate.forEach(assignment => {
+      if (!assignmentsByCaregiver[assignment.caregiver_id]) {
+        assignmentsByCaregiver[assignment.caregiver_id] = 0;
+      }
+      assignmentsByCaregiver[assignment.caregiver_id]++;
+    });
+    
+    console.log(`🔍 DEBUG: Elderly assignments per caregiver:`);
+    console.log(`%c📊 REDISTRIBUTION BREAKDOWN`, 'color: orange; font-size: 14px; font-weight: bold;');
+    Object.entries(assignmentsByCaregiver).forEach(([cgId, count]) => {
+      const isNewCaregiver = cgId === caregiverId;
+      console.log(`%c  ${cgId}${isNewCaregiver ? ' (NEW)' : ' (EXISTING)'}: ${count} elderly`, isNewCaregiver ? 'color: green; font-weight: bold;' : 'color: blue;');
+    });
+    console.log(`%c📊 Total assignments created: ${elderlyAssignmentsToCreate.length}`, 'color: purple; font-weight: bold;');
     
     console.log(`🗑️ Will deactivate ${assignmentsToDeactivate.length} conflicting elderly assignments`);
     
+    // Debug: Log each assignment being deactivated
+    if (assignmentsToDeactivate.length > 0) {
+      console.log(`🔍 Assignments being deactivated:`);
+      assignmentsToDeactivate.forEach((deactivation, idx) => {
+        console.log(`  ${idx + 1}. ID: ${deactivation.id}, Reason: ${deactivation.reason}`);
+      });
+    }
+    
     // Deactivate conflicting assignments
     for (const deactivation of assignmentsToDeactivate) {
+      console.log(`🗑️ Deactivating assignment ${deactivation.id}`);
       batch.update(doc(db, "elderly_caregiver_assign_v2", deactivation.id), {
         status: "redistributed",
         deactivated_at: Timestamp.now(),
@@ -547,35 +563,61 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
       writeCount++;
     }
     
-    // Create all elderly assignments with validation
-    for (const elderlyAssign of elderlyAssignmentsToCreate) {
-      // Validate elderly exists
+    // Create elderly assignments using shared batch function (same as main generator)
+    const validElderlyAssignments = elderlyAssignmentsToCreate.filter(elderlyAssign => {
       const elderlyExists = elderlyList.find(e => e.id === elderlyAssign.elderly_id);
       if (!elderlyExists) {
         console.warn(`⚠️ Skipping assignment for non-existent elderly: ${elderlyAssign.elderly_id}`);
-        continue;
+        return false;
       }
-      
-      const elderlyAssignRef = doc(collection(db, "elderly_caregiver_assign_v2"));
-      batch.set(elderlyAssignRef, elderlyAssign);
-      writeCount++;
-    }
+      return true;
+    });
+    
+    // Additional validation: Check for duplicate assignments (same elderly + caregiver + day + shift)
+    const assignmentKeys = new Set();
+    const deduplicatedAssignments = validElderlyAssignments.filter(assignment => {
+      const key = `${assignment.elderly_id}_${assignment.caregiver_id}_${assignment.day}_${assignment.shift}`;
+      if (assignmentKeys.has(key)) {
+        console.warn(`⚠️ Skipping duplicate assignment: ${key}`);
+        return false;
+      }
+      assignmentKeys.add(key);
+      return true;
+    });
+    
+    console.log(`✅ Final validation: ${deduplicatedAssignments.length}/${elderlyAssignmentsToCreate.length} assignments are valid and unique`);
+    
+    // Use shared batch creation function
+    const batchResult = await createElderlyAssignmentsBatch(deduplicatedAssignments, batch, writeCount);
+    const finalBatch = batchResult.batch;
+    const finalWriteCount = batchResult.writeCount;
     
     // Commit all changes
-    if (writeCount > 0) {
-      await batch.commit();
+    if (finalWriteCount > 0) {
+      await finalBatch.commit();
+      console.log(`💾 Successfully committed ${finalWriteCount} database operations`);
     }
+    
+    // Additional verification: Ensure all assignments were created
+    console.log(`📋 Integration Summary:`);
+    console.log(`  - Deactivated old assignments: ${assignmentsToDeactivate.length}`);
+    console.log(`  - Created new assignments: ${elderlyAssignmentsToCreate.length}`);
+    console.log(`  - New caregiver assignments: ${elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id === caregiverId).length}`);
+    console.log(`  - Existing caregiver assignments updated: ${elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id !== caregiverId).length}`);
     
     // Log the integration activity with detailed distribution info
     await addDoc(collection(db, "activity_logs_v2"), {
-      action: "New Caregiver Integration with Elderly Redistribution",
+      action: "New Caregiver Integration with Complete Elderly Redistribution",
       caregiver_id: caregiverId,
       assignment_details: assignmentData,
-      elderly_distribution: {
+      redistribution_summary: {
         total_elderly_in_house: elderlyList.length,
         total_caregivers_in_house: allHouseCaregivers.length,
+        assignments_deactivated: assignmentsToDeactivate.length,
+        assignments_created: elderlyAssignmentsToCreate.length,
         new_caregiver_elderly_count: elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id === caregiverId).length,
-        distribution_type: allHouseCaregivers.length === 1 ? "single_gets_all" : "equal_redistribution"
+        existing_caregivers_updated: elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id !== caregiverId).length,
+        distribution_type: allHouseCaregivers.length === 1 ? "single_gets_all" : "complete_redistribution"
       },
       time: Timestamp.now(),
       created_by: "admin"

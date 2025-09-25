@@ -86,3 +86,8 @@
 .overlay-content::-webkit-scrollbar {
   display: none;
 }
+
+.overlay-close {
+  margin-right: 22em;
+  margin-top: 0.5em;
+}

@@ -33,6 +33,12 @@
   border: 1px solid #ccc;
 }
 
+/* Specific width for the custom months input */
+.control-panel input[type="number"] {
+  min-width: 150px;
+  width: 150px;
+}
+
 .control-panel button {
   background-color: #216386;
   color: white;
@@ -107,6 +113,11 @@
   gap: 5px;
   margin: 0;
   padding: 0;
+}
+
+/* Add space between multiple shift-tabs sections (for nurse-schedule day tabs) */
+.shift-tabs + .shift-tabs {
+  margin-top: 15px;
 }
 
 /* ========== DAYS OF WEEK TABS - COMMENT OUT THIS SECTION TO REMOVE ========== */
@@ -563,11 +574,23 @@
 }
 
 .schedule-inline {
+  background: rgba(85, 162, 204, 0.05);
+  border: 1px solid rgba(11, 33, 45, 0.2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
   font-size: 14px;
   color: #333;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
 }
+
 .schedule-inline strong {
-  color: #000;
+  color: #216386;
+  font-weight: 600;
 }
 
 /* Confirmation Popup Styles */
@@ -1120,7 +1143,9 @@
 .custom-alert {
   max-width: 500px;
   width: 90%;
-  padding: 25px;
+  text-align: center;
+  margin-right: 30em;
+  margin-top: 20em;
 }
 
 .alert-message {
@@ -1136,6 +1161,14 @@
   background-color: #007bff;
   color: white;
   min-width: 80px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: background-color 0.2s;
+  margin-top: 8px;
 }
 
 .ok-btn:hover {

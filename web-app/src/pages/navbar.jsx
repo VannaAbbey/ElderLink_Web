@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { FaBell, FaBars, FaTimes } from "react-icons/fa";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, query, where, onSnapshot, updateDoc, doc } from "firebase/firestore";
+import Notifications from "./notifications";
 import "./navbar.css";
 
 export default function Navbar() {
@@ -13,7 +14,9 @@ export default function Navbar() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768); // ✅ track screen size
+  const [showNotifModal, setShowNotifModal] = useState(false);
   const dropdownRef = useRef(null);
   const notifRef = useRef(null);
 
@@ -41,7 +44,46 @@ export default function Navbar() {
     }
   };
 
-  // Real-time notifications
+  // Handle leave request approval (for dropdown only)
+  const handleApproveLeave = async (leaveId, event) => {
+    event.stopPropagation(); // Prevent dropdown from closing
+    try {
+      await updateDoc(doc(db, "leave_requests", leaveId), {
+        status: "approved",
+        reviewed_at: new Date(),
+        reviewed_by: "admin",
+        reviewer_comments: "Approved by admin",
+        updated_at: new Date()
+      });
+      alert("Leave request approved!");
+    } catch (error) {
+      console.error("Error approving leave:", error);
+      alert("Failed to approve leave request.");
+    }
+  };
+
+  // Handle leave request rejection (for dropdown only)
+  const handleRejectLeave = async (leaveId, event) => {
+    event.stopPropagation(); // Prevent dropdown from closing
+    const reason = prompt("Enter reason for rejection:");
+    if (reason === null) return; // User cancelled
+    
+    try {
+      await updateDoc(doc(db, "leave_requests", leaveId), {
+        status: "rejected",
+        reviewed_at: new Date(),
+        reviewed_by: "admin",
+        reviewer_comments: reason || "No reason provided",
+        updated_at: new Date()
+      });
+      alert("Leave request rejected.");
+    } catch (error) {
+      console.error("Error rejecting leave:", error);
+      alert("Failed to reject leave request.");
+    }
+  };
+
+  // Real-time notifications for elderly status
   useEffect(() => {
     const q = query(
       collection(db, "notifications"),
@@ -49,6 +91,18 @@ export default function Navbar() {
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setNotifications(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time notifications for leave requests
+  useEffect(() => {
+    const q = query(
+      collection(db, "leave_requests"),
+      where("status", "==", "pending")
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setLeaveRequests(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
   }, []);
@@ -147,41 +201,90 @@ export default function Navbar() {
                   onClick={() => setNotifOpen((prev) => !prev)}
                 >
                   <FaBell size={20} />
-                  {notifications.length > 0 && (
-                    <span className="notif-badge">{notifications.length}</span>
+                  {(notifications.length + leaveRequests.length) > 0 && (
+                    <span className="notif-badge">{notifications.length + leaveRequests.length}</span>
                   )}
                 </button>
                 {notifOpen && (
-                  <ul className="notif-menu">
-                    {notifications.length === 0 ? (
-                      <li>No new notifications</li>
-                    ) : (
-                      <>
-                        {notifications.map((notif) => (
-                          <li
-                            key={notif.id}
-                            onClick={() => {
-                              navigate(`/notifications?id=${notif.id}`);
-                              setMenuOpen(false);
-                            }}
-                            className="notif-item"
-                          >
-                            <strong>{notif.elderly_name}</strong> -{" "}
-                            {notif.elderly_status}
-                          </li>
-                        ))}
-                        <li
-                          className="view-all"
-                          onClick={() => {
-                            navigate("/notifications");
-                            setMenuOpen(false);
-                          }}
-                        >
-                          View All Notifications
-                        </li>
-                      </>
-                    )}
-                  </ul>
+                  <div className="notif-menu">
+                    <div className="notif-content">
+                      {(notifications.length === 0 && leaveRequests.length === 0) ? (
+                        <li>No new notifications</li>
+                      ) : (
+                        <>
+                          {/* Elderly Status Notifications */}
+                          {notifications.length > 0 && (
+                            <>
+                              <li className="notif-section-header">Elderly Status Updates</li>
+                              {notifications.map((notif) => (
+                                <li
+                                  key={`notif-${notif.id}`}
+                                  onClick={() => {
+                                    navigate(`/notifications?id=${notif.id}`);
+                                    setMenuOpen(false);
+                                  }}
+                                  className="notif-item elderly-notif"
+                                >
+                                  <strong>{notif.elderly_name}</strong> - {notif.elderly_status}
+                                </li>
+                              ))}
+                            </>
+                          )}
+                          
+                          {/* Leave Request Notifications */}
+                          {leaveRequests.length > 0 && (
+                            <>
+                              <li className="notif-section-header">Leave Requests</li>
+                              {leaveRequests.map((leave) => (
+                                <li key={`leave-${leave.id}`} className="notif-item leave-notif">
+                                  <div className="leave-notif-content">
+                                    <div className="leave-info">
+                                      <strong>{leave.full_name}</strong>
+                                      <span className="leave-type">{leave.leave_type}</span>
+                                      <span className="leave-dates">
+                                        {leave.start_date?.toDate()?.toLocaleDateString()} - 
+                                        {leave.end_date?.toDate()?.toLocaleDateString()}
+                                      </span>
+                                    </div>
+                                    <div className="leave-actions">
+                                      <button
+                                        className="approve-btn-small"
+                                        onClick={(e) => handleApproveLeave(leave.id, e)}
+                                        title="Approve"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        className="reject-btn-small"
+                                        onClick={(e) => handleRejectLeave(leave.id, e)}
+                                        title="Reject"
+                                      >
+                                        ✗
+                                      </button>
+                                    </div>
+                                  </div>
+                                </li>
+                              ))}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    
+                    {/* Fixed Bottom - View All Notifications */}
+                    <div className="notif-bottom">
+                      <li 
+                        className="notif-item view-all-notif"
+                        onClick={() => {
+                          setShowNotifModal(true);
+                          setMenuOpen(false);
+                          setNotifOpen(false);
+                        }}
+                      >
+                        📋 View All Notifications
+                      </li>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -207,35 +310,97 @@ export default function Navbar() {
           <div className="notif-dropdown" ref={notifRef}>
             <button className="notif-btn" onClick={() => setNotifOpen((prev) => !prev)}>
               <FaBell size={20} />
-              {notifications.length > 0 && (
-                <span className="notif-badge">{notifications.length}</span>
+              {(notifications.length + leaveRequests.length) > 0 && (
+                <span className="notif-badge">{notifications.length + leaveRequests.length}</span>
               )}
             </button>
             {notifOpen && (
-              <ul className="notif-menu">
-                {notifications.length === 0 ? (
-                  <li>No new notifications</li>
-                ) : (
-                  <>
-                    {notifications.map((notif) => (
-                      <li
-                        key={notif.id}
-                        onClick={() => navigate(`/notifications?id=${notif.id}`)}
-                        className="notif-item"
-                      >
-                        <strong>{notif.elderly_name}</strong> - {notif.elderly_status}
-                      </li>
-                    ))}
-                    <li className="view-all" onClick={() => navigate("/notifications")}>
-                      View All Notifications
-                    </li>
-                  </>
-                )}
-              </ul>
+              <div className="notif-menu">
+                <div className="notif-content">
+                  {(notifications.length === 0 && leaveRequests.length === 0) ? (
+                    <li>No new notifications</li>
+                  ) : (
+                    <>
+                      {/* Elderly Status Notifications */}
+                      {notifications.length > 0 && (
+                        <>
+                          <li className="notif-section-header">Elderly Status Updates</li>
+                          {notifications.map((notif) => (
+                            <li
+                              key={`notif-${notif.id}`}
+                              onClick={() => navigate(`/notifications?id=${notif.id}`)}
+                              className="notif-item elderly-notif"
+                            >
+                              <strong>{notif.elderly_name}</strong> - {notif.elderly_status}
+                            </li>
+                          ))}
+                        </>
+                      )}
+                      
+                      {/* Leave Request Notifications */}
+                      {leaveRequests.length > 0 && (
+                        <>
+                          <li className="notif-section-header">Leave Requests</li>
+                          {leaveRequests.map((leave) => (
+                            <li key={`leave-${leave.id}`} className="notif-item leave-notif">
+                              <div className="leave-notif-content">
+                                <div className="leave-info">
+                                  <strong>{leave.full_name}</strong>
+                                  <span className="leave-type">{leave.leave_type}</span>
+                                  <span className="leave-dates">
+                                    {leave.start_date?.toDate()?.toLocaleDateString()} - 
+                                    {leave.end_date?.toDate()?.toLocaleDateString()}
+                                  </span>
+                                </div>
+                                <div className="leave-actions">
+                                  <button
+                                    className="approve-btn-small"
+                                    onClick={(e) => handleApproveLeave(leave.id, e)}
+                                    title="Approve"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    className="reject-btn-small"
+                                    onClick={(e) => handleRejectLeave(leave.id, e)}
+                                    title="Reject"
+                                  >
+                                    ✗
+                                  </button>
+                                </div>
+                              </div>
+                            </li>
+                          ))}
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+                
+                {/* Fixed Bottom - View All Notifications */}
+                <div className="notif-bottom">
+                  <li 
+                    className="notif-item view-all-notif"
+                    onClick={() => {
+                      setShowNotifModal(true);
+                      setNotifOpen(false);
+                    }}
+                  >
+                    📋 View All Notifications
+                  </li>
+                </div>
+              </div>
             )}
           </div>
         </div>
       )}
+
+      {/* ✅ Notifications Modal */}
+      <Notifications 
+        isOpen={showNotifModal} 
+        onClose={() => setShowNotifModal(false)}
+        isModal={true}
+      />
     </nav>
   );
 }

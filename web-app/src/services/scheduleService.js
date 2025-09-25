@@ -255,7 +255,12 @@ export const fetchAssignments = async (isCurrent = true) => {
 
 export const fetchElderlyAssignments = async () => {
   try {
-    const snap = await getDocs(collection(db, "elderly_caregiver_assign_v2"));
+    const snap = await getDocs(
+      query(
+        collection(db, "elderly_caregiver_assign_v2"),
+        where("status", "==", "active")
+      )
+    );
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (error) {
     console.error("Error fetching elderly assignments:", error);
@@ -1078,4 +1083,146 @@ export const findOrphanedElderlyAssignments = async (shouldDelete = false) => {
     console.error("Error finding orphaned elderly assignments:", error);
     throw new Error("Failed to find orphaned elderly assignments");
   }
+};
+
+// ============================================================================
+// SHARED ELDERLY DISTRIBUTION UTILITY FUNCTIONS
+// Used by both main schedule generator and new caregiver integration
+// ============================================================================
+
+/**
+ * Distributes elderly among caregivers for a specific day and shift
+ * Uses the same logic as the main schedule generator
+ * @param {Array} elderlyList - List of elderly to distribute
+ * @param {Array} workingCaregivers - Caregivers working this day/shift
+ * @param {string} day - Day of the week
+ * @param {string} shift - Shift (1st, 2nd, 3rd)
+ * @param {Object} assignmentMetadata - Version, house info, etc.
+ * @returns {Array} Array of elderly assignment objects ready for batch creation
+ */
+export const distributeElderlyForDayShift = (elderlyList, workingCaregivers, day, shift, assignmentMetadata) => {
+  const assignments = [];
+  
+  if (!elderlyList || elderlyList.length === 0) {
+    console.log(`📝 No elderly to distribute for ${day} ${shift} shift`);
+    return assignments;
+  }
+  
+  if (!workingCaregivers || workingCaregivers.length === 0) {
+    console.warn(`⚠️ No working caregivers for ${day} ${shift} shift`);
+    return assignments;
+  }
+  
+  // Sort elderly alphabetically for consistent assignment (same as main generator)
+  const sortedElderly = [...elderlyList].sort((a, b) => {
+    const nameA = `${a.elderly_fname} ${a.elderly_lname}`.toLowerCase();
+    const nameB = `${b.elderly_fname} ${b.elderly_lname}`.toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+  
+  console.log(`👥 Distributing ${sortedElderly.length} elderly among ${workingCaregivers.length} caregivers on ${day} ${shift} shift`);
+  
+  if (workingCaregivers.length === 1) {
+    // SINGLE CAREGIVER: Gets ALL house elderly for this day (same as main generator)
+    const caregiver = workingCaregivers[0];
+    console.log(`👤 Single caregiver gets ALL ${sortedElderly.length} elderly on ${day}`);
+    
+    for (const elder of sortedElderly) {
+      assignments.push({
+        caregiver_id: caregiver.caregiver_id,
+        elderly_id: elder.id,
+        assigned_at: Timestamp.now(),
+        assign_version: assignmentMetadata.version,
+        assign_id: assignmentMetadata.assign_id,
+        status: "active",
+        day: day,
+        shift: shift,
+        house_id: assignmentMetadata.house_id,
+        house_name: assignmentMetadata.house_name,
+        assignment_type: "single_caregiver_gets_all_house_elderly_per_day",
+        caregiver_name: caregiver.caregiver_name || `${caregiver.user_fname || ''} ${caregiver.user_lname || ''}`.toLowerCase(),
+        elderly_name: `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase(),
+        debug_info: `${day}_${shift}_single_cg_all_elderly`
+      });
+    }
+    
+  } else {
+    // MULTIPLE CAREGIVERS: Split elderly equally for this day (same as main generator)
+    console.log(`👥 Multiple caregivers: Split ${sortedElderly.length} elderly among ${workingCaregivers.length} caregivers`);
+    
+    // Create balanced chunks for each caregiver (identical to main generator logic)
+    const elderlyChunks = [];
+    for (let i = 0; i < workingCaregivers.length; i++) {
+      elderlyChunks.push([]);
+    }
+    
+    // Distribute elderly round-robin to ensure balanced assignment (same as main generator)
+    for (let i = 0; i < sortedElderly.length; i++) {
+      const chunkIndex = i % workingCaregivers.length;
+      elderlyChunks[chunkIndex].push(sortedElderly[i]);
+    }
+    
+    // Assign each chunk to respective caregiver
+    for (let cgIndex = 0; cgIndex < workingCaregivers.length; cgIndex++) {
+      const caregiver = workingCaregivers[cgIndex];
+      const elderlyChunk = elderlyChunks[cgIndex];
+      
+      console.log(`👤 ${caregiver.caregiver_name || `${caregiver.user_fname} ${caregiver.user_lname}`}: gets ${elderlyChunk.length} elderly on ${day}`);
+      
+      for (const elder of elderlyChunk) {
+        assignments.push({
+          caregiver_id: caregiver.caregiver_id,
+          elderly_id: elder.id,
+          assigned_at: Timestamp.now(),
+          assign_version: assignmentMetadata.version,
+          assign_id: assignmentMetadata.assign_id,
+          status: "active",
+          day: day,
+          shift: shift,
+          house_id: assignmentMetadata.house_id,
+          house_name: assignmentMetadata.house_name,
+          assignment_type: "multiple_caregivers_split_house_elderly_per_day",
+          caregiver_name: caregiver.caregiver_name || `${caregiver.user_fname || ''} ${caregiver.user_lname || ''}`.toLowerCase(),
+          elderly_name: `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase(),
+          debug_info: `${day}_${shift}_multi_cg_split_elderly`
+        });
+      }
+    }
+  }
+  
+  return assignments;
+};
+
+/**
+ * Creates elderly assignments in batch for multiple days/shifts
+ * Handles the database operations and batch management
+ * @param {Array} elderlyAssignments - Array of assignment objects from distributeElderlyForDayShift
+ * @param {Object} batch - Firebase batch object
+ * @param {number} writeCount - Current batch write count
+ * @returns {Object} Updated batch and writeCount
+ */
+export const createElderlyAssignmentsBatch = async (elderlyAssignments, batch, writeCount) => {
+  const BATCH_SIZE = 450; // Same as main generator
+  let currentBatch = batch;
+  let currentWriteCount = writeCount;
+  
+  console.log(`📝 Creating ${elderlyAssignments.length} elderly assignments in batch`);
+  
+  for (const assignment of elderlyAssignments) {
+    const elderRef = doc(collection(db, "elderly_caregiver_assign_v2"));
+    currentBatch.set(elderRef, assignment);
+    currentWriteCount++;
+    
+    // Commit batch if it reaches size limit (same as main generator)
+    if (currentWriteCount >= BATCH_SIZE) {
+      await currentBatch.commit();
+      currentBatch = writeBatch(db);
+      currentWriteCount = 0;
+    }
+  }
+  
+  return {
+    batch: currentBatch,
+    writeCount: currentWriteCount
+  };
 };
