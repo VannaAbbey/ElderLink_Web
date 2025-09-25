@@ -362,7 +362,7 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
   }
   
   // Log activity
-  await addDoc(collection(db, "activity_logs_v2"), {
+  await addDoc(collection(db, "activity_logs"), {
     action: "Manual Emergency Cross-House Coverage Activated",
     date: targetDateStr,
     day: dayName,
@@ -599,7 +599,7 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
   }
   
   // Log activity
-  await addDoc(collection(db, "activity_logs_v2"), {
+  await addDoc(collection(db, "activity_logs"), {
     action: "Emergency Cross-House Coverage Activated",
     date: targetDateStr,
     day: dayName,
