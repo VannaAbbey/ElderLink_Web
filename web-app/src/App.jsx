@@ -23,7 +23,7 @@ import EditAdminProfile from "./pages/edit_admin_profile";
 import EditElderlyProfile from "./pages/edit_elderly_profile";
 import EditCaregiverOverlay from "./pages/edit_cg_overlay"; // ✅ added
 import EditNurseOverlay from "./pages/edit_nurse_overlay"; // ✅ added
-import NurseSchedule from "./pages/nurse-schedule";
+
 
 // --- ProtectedRoute Component ---
 function ProtectedRoute({ user, children }) {
@@ -150,14 +150,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/nurse-schedule"
-          element={
-            <ProtectedRoute user={user}>
-              <NurseSchedule />
-            </ProtectedRoute>
-          }
-        />
+
         <Route
           path="/edit_admin_profile"
           element={

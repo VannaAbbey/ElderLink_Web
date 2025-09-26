@@ -15,7 +15,6 @@ export default function ProfileNurse() {
   const [loading, setLoading] = useState(true);
   const [showEditOverlay, setShowEditOverlay] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [showResignConfirm, setShowResignConfirm] = useState(false); // ✅ added
   const [formData, setFormData] = useState({});
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewImage, setPreviewImage] = useState("");
@@ -104,29 +103,6 @@ export default function ProfileNurse() {
     }
   };
 
-// ✅ Mark as Resigned
-const handleMarkAsResigned = async () => {
-  try {
-    const nurseRef = doc(db, "users", nurse.id);
-
-    const resignationDate = new Date(); // or serverTimestamp() if you prefer server time
-
-    await updateDoc(nurseRef, { 
-      user_activation: false,
-      user_resignedDate: resignationDate
-    });
-
-    setNurse((prev) => ({ 
-      ...prev, 
-      user_activation: false, 
-      user_resignedDate: resignationDate 
-    }));
-    setShowResignConfirm(false);
-  } catch (err) {
-    console.error("Failed to mark as resigned:", err);
-  }
-};
-
   if (loading) return <p>Loading...</p>;
   if (!nurse) return <p>Nurse profile not found.</p>;
 
@@ -169,28 +145,6 @@ const handleMarkAsResigned = async () => {
         </div>
       </div>
 
-      {/* Mark as Resigned Button */}
-      {nurse.user_activation && (
-        <div className="resign-button-container">
-          <button className="resign-btn" onClick={() => setShowResignConfirm(true)}>
-          Mark as Resigned
-          </button>
-        </div>
-      )}
-
-      {/* Resign Confirmation */}
-      {showResignConfirm && (
-        <div className="overlay">
-          <div className="overlay-content">
-            <h3>Are you sure you want to mark this nurse as resigned?</h3>
-            <div className="overlay-buttons">
-              <button onClick={handleMarkAsResigned}>Yes, Mark as Resigned</button>
-              <button onClick={() => setShowResignConfirm(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Edit Overlay */}
       {showEditOverlay && (
         <div className="overlay">
@@ -229,7 +183,7 @@ const handleMarkAsResigned = async () => {
         </div>
       )}
 
-      {/* Save Confirmation */}
+      {/* Confirmation */}
       {showConfirm && (
         <div className="overlay">
           <div className="overlay-content">

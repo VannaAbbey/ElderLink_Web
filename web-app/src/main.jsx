@@ -21,7 +21,6 @@ import EditAdminProfile from "./pages/edit_admin_profile.jsx";
 import EditElderlyProfile from "./pages/edit_elderly_profile";
 import EditCaregiverOverlay from "./pages/edit_cg_overlay"; // ✅ added
 import EditNurseOverlay from "./pages/edit_nurse_overlay"; // ✅ added
-import NurseSchedule from "./pages/nurse-schedule.jsx";
 
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -47,7 +46,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <Route path="/edit_elderly_profile/:id" element={<EditElderlyProfile />} />
       <Route path="/edit_caregiver_overlay/:id" element={<EditCaregiverOverlay />} /> {/* ✅ added */}
       <Route path="/edit_nurse_overlay/:id" element={<EditNurseOverlay />} /> {/* ✅ added */}
-      <Route path="/nurse-schedule" element={<NurseSchedule />} />
+
 
       
 

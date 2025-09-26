@@ -15,7 +15,6 @@ export default function ProfileCaregiver() {
   const [loading, setLoading] = useState(true);
   const [showEditOverlay, setShowEditOverlay] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [formData, setFormData] = useState({});
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewImage, setPreviewImage] = useState("");
@@ -104,29 +103,6 @@ export default function ProfileCaregiver() {
     }
   };
 
-  // ✅ Mark as Resigned
-  const handleMarkAsResigned = async () => {
-    try {
-      const caregiverRef = doc(db, "users", caregiver.id);
-
-      const resignationDate = new Date();
-
-      await updateDoc(caregiverRef, {
-        user_activation: false,
-        user_resignedDate: resignationDate,
-      });
-
-      setCaregiver((prev) => ({
-        ...prev,
-        user_activation: false,
-        user_resignedDate: resignationDate,
-      }));
-      setShowResignConfirm(false);
-    } catch (err) {
-      console.error("Failed to mark as resigned:", err);
-    }
-  };
-
   if (loading) return <p>Loading...</p>;
   if (!caregiver) return <p>Caregiver profile not found.</p>;
 
@@ -134,9 +110,7 @@ export default function ProfileCaregiver() {
     <>
       {/* Header */}
       <div className="caregiver-profile-header">
-        <button onClick={() => navigate(-1)}>
-          <MdArrowBack /> Back
-        </button>
+        <button onClick={() => navigate(-1)}><MdArrowBack /> Back</button>
         <h1>{caregiver.user_fname} {caregiver.user_lname}</h1>
         <button onClick={() => setShowEditOverlay(true)}>Edit Profile</button>
       </div>
@@ -158,7 +132,7 @@ export default function ProfileCaregiver() {
           </p>
           <p className="detail-item">
             <MdCake className="icon" />
-            <strong>Birth Date: </strong> &nbsp;{formatDateInput(caregiver.user_bday)}
+            <strong>Birth Date: </strong> &nbsp; {formatDateInput(caregiver.user_bday)}
           </p>
           <p className="detail-item">
             <FaPhone className="icon" />
@@ -171,34 +145,12 @@ export default function ProfileCaregiver() {
         </div>
       </div>
 
-      {/* Mark as Resigned Button */}
-      {caregiver.user_activation && (
-        <div className="resign-button-container">
-          <button className="resign-btn" onClick={() => setShowResignConfirm(true)}>
-            Mark as Resigned
-          </button>
-        </div>
-      )}
-
-      {/* Resign Confirmation */}
-      {showResignConfirm && (
-        <div className="overlay">
-          <div className="overlay-content">
-            <h3>Are you sure you want to mark this caregiver as resigned?</h3>
-            <div className="overlay-buttons">
-              <button onClick={handleMarkAsResigned}>Yes, Mark as Resigned</button>
-              <button onClick={() => setShowResignConfirm(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Edit Overlay */}
       {showEditOverlay && (
         <div className="overlay">
           <div className="overlay-content">
             <span className="overlay-close" onClick={() => setShowEditOverlay(false)}>✕</span>
-            <h2>Edit Caregiver Profile</h2>
+            <h2 className="edit-profile-title">Edit Caregiver Profile</h2>
 
             <div className="image-upload-box" onClick={() => document.getElementById("fileInput").click()}>
               {previewImage ? (
@@ -231,7 +183,7 @@ export default function ProfileCaregiver() {
         </div>
       )}
 
-      {/* Save Confirmation */}
+      {/* Confirmation */}
       {showConfirm && (
         <div className="overlay">
           <div className="overlay-content">

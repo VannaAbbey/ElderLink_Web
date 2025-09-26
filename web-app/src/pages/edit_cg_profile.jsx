@@ -20,27 +20,24 @@ export default function EditCaregiverProfile() {
   const [editCaregiverId, setEditCaregiverId] = useState(null);
 
   // Fetch caregivers from Firestore
-useEffect(() => {
-  const fetchCaregivers = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, "users"));
-      const data = querySnapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .filter(
-          (u) => u.user_type === "caregiver" && u.user_activation !== false // ✅ only active caregivers
-        );
+  useEffect(() => {
+    const fetchCaregivers = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, "users"));
+        const data = querySnapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter((u) => u.user_type === "caregiver");
 
-      setCaregivers(data);
-    } catch (error) {
-      console.error("Error fetching caregivers:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+        setCaregivers(data);
+      } catch (error) {
+        console.error("Error fetching caregivers:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  fetchCaregivers();
-}, []);
-
+    fetchCaregivers();
+  }, []);
 
   // Filter + sort caregivers
   const filteredCaregivers = caregivers
@@ -72,7 +69,7 @@ useEffect(() => {
         </div>
       </div>
         <div className="header-title-wrapper">
-          <span className="total-caregiver"> Total Number of Active Caregivers: {totalCaregivers}</span>
+          <span className="total-caregiver"> Total Number of Caregivers: {totalCaregivers}</span>
         </div>
 
       {/* Search + Sort */}

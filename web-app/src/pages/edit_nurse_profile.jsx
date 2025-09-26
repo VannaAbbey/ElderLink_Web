@@ -19,25 +19,23 @@ export default function EditNurseProfile() {
 
   // Fetch nurses from Firestore
   useEffect(() => {
-  const fetchNurses = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, "users"));
-      const data = querySnapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .filter(
-          (u) => u.user_type === "nurse" && u.user_activation !== false // ✅ only active
-        );
+    const fetchNurses = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, "users"));
+        const data = querySnapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter((u) => u.user_type === "nurse");
 
-      setNurses(data);
-    } catch (error) {
-      console.error("Error fetching nurses:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+        setNurses(data);
+      } catch (error) {
+        console.error("Error fetching nurses:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  fetchNurses();
-}, []);
+    fetchNurses();
+  }, []);
 
   // Search + Sort
   const filteredNurses = nurses
@@ -69,7 +67,7 @@ export default function EditNurseProfile() {
         </div>
       </div>
       <div className="header-title-wrapper">
-          <span className="total-nurse"> Total Number of Active Nurses: {totalNurses}</span>
+          <span className="total-nurse"> Total Number of Nurses: {totalNurses}</span>
         </div>
 
       {/* Search + Sort */}
