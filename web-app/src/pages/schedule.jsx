@@ -3,19 +3,18 @@ import { db } from "../firebase";
 import {
   collection,
   getDocs,
-  addDoc,
   query,
   where,
-  Timestamp,
-  doc,
-  updateDoc,
-  deleteDoc,
-  orderBy,
+  onSnapshot,
   writeBatch,
-  onSnapshot
+  doc
 } from "firebase/firestore";
 import "./schedule.css";
 import Navbar from "./navbar";
+import * as ScheduleService from "../services/scheduleService";
+import * as NewCaregiverService from "../services/newCaregiverService";
+import * as EmergencyService from "../services/emergencyService";
+import * as AbsenceService from "../services/absenceService";
 
 
 export default function Schedule() {
@@ -36,10 +35,39 @@ export default function Schedule() {
   const [activeHouseId, setActiveHouseId] = useState(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  
+  // Emergency coverage modal states
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [emergencyOptions, setEmergencyOptions] = useState([]);
+  const [selectedDonorChoices, setSelectedDonorChoices] = useState({});
+  
+  // New caregiver integration modal states
+  const [showNewCaregiverModal, setShowNewCaregiverModal] = useState(false);
+  const [unassignedCaregivers, setUnassignedCaregivers] = useState([]);
+  const [selectedNewCaregiver, setSelectedNewCaregiver] = useState(null);
+  const [integrationMode, setIntegrationMode] = useState('auto'); // 'auto' or 'manual'
+  const [manualAssignment, setManualAssignment] = useState({
+    house: '',
+    shift: '',
+    workDays: []
+  });
+  const [systemRecommendations, setSystemRecommendations] = useState([]);
+  const [selectedRecommendation, setSelectedRecommendation] = useState(null);
+  
+  // ========== DAYS OF WEEK TABS - COMMENT OUT BELOW LINES TO REMOVE ==========
   const [activeDay, setActiveDay] = useState("Monday");
+  // ========== END DAYS OF WEEK TABS SECTION ==========
 
   const [scheduleInfo, setScheduleInfo] = useState(null);
   const [daysLeft, setDaysLeft] = useState(null);
+  const [showAbsentConfirm, setShowAbsentConfirm] = useState(false);
+  const [pendingAbsentAssignment, setPendingAbsentAssignment] = useState(null);
+
+  // Custom alert modal states
+  const [showCustomAlert, setShowCustomAlert] = useState(false);
+  const [customAlertMessage, setCustomAlertMessage] = useState("");
+  const [customAlertTitle, setCustomAlertTitle] = useState("Notification");
 
 
   // 3-shift schedule definitions
@@ -54,11 +82,50 @@ export default function Schedule() {
 
   const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-  //code for rest day modal
-  const [showRestDayModal, setShowRestDayModal] = useState(false);
-  const [selectedCaregiverAssignId, setSelectedCaregiverAssignId] = useState(null);
-  const [selectedCaregiverName, setSelectedCaregiverName] = useState("");
-  const [selectedRestDays, setSelectedRestDays] = useState([]);
+  // Validation function to check if rest days are consecutive
+  const areWorkDaysConsecutive = (workDays) => {
+    if (workDays.length !== 5) return false;
+    
+    // Get rest days (days not in workDays)
+    const restDays = daysOfWeek.filter(day => !workDays.includes(day));
+    
+    if (restDays.length !== 2) return false; // Should have exactly 2 rest days
+    
+    // Convert rest day names to indices
+    const restDayIndices = restDays.map(day => daysOfWeek.indexOf(day)).sort((a, b) => a - b);
+    
+    // Check if the 2 rest days are consecutive
+    const [firstRest, secondRest] = restDayIndices;
+    
+    // Two cases for consecutive rest days:
+    // 1. Normal consecutive (e.g., Saturday=5, Sunday=6)
+    // 2. Wrap-around consecutive (e.g., Sunday=6, Monday=0)
+    const isNormalConsecutive = (secondRest - firstRest === 1);
+    const isWrapAroundConsecutive = (firstRest === 0 && secondRest === 6); // Sunday and Saturday
+    
+    return isNormalConsecutive || isWrapAroundConsecutive;
+  };
+
+  // Custom alert function to replace native alert()
+  const showAlert = (message, title = "Notification") => {
+    setCustomAlertMessage(message);
+    setCustomAlertTitle(title);
+    setShowCustomAlert(true);
+  };
+
+  const closeCustomAlert = () => {
+    setShowCustomAlert(false);
+    setCustomAlertMessage("");
+    setCustomAlertTitle("Notification");
+  };
+
+  const formatDateString = (date) => {
+    // Format date in local timezone to avoid UTC conversion issues
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
 
   useEffect(() => {
@@ -100,7 +167,7 @@ export default function Schedule() {
       if (latestEnd && now > latestEnd) {
         console.log("Auto reshuffle triggered!");
         const months = customDuration ? parseInt(customDuration) : duration;
-        await distributeCaregivers(months);
+        await handleScheduleGeneration(months);
       }
     };
 
@@ -150,6 +217,26 @@ export default function Schedule() {
 }, [viewMode]);
 
   useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "elderly_caregiver_assign"),
+      (snapshot) => {
+        setElderlyAssigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "temp_reassignments"),
+      (snapshot) => {
+        setTempReassigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
   if (!assignments || assignments.length === 0) {
     setScheduleInfo(null);
     setDaysLeft(null);
@@ -174,59 +261,110 @@ export default function Schedule() {
   }
 }, [assignments]);
 
+  // Separate effect to handle date validation when schedule info changes
+  useEffect(() => {
+    if (scheduleInfo?.start && scheduleInfo?.end) {
+      const { start, end } = scheduleInfo;
+      const currentSelected = selectedDate;
+      
+      // If the currently selected date is outside the schedule range, reset it
+      if (currentSelected < start || currentSelected > end) {
+        // Choose today if it's within range, otherwise use start date
+        const today = new Date();
+        const newSelectedDate = (today >= start && today <= end) ? today : start;
+        setSelectedDate(newSelectedDate);
+        
+        // Update the day tab to match
+        const dayName = daysOfWeek[newSelectedDate.getDay() === 0 ? 6 : newSelectedDate.getDay() - 1];
+        setActiveDay(dayName);
+      }
+    }
+  }, [scheduleInfo]);
+
   // --- Loaders ---
   const loadStaticData = async () => {
-    const cgSnap = await getDocs(query(collection(db, "users"), where("user_type", "==", "caregiver")));
-    const houseSnap = await getDocs(collection(db, "house"));
-    const elderlySnap = await getDocs(collection(db, "elderly"));
+    try {
+      const data = await ScheduleService.fetchStaticData();
+      setCaregivers(data.caregivers);
+      setHouses(data.houses);
+      setElderlyList(data.elderly);
 
-    const cgList = cgSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    const houseList = houseSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    const elderly = elderlySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // Set H001 (St. Sebastian) as default house if present
+      if (!activeHouseId && data.houses.length) {
+        const defaultHouse = data.houses.find(h => h.house_id === "H001") || data.houses[0];
+        setActiveHouseId(defaultHouse.house_id);
+      }
 
-    setCaregivers(cgList);
-    setHouses(houseList);
-    setElderlyList(elderly);
-
-    // Set H001 (St. Sebastian) as default house if present
-    if (!activeHouseId && houseList.length) {
-      const defaultHouse = houseList.find(h => h.house_id === "H001") || houseList[0];
-      setActiveHouseId(defaultHouse.house_id);
+      const v = await ScheduleService.getMaxVersion();
+      setCurrentVersion(v);
+    } catch (error) {
+      console.error("Error loading static data:", error);
+      showAlert("Failed to load data. Please refresh the page.", "Error");
     }
-
-    const v = await getMaxVersion();
-    setCurrentVersion(v);
   };
 
   const loadAllAssignments = async () => {
-    let q;
-    if (viewMode === "current") q = query(collection(db, "cg_house_assign"), where("is_current", "==", true));
-    else q = query(collection(db, "cg_house_assign"), where("is_current", "==", false));
-    const snap = await getDocs(q);
-    setAssignments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    try {
+      const isCurrent = viewMode === "current";
+      const data = await ScheduleService.fetchAssignments(isCurrent);
+      setAssignments(data);
+    } catch (error) {
+      console.error("Error loading assignments:", error);
+    }
   };
 
   const loadAllElderlyAssigns = async () => {
-    const snap = await getDocs(collection(db, "elderly_caregiver_assign"));
-    setElderlyAssigns(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    try {
+      const data = await ScheduleService.fetchElderlyAssignments();
+      setElderlyAssigns(data);
+    } catch (error) {
+      console.error("Error loading elderly assignments:", error);
+    }
   };
 
   const loadTempReassigns = async () => {
-    const snap = await getDocs(collection(db, "temp_reassignments"));
-    setTempReassigns(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    try {
+      const data = await ScheduleService.fetchTempReassignments();
+      setTempReassigns(data);
+    } catch (error) {
+      console.error("Error loading temp reassignments:", error);
+    }
   };
 
-  const getMaxVersion = async () => {
-    const snap = await getDocs(collection(db, "cg_house_assign"));
-    if (snap.empty) return 0;
-    const versions = snap.docs.map((d) => d.data().version || 0);
-    return Math.max(...versions);
+  // Schedule generation function - now uses API service
+  const handleScheduleGeneration = async (months) => {
+    try {
+      const result = await ScheduleService.generateSchedule(months, {
+        caregivers,
+        houses,
+        elderly: elderlyList
+      });
+      
+      if (result.success) {
+        console.log("Schedule generated successfully:", result.message);
+        setCurrentVersion(result.version);
+        // Refresh data after generation
+        await loadAllAssignments();
+        await loadAllElderlyAssigns();
+      }
+    } catch (error) {
+      console.error("Error generating schedule:", error);
+      throw error; // Re-throw so calling function can handle it
+    }
   };
 
-  const getEndDate = (months) => {
-    const end = new Date();
-    end.setMonth(end.getMonth() + months);
-    return end;
+  const confirmGenerate = async () => {
+    setIsGenerating(true);
+    setShowOverlay(false);
+    try {
+      await handleScheduleGeneration(pendingDuration);
+      setShowSuccess(true);
+    } catch (err) {
+      console.error("Error generating schedule:", err);
+      showAlert("Something went wrong. Please try again.", "Error");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleGenerateClick = () => {
@@ -235,553 +373,623 @@ export default function Schedule() {
     setShowOverlay(true);
   };
 
-  // helper: split arr into n groups as even as possible
-  const splitIntoChunks = (arr, n) => {
-    if (!arr || arr.length === 0) return Array.from({ length: n }, () => []);
-    const res = Array.from({ length: n }, () => []);
-    for (let i = 0; i < arr.length; i++) {
-      res[i % n].push(arr[i]);
-    }
-    return res;
-  };
-
-    // helper to fetch each caregiver's last house
-  const getLastHouseMap = async () => {
-    const snap = await getDocs(
-      query(collection(db, "cg_house_assign"), orderBy("created_at", "desc"))
-    );
-
-    const lastMap = {};
-    snap.docs.forEach((d) => {
-      const data = d.data();
-      if (!lastMap[data.caregiver_id]) {
-        lastMap[data.caregiver_id] = data.house_id;
-      }
-    });
-    return lastMap;
-  };
-
-const distributeCaregivers = async (months) => {
-  // 🔹 1. Deactivate *only* current assignments (same as before)
-  const allAssignSnap = await getDocs(
-    query(collection(db, "cg_house_assign"), where("is_current", "==", true))
-  );
-
-  let batch = writeBatch(db);
-  let writeCount = 0;
-  const BATCH_SIZE = 450; // commit threshold (adjust if needed)
-
-  for (const d of allAssignSnap.docs) {
-    batch.update(doc(db, "cg_house_assign", d.id), { is_current: false });
-    writeCount++;
-    if (writeCount >= BATCH_SIZE) {
-      await batch.commit();
-      await new Promise((r) => setTimeout(r, 0));
-      batch = writeBatch(db);
-      writeCount = 0;
-    }
-  }
-  if (writeCount > 0) {
-    await batch.commit();
-    await new Promise((r) => setTimeout(r, 0));
-    batch = writeBatch(db);
-    writeCount = 0;
-  }
-
-  // 🔹 2. Versioning + dates
-  const prevVersion = await getMaxVersion();
-  const nextVersion = prevVersion + 1;
-  const start_date = Timestamp.now();
-  const end_date = Timestamp.fromDate(getEndDate(months));
-
-  // 🔹 3. House weights (same)
-  const weights = {
-    H002: 2,
-    H003: 2,
-    H001: 1,
-    H004: 1,
-    H005: 1,
-  };
-  const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
-
-  // 🔹 4. Caregivers per house (proportional)
-  const caregiversPerHouse = {};
-  for (const house of houses) {
-    const w = weights[house.house_id] || 1;
-    caregiversPerHouse[house.house_id] = Math.max(
-      1,
-      Math.floor((caregivers.length * w) / totalWeight)
-    );
-  }
-
-  // 🔹 5. Last-house history (avoid repeating)
-  const lastHouseMap = await getLastHouseMap();
-
-  // 🔹 6. Shuffle caregivers pool
-  const pool = [...caregivers].sort(() => Math.random() - 0.5);
-
-  // 🔹 7. Assign caregivers to houses (weighted)
-  let poolIdx = 0;
-  const houseAssignments = {}; // houseId -> array of caregiver objects
-  for (const house of houses) {
-    const count = caregiversPerHouse[house.house_id] || 1;
-    houseAssignments[house.house_id] = [];
-
-    for (let i = 0; i < count && poolIdx < pool.length; i++) {
-      const cg = pool[poolIdx];
-      // Avoid giving caregiver the same last house when possible
-      if (lastHouseMap[cg.id] === house.house_id) {
-        pool.push(pool.splice(poolIdx, 1)[0]); // move to end
-        i--;
-        continue;
-      }
-      houseAssignments[house.house_id].push(cg);
-      poolIdx++;
-    }
-  }
-
-  // If any caregivers remain in pool (not enough weight slots) assign them to houses round-robin
-  if (poolIdx < pool.length) {
-    const remaining = pool.slice(poolIdx);
-    const houseIds = houses.map((h) => h.house_id);
-    let rIdx = 0;
-    for (const cg of remaining) {
-      const hid = houseIds[rIdx % houseIds.length];
-      houseAssignments[hid] = houseAssignments[hid] || [];
-      houseAssignments[hid].push(cg);
-      rIdx++;
-    }
-  }
-
-  // Helper: ensure dayCounts container for each house+shift
-  const ensureDayCounts = (obj, key) => {
-    if (!obj[key]) obj[key] = daysOfWeek.map(() => 0);
-    return obj[key];
-  };
-
-  // 🔹 8. For each house: split into shifts, assign days per caregiver, THEN distribute elderly per day
-  for (const house of houses) {
-    const assignedCGs = houseAssignments[house.house_id] || [];
-    if (!assignedCGs.length) continue;
-
-    // split caregivers into 3 shift groups as evenly as possible
-    const shiftCaregivers = splitIntoChunks(assignedCGs, 3);
-
-    // house elders (all elderly that belong to this house)
-    const houseElders = elderlyList.filter((e) => e.house_id === house.house_id) || [];
-
-    // We'll keep references to assignRef IDs per caregiver so we can relate per-day elder assignments
-    const assignRefsByCaregiver = {}; // caregiverId -> { assignRef, shift, days_assigned }
-
-    for (let s = 0; s < 3; s++) {
-      const cgInShift = shiftCaregivers[s] || [];
-      if (!cgInShift.length) continue;
-
-      // day counts keyed by house_shift to balance days across caregivers in same house+shift
-      const dayCountsKey = `${house.house_id}_${shiftDefs[s].key}_dayCounts`;
-      const dayCounts = ensureDayCounts(houseAssignments, dayCountsKey);
-
-      // For each caregiver in this shift: pick 5 least-loaded days (balanced)
-      for (let i = 0; i < cgInShift.length; i++) {
-        const cg = cgInShift[i];
-        // choose 5 days with smallest counts
-        let dayIndexes = daysOfWeek.map((_, idx) => idx);
-        dayIndexes.sort((a, b) => dayCounts[a] - dayCounts[b] || Math.random() - 0.5);
-        const selectedIndexes = dayIndexes.slice(0, 5);
-        const days_assigned = selectedIndexes.map((idx) => daysOfWeek[idx]);
-        // update day counts
-        selectedIndexes.forEach((idx) => (dayCounts[idx]++));
-        // create cg_house_assign doc for the caregiver/shift
-        const shift = shiftDefs[s].key;
-        const time_range = shiftDefs[s].time_range;
-
-        const assignRef = doc(collection(db, "cg_house_assign"));
-        batch.set(assignRef, {
-          caregiver_id: cg.id,
-          house_id: house.house_id,
-          shift,
-          days_assigned,
-          start_date,
-          end_date,
-          time_range,
-          is_absent: false,
-          absent_at: null,
-          is_current: true,
-          version: nextVersion,
-          created_at: Timestamp.now(),
-        });
-        writeCount++;
-
-        // Save the assignRef for later linking per-day elder assignment
-        assignRefsByCaregiver[cg.id] = {
-          assignRefId: assignRef.id,
-          shift,
-          days_assigned,
-        };
-
-        // commit batch if needed
-        if (writeCount >= BATCH_SIZE) {
-          await batch.commit();
-          batch = writeBatch(db);
-          writeCount = 0;
-        }
-      }
-    }
-
-    // --- Now: per-day distribution of elders among active caregivers (house-level, per shift) ---
-    // For each day of the week, for each shift, find the caregivers active that day+shift and split the houseElders among them.
-    for (let s = 0; s < 3; s++) {
-      const shiftKey = shiftDefs[s].key;
-      // list caregivers in this house & shift from assignRefsByCaregiver
-      const cgIdsInShift = Object.keys(assignRefsByCaregiver).filter(
-        (cid) => assignRefsByCaregiver[cid].shift === shiftKey
-      );
-
-      if (cgIdsInShift.length === 0) continue;
-
-      // For each day
-      for (const day of daysOfWeek) {
-        // caregivers active that day
-        const activeCgIds = cgIdsInShift.filter((cid) =>
-          (assignRefsByCaregiver[cid].days_assigned || []).map(d => d.toLowerCase()).includes(day.toLowerCase())
-        );
-
-        if (activeCgIds.length === 0) {
-          // no caregivers for this shift/day -> skip (no assignment)
-          continue;
-        }
-
-        // split the house elders among active caregivers for this day
-        const elderChunks = splitIntoChunks(houseElders, activeCgIds.length);
-
-        // create elderly_caregiver_assign entries per caregiver for this day
-        for (let i = 0; i < activeCgIds.length; i++) {
-          const targetCgId = activeCgIds[i];
-          const elderChunk = elderChunks[i] || [];
-
-          // If no elders assigned to this chunk, skip
-          if (!elderChunk.length) continue;
-
-          // Use previously created assignRefId for the caregiver
-          const assignId = assignRefsByCaregiver[targetCgId].assignRefId;
-
-          for (const elder of elderChunk) {
-            const elderRef = doc(collection(db, "elderly_caregiver_assign"));
-            batch.set(elderRef, {
-              caregiver_id: targetCgId,
-              elderly_id: elder.id,
-              assigned_at: Timestamp.now(),
-              assign_version: nextVersion,
-              assign_id: assignId,
-              status: "active",
-              day, // day string (e.g., "Monday") — indicates the day this link applies to
-            });
-            writeCount++;
-
-            if (writeCount >= BATCH_SIZE) {
-              await batch.commit();
-              batch = writeBatch(db);
-              writeCount = 0;
-            }
-          }
-        }
-      }
-    }
-  } // end houses loop
-
-  // final commit if anything left
-  if (writeCount > 0) {
-    await batch.commit();
-  }
-
-  // 🔹 9. Activity log
-  await addDoc(collection(db, "activity_logs"), {
-    action: "Generate Schedule (per-day elder distribution)",
-    version: nextVersion,
-    time: Timestamp.now(),
-    created_by: "system",
-    details: { duration_months: months },
-  });
-};
-
-
-  const confirmGenerate = async () => {
-    setIsGenerating(true); // Show loading spinner immediately
-    setShowOverlay(false);
+  // Manual emergency coverage activation - now with modal
+  const handleEmergencyCoverage = async () => {
+    console.log("🚨 Emergency Coverage button clicked");
+    
     try {
-      await distributeCaregivers(pendingDuration);
-      setShowSuccess(true);
-    } catch (err) {
-      console.error("Error generating schedule:", err);
-      alert("Something went wrong. Please try again.");
-    } finally {
-      setIsGenerating(false); // Hide loading overlay
+      const selectedDateStr = formatDateString(selectedDate);
+      console.log(`📅 Checking emergency needs for date: ${selectedDateStr}`);
+      console.log(`📊 Current assignments count: ${assignments.length}`);
+      console.log(`👵 Current elderly assignments count: ${elderlyAssigns.length}`);
+      console.log(`🔄 Current temp reassignments count: ${tempReassigns.length}`);
+      
+      const emergencyCheck = await EmergencyService.checkEmergencyNeedsAndDonors(selectedDateStr, assignments, elderlyAssigns, tempReassigns);
+      console.log("🔍 Emergency check result:", emergencyCheck);
+      
+      if (!emergencyCheck.hasEmergency) {
+        console.log("✅ No emergency coverage needed");
+        showAlert("✅ No emergency coverage needed for this date.", "Success");
+        return;
+      }
+      
+      console.log(`🆘 Found ${emergencyCheck.emergencyCount} emergencies`);
+      console.log("🎯 Emergency options:", emergencyCheck.emergencyOptions);
+      
+      // Initialize selected donor choices with suggested donors
+      const initialChoices = {};
+      emergencyCheck.emergencyOptions.forEach(option => {
+        if (option.suggestedDonor) {
+          initialChoices[`${option.emergencyHouse}_${option.emergencyShift}`] = {
+            donorHouse: option.suggestedDonor.house,
+            caregiverId: option.suggestedDonor.presentCaregivers[0]?.caregiverId
+          };
+        }
+      });
+      
+      console.log("💡 Initial donor choices:", initialChoices);
+      
+      setEmergencyOptions(emergencyCheck.emergencyOptions);
+      setSelectedDonorChoices(initialChoices);
+      setShowEmergencyModal(true);
+      
+      console.log("✅ Modal should be showing now");
+      
+    } catch (error) {
+      console.error("❌ Error checking emergency coverage:", error);
+      showAlert(`Failed to check emergency coverage needs: ${error.message}`, "Error");
     }
   };
 
-  const closeSuccess = () => setShowSuccess(false);
+  // Execute emergency coverage with selected donors
+  const executeEmergencyCoverage = async () => {
+    try {
+      const selectedDateStr = formatDateString(selectedDate);
+      
+      // Create donor choices array for the API
+      const donorChoices = Object.entries(selectedDonorChoices).map(([key, choice]) => {
+        const [house, shift] = key.split('_');
+        return {
+          emergencyHouse: house,
+          emergencyShift: shift,
+          donorHouse: choice.donorHouse,
+          caregiverId: choice.caregiverId
+        };
+      });
+      
+      const result = await EmergencyService.activateEmergencyCoverage(selectedDateStr, assignments, elderlyAssigns, tempReassigns, donorChoices);
+      
+      if (result.success) {
+        if (result.emergencyReassignments?.length > 0) {
+          const emergencyCount = result.emergencyReassignments.length;
+          showAlert(`🚨 Emergency coverage activated!\n\n${emergencyCount} emergency reassignment(s) made:\n${result.emergencyReassignments.map(er => `• ${er.emergencyHouse} ${er.emergencyShift} covered by caregiver from ${er.donorHouse}`).join('\n')}`, "Emergency Coverage Activated");
+          
+          // Refresh data to show changes
+          await loadAllAssignments();
+          await loadAllElderlyAssigns();
+          await loadTempReassigns();
+        } else {
+          showAlert("✅ No emergency coverage activated.", "Information");
+        }
+      }
+      
+      setShowEmergencyModal(false);
+      
+    } catch (error) {
+      console.error("Error executing emergency coverage:", error);
+      showAlert("Failed to execute emergency coverage. Please try again.", "Error");
+    }
+  };
 
+  const cancelEmergencyCoverage = () => {
+    setShowEmergencyModal(false);
+    setEmergencyOptions([]);
+    setSelectedDonorChoices({});
+  };
 
-  const cancelGenerate = () => setShowOverlay(false);
+  // New Caregiver Integration functions
+  const handleNewCaregiverIntegration = async () => {
+    console.log(`%c🔧 TEST: Console logging is working! Button clicked.`, 'color: red; font-size: 14px; font-weight: bold;');
+    try {
+      // Refresh static data first to ensure we have latest caregiver info
+      await loadStaticData();
+      
+      // Then detect unassigned caregivers
+      const unassigned = await NewCaregiverService.detectUnassignedCaregivers();
+      
+      if (unassigned.length === 0) {
+        showAlert("All caregivers are already assigned to the current schedule.", "No Unassigned Caregivers");
+        return;
+      }
+      
+      setUnassignedCaregivers(unassigned);
+      setShowNewCaregiverModal(true);
+      
+    } catch (error) {
+      console.error("Error detecting unassigned caregivers:", error);
+      showAlert("Failed to check for unassigned caregivers. Please try again.", "Error");
+    }
+  };
 
-  // --- Absent handling (unchanged) ---
-  const markAbsent = async (assignDocId) => {
-    const assign = assignments.find((a) => a.id === assignDocId);
-    if (!assign) return;
+  const handleCaregiverSelection = async (caregiverId) => {
+    setSelectedNewCaregiver(caregiverId);
+    setSelectedRecommendation(null); // Reset selected recommendation
+    
+    if (integrationMode === 'auto') {
+      // Generate system recommendations
+      try {
+        const recommendations = await NewCaregiverService.generateCaregiverRecommendations(caregiverId, assignments, houses);
+        setSystemRecommendations(recommendations);
+      } catch (error) {
+        console.error("Error generating recommendations:", error);
+        showAlert("Failed to generate recommendations. Please try manual assignment.", "Error");
+      }
+    }
+  };
 
-    const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10); // YYYY-MM-DD
-    const dayName = daysOfWeek[today.getDay()]; // get current day name
-
-    // 1. Mark the caregiver as absent for today only
-    await updateDoc(doc(db, "cg_house_assign", assignDocId), {
-      is_absent: true,
-      absent_at: Timestamp.now(),
-      absent_for_date: todayStr // track which date this absence is for
-    });
-
-    await loadAllAssignments();
-    await loadAllElderlyAssigns();
-
-    // 2. Get the caregiver's assigned elderly
-    const assignedEAs = elderlyAssigns.filter(
-      (ea) => ea.caregiver_id === assign.caregiver_id && ea.assign_version === assign.version
-    );
-    const elderIds = assignedEAs.map((ea) => ea.elderly_id);
-
-    // 3. Find other caregivers in the SAME house & shift, who are NOT absent today AND work today
-    const otherAssigns = assignments.filter((a) =>
-      a.house_id === assign.house_id &&
-      a.shift === assign.shift &&
-      a.id !== assignDocId &&
-      (!a.is_absent || a.absent_for_date !== todayStr) && // only present today
-      a.is_current &&
-      a.days_assigned.includes(dayName) // only those scheduled today
-    );
-
-    if (otherAssigns.length === 0) {
-      // fallback: do not reassign across shifts
-      console.log("No available caregivers to reassign today.");
+  const executeNewCaregiverIntegration = async () => {
+    if (!selectedNewCaregiver) {
+      showAlert("Please select a caregiver first.", "No Caregiver Selected");
       return;
     }
 
-    // 4. Split elders evenly among available caregivers
-    const chunks = splitIntoChunks(elderIds, otherAssigns.length);
-    const promises = [];
-    for (let i = 0; i < otherAssigns.length; i++) {
-      const target = otherAssigns[i];
-      const chunk = chunks[i] || [];
-      for (const eid of chunk) {
-        promises.push(
-          addDoc(collection(db, "temp_reassignments"), {
-            elderly_id: eid,
-            from_caregiver_id: assign.caregiver_id,
-            to_caregiver_id: target.caregiver_id,
-            date: todayStr,
-            assign_version: assign.version,
-            created_at: Timestamp.now(),
-          })
-        );
+    try {
+      let assignmentData;
+      
+      if (integrationMode === 'auto') {
+        if (!selectedRecommendation) {
+          showAlert("Please select a system recommendation first.", "No Recommendation Selected");
+          return;
+        }
+        // Use the selected recommendation
+        assignmentData = selectedRecommendation;
+      } else if (integrationMode === 'manual') {
+        // Validate manual assignment
+        if (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length === 0) {
+          showAlert("Please complete all manual assignment fields.", "Incomplete Assignment");
+          return;
+        }
+        assignmentData = manualAssignment;
+      } else {
+        showAlert("Please select assignment options.", "No Assignment Data");
+        return;
       }
-    }
 
-    await Promise.all(promises);
-    await loadTempReassigns();
-    await loadAllAssignments();
-    await loadAllElderlyAssigns();
+      // Execute the integration
+      const result = await NewCaregiverService.integrateNewCaregiver(selectedNewCaregiver, assignmentData, assignments, elderlyAssigns, houses);
+      
+      if (result.success) {
+        console.log(`✅ Integration successful: ${result.elderlyAssigned} elderly assigned to new caregiver, ${result.totalElderlyRedistributed} total redistributed`);
+      console.log(`%c🎉 INTEGRATION COMPLETED SUCCESSFULLY!`, 'color: green; font-size: 16px; font-weight: bold;');
+      console.log(`%cNew caregiver assignments: ${result.elderlyAssigned}`, 'color: green; font-weight: bold;');
+      console.log(`%cTotal redistributed: ${result.totalElderlyRedistributed}`, 'color: blue; font-weight: bold;');
+        
+        // Force a complete data refresh with proper timing
+        console.log("🔄 Refreshing all schedule data after integration...");
+        
+        // Wait a bit for database operations to fully complete
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Refresh all data including caregivers list FIRST
+        await loadStaticData(); // This will refresh the caregivers list so names show properly
+        await loadAllAssignments();
+        await loadAllElderlyAssigns();
+        
+        // Additional delay to ensure UI state is fully updated
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        console.log("✅ Data refresh completed after caregiver integration");
+        
+        showAlert(`Successfully integrated caregiver into the schedule!\n\nAssigned to: ${assignmentData.house}\nShift: ${assignmentData.shift}\nWork Days: ${assignmentData.workDays.join(', ')}\n\nTotal elderly redistributed: ${result.totalElderlyRedistributed}\nNew caregiver assigned: ${result.elderlyAssigned} elderly`, "Integration Successful");
+        
+        // Reset modal state
+        setShowNewCaregiverModal(false);
+        setSelectedNewCaregiver(null);
+        setIntegrationMode('auto');
+        setManualAssignment({ house: '', shift: '', workDays: [] });
+        setSystemRecommendations([]);
+        setSelectedRecommendation(null);
+        
+      } else {
+        showAlert(result.message || "Failed to integrate caregiver.", "Integration Failed");
+      }
+      
+    } catch (error) {
+      console.error("Error integrating new caregiver:", error);
+      showAlert("Failed to integrate caregiver. Please try again.", "Error");
+    }
+  };
+
+  const cancelNewCaregiverIntegration = () => {
+    setShowNewCaregiverModal(false);
+    setSelectedNewCaregiver(null);
+    setIntegrationMode('auto');
+    setManualAssignment({ house: '', shift: '', workDays: [] });
+    setSystemRecommendations([]);
+    setSelectedRecommendation(null);
+    setUnassignedCaregivers([]);
+  };
+
+  const closeSuccess = () => setShowSuccess(false);
+  const cancelGenerate = () => setShowOverlay(false);
+
+  // --- Absent handling - now uses API service ---
+  const markAbsent = async (assignDocId) => {
+    // Store the assignment and show confirmation popup
+    const assignment = assignments.find(a => a.id === assignDocId);
+    if (assignment) {
+      setPendingAbsentAssignment({ assignDocId, assignment });
+      setShowAbsentConfirm(true);
+    }
+  };
+
+  const confirmMarkAbsent = async () => {
+    if (!pendingAbsentAssignment) return;
+    
+    try {
+      const selectedDateStr = formatDateString(selectedDate);
+      const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
+      
+      console.log(`Marking absent for exact date: ${selectedDateStr} (${dayName})`);
+      
+      // Use new emergency coverage function
+      const result = await AbsenceService.markCaregiverAbsentWithEmergencyCheck(
+        pendingAbsentAssignment.assignDocId, 
+        assignments, 
+        elderlyAssigns, 
+        tempReassigns,
+        selectedDateStr,
+        dayName
+      );
+      
+      if (result.success) {
+        // Refresh data after marking absent
+        await loadAllAssignments();
+        await loadAllElderlyAssigns();
+        await loadTempReassigns();
+        
+        // Check if emergency coverage is needed and show modal
+        if (result.emergencyCheck && result.emergencyCheck.hasEmergency) {
+          console.log(`🚨 Emergency coverage needed after marking absence! Showing modal...`);
+          
+          // Initialize selected donor choices with suggested donors
+          const initialChoices = {};
+          result.emergencyCheck.emergencyOptions.forEach(option => {
+            if (option.suggestedDonor) {
+              initialChoices[`${option.emergencyHouse}_${option.emergencyShift}`] = {
+                donorHouse: option.suggestedDonor.house,
+                caregiverId: option.suggestedDonor.presentCaregivers[0]?.caregiverId
+              };
+            }
+          });
+          
+          setEmergencyOptions(result.emergencyCheck.emergencyOptions);
+          setSelectedDonorChoices(initialChoices);
+          setShowEmergencyModal(true);
+          
+          // Show an alert about the emergency
+          showAlert(`🚨 Emergency coverage required!\n\nMarking this caregiver as absent has left ${result.emergencyCheck.emergencyCount} house/shift(s) with no coverage. Please select emergency coverage options.`, "Emergency Coverage Required");
+        } else {
+          // No emergency coverage needed
+          showAlert("✅ Caregiver marked as absent successfully. No emergency coverage needed.", "Success");
+        }
+      }
+    } catch (error) {
+      console.error("Error marking caregiver absent:", error);
+      showAlert("Failed to mark caregiver as absent. Please try again.", "Error");
+    } finally {
+      setShowAbsentConfirm(false);
+      setPendingAbsentAssignment(null);
+    }
+  };
+
+  const cancelMarkAbsent = () => {
+    setShowAbsentConfirm(false);
+    setPendingAbsentAssignment(null);
   };
 
   // --- Optional: reset absences automatically on component mount ---
   useEffect(() => {
-    const resetDailyAbsences = async () => {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      const snap = await getDocs(collection(db, "cg_house_assign"));
-
-      const resetPromises = snap.docs
-        .filter((d) => d.data().is_absent && d.data().absent_for_date !== todayStr)
-        .map((d) =>
-          updateDoc(doc(db, "cg_house_assign", d.id), {
-            is_absent: false,
-            absent_at: null,
-            absent_for_date: null,
-          })
-        );
-
-      await Promise.all(resetPromises);
-      await loadAllAssignments();
+    const resetAbsences = async () => {
+      try {
+        await AbsenceService.resetDailyAbsences();
+        await loadAllAssignments();
+      } catch (error) {
+        console.error("Error resetting daily absences:", error);
+      }
     };
 
-    resetDailyAbsences();
-  }, []); // run once on component mount
+    resetAbsences();
+  }, []);
 
-
-  const unmarkAbsent = async (assignDocId) => {
-    const assign = assignments.find(a => a.id === assignDocId);
-    if (!assign) return;
-
-    const todayStr = new Date().toISOString().slice(0, 10);
-
-    // 1. Clear absence for today only
-    await updateDoc(doc(db, "cg_house_assign", assignDocId), {
-      is_absent: false,
-      absent_at: null,
-      absent_for_date: null, // reset the day-specific absence
-    });
-
-    // 2. Remove temporary reassignments for today from this caregiver
-    const snap = await getDocs(query(
-      collection(db, "temp_reassignments"),
-      where("date", "==", todayStr)
-    ));
-
-    const delPromises = snap.docs
-      .filter(d => d.data().from_caregiver_id === assign.caregiver_id)
-      .map(d => deleteDoc(doc(db, "temp_reassignments", d.id)));
-
-    await Promise.all(delPromises);
-
-    // 3. Reload state
-    await loadTempReassigns();
-    await loadAllAssignments();
-    await loadAllElderlyAssigns();
-  };
-
-  // ✅ Manual Rest Day function
-  const manualRestDay = async (assignDocId) => {
-    const assign = assignments.find(a => a.id === assignDocId);
-    if (!assign) return;
-
-    const currentDays = assign.days_assigned || [];
-
-    const input = prompt(
-      `Current days assigned: ${currentDays.join(", ")}\nEnter 2 rest days separated by comma (e.g., Saturday, Sunday):`,
-      ""
+  // Check if caregiver is providing emergency coverage
+  const isProvidingEmergencyCoverage = (caregiverId, selectedDateStr) => {
+    return tempReassigns.some(tr => 
+      tr.to_caregiver_id === caregiverId && 
+      tr.date === selectedDateStr && 
+      tr.from_caregiver_id === "EMERGENCY_ABSENT"
     );
-
-    if (!input) return;
-
-    const restDays = input.split(",").map(d => d.trim()).filter(d => daysOfWeek.includes(d));
-
-    if (restDays.length !== 2) {
-      alert("Please enter exactly 2 valid rest days!");
-      return;
-    }
-
-    const newDaysAssigned = daysOfWeek.filter(d => !restDays.includes(d)).slice(0, 5);
-
-    await updateDoc(doc(db, "cg_house_assign", assignDocId), {
-      days_assigned: newDaysAssigned
-    });
-
-    alert(`Updated working days for ${caregiverName(assign.caregiver_id)}: ${newDaysAssigned.join(", ")}`);
-    await loadAllAssignments();
   };
 
+  // Get emergency coverage details for a caregiver
+  const getEmergencyCoverageDetails = (caregiverId, selectedDateStr) => {
+    const emergencyAssignments = tempReassigns.filter(tr => 
+      tr.to_caregiver_id === caregiverId && 
+      tr.date === selectedDateStr && 
+      tr.from_caregiver_id === "EMERGENCY_ABSENT"
+    );
+    
+    if (emergencyAssignments.length > 0) {
+      const firstAssignment = emergencyAssignments[0];
+      return {
+        count: emergencyAssignments.length,
+        reason: firstAssignment?.reason || "Emergency coverage",
+        originalHouse: firstAssignment?.original_house,
+        emergencyHouse: firstAssignment?.emergency_house,
+        emergencyShift: firstAssignment?.emergency_shift
+      };
+    }
+    
+    return null;
+  };
 
   const getDisplayedEldersFor = (caregiverId) => {
+  const selectedDateStr = formatDateString(selectedDate);
+  
+  // Use the selected date from date picker to determine the day
+  const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
+  
+  console.log(`=== DISPLAYING ELDERLY FOR CAREGIVER ${caregiverId} ===`);
+  console.log(`Selected date: ${selectedDateStr} (${dayName}), Current version: ${currentVersion}`);
+  
+  // First, check if this caregiver is marked as absent for this specific date
+  const caregiverAssignment = assignments.find(a => a.caregiver_id === caregiverId && a.is_current);
+  const isAbsentForThisDate = caregiverAssignment && caregiverAssignment.is_absent && caregiverAssignment.absent_for_date === selectedDateStr;
+  
+  if (isAbsentForThisDate) {
+    console.log(`Caregiver ${caregiverId} is marked ABSENT for ${selectedDateStr} - showing no elderly assignments`);
+    return []; // Return empty array - all elderly should be reassigned to others
+  }
+  
   const base = elderlyAssigns
     .filter(
       (ea) =>
         ea.caregiver_id === caregiverId &&
         ea.assign_version === currentVersion &&
-        ea.day === activeDay // 🔹 only show elderly for the currently selected day
+        ea.day?.toLowerCase() === dayName.toLowerCase()
     )
     .map((ea) => ea.elderly_id);
-
-  const today = new Date().toISOString().slice(0, 10);
+  
+  console.log(`Base assignments for ${caregiverId} on ${dayName}: ${base.length}`, base);
 
   const toTemp = tempReassigns
     .filter(
       (t) =>
         t.to_caregiver_id === caregiverId &&
-        t.date === today &&
+        t.date === selectedDateStr &&
         t.assign_version === currentVersion
     )
     .map((t) => t.elderly_id);
+    
+  console.log(`Temp assignments TO ${caregiverId} for ${selectedDateStr}: ${toTemp.length}`, toTemp);
 
   const fromTemp = tempReassigns
     .filter(
       (t) =>
         t.from_caregiver_id === caregiverId &&
-        t.date === today &&
+        t.date === selectedDateStr &&
         t.assign_version === currentVersion
     )
     .map((t) => t.elderly_id);
+    
+  console.log(`Temp assignments FROM ${caregiverId} for ${selectedDateStr}: ${fromTemp.length}`, fromTemp);
 
-  const finalIds = base.filter((id) => !fromTemp.includes(id)).concat(toTemp);
+  const finalIds = [...new Set(base.filter((id) => !fromTemp.includes(id)).concat(toTemp))]; // Remove duplicates
+  console.log(`Final elderly IDs for ${caregiverId}: ${finalIds.length}`, finalIds);
+  
   const elders = finalIds
-    .map((id) => elderlyList.find((e) => e.id === id))
+    .map((id) => {
+      const elderly = elderlyList.find((e) => e.id === id);
+      if (!elderly) {
+        console.warn(`⚠️ Elderly not found: ${id}. Available elderly:`, 
+          elderlyList.slice(0, 3).map(e => ({ id: e.id, name: `${e.elderly_fname} ${e.elderly_lname}` }))
+        );
+        return { id: id, elderly_fname: "Unknown", elderly_lname: `(${id.substring(0, 8)}...)` };
+      }
+      return elderly;
+    })
     .filter(Boolean);
 
+  console.log(`Final elderly objects for ${caregiverId}:`, elders.map(e => `${e.elderly_fname} ${e.elderly_lname}`));
+  console.log(`=== END DISPLAY DEBUG ===`);
+  
   return elders;
 };
 
 
   const caregiverName = (id) => {
     const c = caregivers.find((cg) => cg.id === id);
-    return c ? `${c.user_fname} ${c.user_lname}` : "Unknown";
-  };
-
-  const filteredAssignments = assignments.filter((a) => {
-    if (viewMode === "current" && !a.is_current) return false;
-    if (viewMode === "previous" && a.is_current) return false;
-    if (activeHouseId && a.house_id !== activeHouseId) return false;
-    if (activeShift && a.shift !== activeShift) return false;
-    if (activeDay && !(a.days_assigned || []).includes(activeDay)) return false; // ✅ filter by day
-    return true;
-  });
-
-  // ✅ Open modal for specific caregiver
-  const openRestDayModal = (assignDocId, caregiverId) => {
-    setSelectedCaregiverAssignId(assignDocId);
-    setSelectedCaregiverName(caregiverName(caregiverId)); // existing helper
-    setSelectedRestDays([]); // reset selection
-    setShowRestDayModal(true);
-  };
-
-  // ✅ Handle checkbox selection
-  const toggleRestDay = (day) => {
-    if (selectedRestDays.includes(day)) {
-      setSelectedRestDays(selectedRestDays.filter(d => d !== day));
-    } else if (selectedRestDays.length < 2) {
-      setSelectedRestDays([...selectedRestDays, day]);
+    if (c) {
+      return `${c.user_fname} ${c.user_lname}`;
     } else {
-      alert("You can only select 2 rest days.");
+      // Enhanced debugging for missing caregivers
+      console.warn(`⚠️ Caregiver not found: ${id}`);
+      console.log(`Available caregivers (${caregivers.length}):`, 
+        caregivers.slice(0, 3).map(cg => ({ id: cg.id, name: `${cg.user_fname} ${cg.user_lname}` }))
+      );
+      return `Unknown (${id.substring(0, 8)}...)`;
     }
   };
 
-  // ✅ Save selected rest days
-  const saveRestDays = async () => {
-    if (selectedRestDays.length !== 2) {
-      alert("Please select exactly 2 rest days.");
-      return;
-    }
+  // Get emergency coverage assignments for display
+  const getEmergencyCoverageAssignments = () => {
+    const selectedDateStr = formatDateString(selectedDate);
+    const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
+    
+    // Find emergency coverage temp assignments
+    const emergencyTempAssigns = tempReassigns.filter(tr => 
+      tr.date === selectedDateStr && 
+      tr.from_caregiver_id === "EMERGENCY_ABSENT"
+    );
+    
+    // Group by caregiver to create virtual assignments
+    const emergencyAssignments = [];
+    const emergencyCaregivers = new Set();
+    
+    emergencyTempAssigns.forEach(ta => {
+      emergencyCaregivers.add(ta.to_caregiver_id);
+    });
+    
+    // For each emergency caregiver, find which house/shift they're covering
+    emergencyCaregivers.forEach(caregiverId => {
+      // Get the first emergency temp assignment to parse the reason
+      const firstEmergencyAssign = emergencyTempAssigns.find(ta => ta.to_caregiver_id === caregiverId);
+      
+      if (firstEmergencyAssign) {
+        let emergencyHouseId, emergencyShift;
+        
+        // Try to get from dedicated fields first
+        if (firstEmergencyAssign.emergency_house) {
+          emergencyHouseId = firstEmergencyAssign.emergency_house;
+        }
+        
+        if (firstEmergencyAssign.emergency_shift) {
+          emergencyShift = firstEmergencyAssign.emergency_shift;
+        }
+        
+        // If not available, parse from reason (for backward compatibility)
+        if (!emergencyHouseId || !emergencyShift) {
+          const reasonMatch = firstEmergencyAssign.reason?.match(/Emergency coverage for (\w+) (\w+) shift/i);
+          if (reasonMatch) {
+            emergencyHouseId = emergencyHouseId || reasonMatch[1];
+            emergencyShift = emergencyShift || reasonMatch[2];
+          }
+        }
+        
+        // Last resort: find absent caregiver in emergency house for this date to get shift
+        if (!emergencyShift && emergencyHouseId) {
+          const selectedDateStr = formatDateString(selectedDate);
+          const absentInEmergencyHouse = assignments.find(a => 
+            a.house_id === emergencyHouseId && 
+            a.is_current &&
+            a.is_absent && 
+            a.absent_for_date === selectedDateStr &&
+            (a.days_assigned || []).map(d => d.toLowerCase()).includes(dayName.toLowerCase())
+          );
+          emergencyShift = absentInEmergencyHouse?.shift || "1st"; // Default fallback
+        }
+        
+        if (emergencyHouseId && emergencyShift) {
+          
+          console.log(`🚨 Emergency caregiver ${caregiverId} should appear in ${emergencyHouseId} ${emergencyShift} shift`);
+          
+          // Find the time range for this shift by looking at any assignment with this shift
+          const shiftTimeRange = assignments.find(a => a.shift === emergencyShift && a.is_current)?.time_range;
+          
+          // Create a virtual assignment for the emergency caregiver in the emergency house/shift
+          emergencyAssignments.push({
+            id: `emergency_${caregiverId}_${emergencyHouseId}_${emergencyShift}`,
+            caregiver_id: caregiverId,
+            house_id: emergencyHouseId,
+            shift: emergencyShift,
+            days_assigned: [dayName],
+            is_current: true,
+            is_emergency_coverage: true,
+            time_range: shiftTimeRange || { start: "06:00", end: "14:00" },
+            version: currentVersion
+          });
+        } else {
+          console.error(`Could not parse emergency coverage reason: ${firstEmergencyAssign.reason}`);
+        }
+      }
+    });
+    
+    console.log(`📋 Created ${emergencyAssignments.length} emergency coverage virtual assignments`);
+    return emergencyAssignments;
+  };
 
-    const newDaysAssigned = daysOfWeek.filter(d => !selectedRestDays.includes(d)).slice(0, 5);
+  const filteredAssignments = (() => {
+    const selectedDateStr = formatDateString(selectedDate);
+    const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
+    
+    // Get emergency coverage caregivers for this date
+    const emergencyCaregivers = tempReassigns
+      .filter(tr => tr.date === selectedDateStr && tr.from_caregiver_id === "EMERGENCY_ABSENT")
+      .map(tr => tr.to_caregiver_id);
+    
+    console.log(`🚨 Emergency caregivers for ${selectedDateStr}:`, emergencyCaregivers);
+    
+    // Filter regular assignments
+    const regularAssignments = assignments.filter((a) => {
+      if (viewMode === "current" && !a.is_current) return false;
+      if (viewMode === "previous" && a.is_current) return false;
+      if (activeHouseId && a.house_id !== activeHouseId) return false;
+      if (activeShift && a.shift !== activeShift) return false;
+      
+      if (!(a.days_assigned || []).map(d => d.toLowerCase()).includes(dayName.toLowerCase())) return false;
+      
+      // EXCLUDE caregivers who are providing emergency coverage (they'll appear in the emergency house)
+      if (emergencyCaregivers.includes(a.caregiver_id)) {
+        console.log(`❌ EXCLUDING emergency caregiver ${a.caregiver_id} from their original house ${a.house_id} ${a.shift}`);
+        return false;
+      }
+      
+      return true;
+    });
+    
+    // Add emergency coverage assignments
+    const emergencyAssignments = getEmergencyCoverageAssignments().filter(ea => {
+      if (activeHouseId && ea.house_id !== activeHouseId) return false;
+      if (activeShift && ea.shift !== activeShift) return false;
+      return true;
+    });
+    
+    console.log(`📊 Final assignments: ${regularAssignments.length} regular + ${emergencyAssignments.length} emergency`);
+    console.log("🚨 Emergency assignments:", emergencyAssignments);
+    
+    return [...regularAssignments, ...emergencyAssignments];
+  })();
 
-    await updateDoc(doc(db, "cg_house_assign", selectedCaregiverAssignId), {
-      days_assigned: newDaysAssigned
+  const deleteCollection = async (collectionName) => {
+    const snap = await getDocs(collection(db, collectionName));
+    const batch = writeBatch(db);
+
+    snap.docs.forEach((docSnap) => {
+      batch.delete(doc(db, collectionName, docSnap.id));
     });
 
-    alert(`Updated working days for ${selectedCaregiverName}: ${newDaysAssigned.join(", ")}`);
-    setShowRestDayModal(false);
-    await loadAllAssignments();
+    await batch.commit();
+    console.log(`${collectionName} cleared`);
   };
 
-  // Clear schedule handler: deletes all docs in cg_house_assign and elderly_caregiver_assign
   const handleClearSchedule = async () => {
-    if (!window.confirm("Are you sure you want to clear the generated schedule? This will delete all assignments in the database, but not affect the table UI.")) return;
-    // Delete all docs in cg_house_assign
-    const cgSnap = await getDocs(collection(db, "cg_house_assign"));
-    const cgDeletes = cgSnap.docs.map((d) => deleteDoc(doc(db, "cg_house_assign", d.id)));
-    // Delete all docs in elderly_caregiver_assign
-    const eaSnap = await getDocs(collection(db, "elderly_caregiver_assign"));
-    const eaDeletes = eaSnap.docs.map((d) => deleteDoc(doc(db, "elderly_caregiver_assign", d.id)));
-    await Promise.all([...cgDeletes, ...eaDeletes]);
-    // Optionally reload assignments
-    await loadAllAssignments();
-    await loadAllElderlyAssigns();
-    alert("Schedule cleared from database.");
+    if (!window.confirm("Are you sure you want to clear the generated schedule? This will delete all assignments in the database...")) return;
+
+    try {
+      const result = await ScheduleService.clearSchedule();
+      if (result.success) {
+        showAlert("Schedule cleared successfully!", "Success");
+        // reload state so UI updates
+        await loadAllAssignments();
+        await loadAllElderlyAssigns();
+        await loadTempReassigns();
+      } else {
+        showAlert(`Failed to clear schedule: ${result.message}`, "Error");
+      }
+    } catch (error) {
+      console.error("Error clearing schedule:", error);
+      showAlert(`Failed to clear schedule: ${error.message || "Unknown error occurred"}`, "Error");
+    }
+  };
+
+  const handleCleanupOrphanedAssignments = async () => {
+    if (!window.confirm("This will remove assignments for caregivers/elderly that no longer exist in the system. Are you sure?")) return;
+
+    try {
+      // Clean up both caregiver and elderly assignments
+      const [caregiverResult, elderlyResult] = await Promise.all([
+        ScheduleService.findOrphanedAssignments(true),
+        ScheduleService.findOrphanedElderlyAssignments(true)
+      ]);
+      
+      const totalCleaned = caregiverResult.count + elderlyResult.count;
+      
+      if (totalCleaned > 0) {
+        showAlert(
+          `Successfully cleaned up:\n• ${caregiverResult.count} orphaned caregiver assignment(s)\n• ${elderlyResult.count} orphaned elderly assignment(s)\n\nThe "Unknown" entries should now be gone.`, 
+          "Cleanup Complete"
+        );
+        // Reload data to reflect changes
+        await loadStaticData();
+        await loadAllAssignments();
+        await loadAllElderlyAssigns();
+      } else {
+        showAlert("No orphaned assignments found. All assignments have valid caregivers and elderly.", "Nothing to Clean");
+      }
+    } catch (error) {
+      console.error("Error cleaning up orphaned assignments:", error);
+      showAlert(`Failed to clean up assignments: ${error.message || "Unknown error occurred"}`, "Error");
+    }
   };
 
   // Sort houses by house_id (H001 to H005)
@@ -802,8 +1010,7 @@ const distributeCaregivers = async (months) => {
 
       <div className="toggle-header">
         <div className="toggle-buttons">
-          <button
-            onClick={() => { setViewMode("current"); }}
+          {/* <button
             className={`toggle-btn ${viewMode === "current" ? "active" : ""}`}
           >
             Current Schedule
@@ -814,7 +1021,7 @@ const distributeCaregivers = async (months) => {
             style={{ marginLeft: 8 }}
           >
             Caregiver Schedule History
-          </button>
+          </button> */}
         </div>
 
         {scheduleInfo && (
@@ -823,7 +1030,7 @@ const distributeCaregivers = async (months) => {
               <strong>Schedule:</strong>{" "}
               {scheduleInfo.start?.toLocaleDateString()} → {scheduleInfo.end?.toLocaleDateString()}
             </span>
-            <span style={{ marginLeft: 12 }}>
+            <span>
               <strong>Days Left:</strong> {daysLeft} {daysLeft === 1 ? "day" : "days"}
             </span>
           </div>
@@ -845,14 +1052,28 @@ const distributeCaregivers = async (months) => {
           type="number"
           placeholder="Custom Months"
           value={customDuration}
+          min="1"
+          max="36"
+          onKeyDown={(e) => {
+            // Prevent typing letters, special characters (except backspace, delete, arrow keys, tab)
+            if (!/[0-9]/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
+              e.preventDefault();
+            }
+          }}
           onChange={(e) => {
             const val = e.target.value;
-            setCustomDuration(val);
-            localStorage.setItem("schedule_custom", val); // save custom input
+            // Only allow positive numbers
+            if (val === '' || (parseInt(val) > 0 && parseInt(val) <= 36)) {
+              setCustomDuration(val);
+              localStorage.setItem("schedule_custom", val); // save custom input
+            }
           }}
         />
         <button onClick={handleGenerateClick}>Generate Schedule</button>
         <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
+        {/* <button onClick={handleCleanupOrphanedAssignments} style={{ marginLeft: 8, background: '#dc3545', color: 'white' }}>🧹 Fix Unknown</button> */}
+        <button onClick={handleEmergencyCoverage} style={{ marginLeft: 8, background: '#f39c12', color: 'white' }}>🚨 Emergency Coverage</button>
+        <button onClick={handleNewCaregiverIntegration} style={{ marginLeft: 8, background: '#28a745', color: 'white' }}>👥 Add New Caregiver</button>
       </div>
 
       {showOverlay && (
@@ -892,30 +1113,71 @@ const distributeCaregivers = async (months) => {
       </div>
 
       <div className="table-container">
-        <div className="shift-tabs">
-          {shiftDefs.map((s) => (
-            <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)}>{s.name}</button>
-          ))}
+        <div className="table-header">
+          <div className="shift-tabs">
+            {shiftDefs.map((s) => (
+              <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)}>{s.name}</button>
+            ))}
+          </div>
+          
+          {/* ========== DAYS OF WEEK TABS - COMMENT OUT THIS SECTION TO REMOVE ========== */}
+          <div className="day-tabs">
+            {daysOfWeek.map((day) => (
+              <button
+                key={day}
+                className={`day-tab ${activeDay === day ? "active-day" : ""}`}
+                onClick={() => {
+                  setActiveDay(day);
+                  // Update the date picker to show a date that matches this day
+                  const currentDate = new Date(selectedDate);
+                  const currentDayIndex = currentDate.getDay() === 0 ? 6 : currentDate.getDay() - 1;
+                  const targetDayIndex = daysOfWeek.indexOf(day);
+                  const dayDiff = targetDayIndex - currentDayIndex;
+                  
+                  const newDate = new Date(currentDate);
+                  newDate.setDate(currentDate.getDate() + dayDiff);
+                  setSelectedDate(newDate);
+                }}
+              >
+                {day.slice(0, 3)}
+              </button>
+            ))}
+          </div>
+          {/* ========== END DAYS OF WEEK TABS SECTION ========== */}
+          
+          <div className="date-picker-top-right">
+            <label htmlFor="date-picker" className="date-picker-label">
+              Select Date:
+            </label>
+            <input
+              id="date-picker"
+              type="date"
+              className="date-picker-input"
+              value={formatDateString(selectedDate)}
+              min={scheduleInfo?.start ? formatDateString(scheduleInfo.start) : undefined}
+              max={scheduleInfo?.end ? formatDateString(scheduleInfo.end) : undefined}
+              onChange={(e) => {
+                // Create date in local timezone to avoid timezone issues
+                const dateParts = e.target.value.split('-');
+                const year = parseInt(dateParts[0]);
+                const month = parseInt(dateParts[1]) - 1; // Month is 0-indexed
+                const day = parseInt(dateParts[2]);
+                const newDate = new Date(year, month, day);
+                setSelectedDate(newDate);
+                
+                // Sync the day tabs with the selected date
+                const dayName = daysOfWeek[newDate.getDay() === 0 ? 6 : newDate.getDay() - 1];
+                setActiveDay(dayName);
+              }}
+            />
+          </div>
         </div>
-
-        {/* ✅ New Days-of-Week tabs */}
-      <div className="day-tabs">
-        {daysOfWeek.map((day) => (
-          <button
-            key={day}
-            className={`day-tab ${activeDay === day ? "active" : ""}`}
-            onClick={() => setActiveDay(day)}
-          >
-            {day}
-          </button>
-        ))}
-      </div>
 
         <table className="schedule-table">
           <thead>
             <tr>
               <th>Caregiver Name</th>
-              <th>Days</th>
+              <th>Work Days</th>
               <th>Time</th>
               <th>Elderly Assigned</th>
               <th>Action</th>
@@ -923,29 +1185,76 @@ const distributeCaregivers = async (months) => {
           </thead>
           <tbody>
             {filteredAssignments.map((a) => {
-              const isAbsent = !!a.is_absent;
+              const selectedDateStr = formatDateString(selectedDate);
+              
+              // Use the selected date from date picker to determine the day
+              const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
+              
+              // Enhanced absent check with debugging
+              const isAbsent = !!a.is_absent && a.absent_for_date === selectedDateStr;
+              
+              // Check if providing emergency coverage
+              const isEmergency = isProvidingEmergencyCoverage(a.caregiver_id, selectedDateStr);
+              const emergencyDetails = isEmergency ? getEmergencyCoverageDetails(a.caregiver_id, selectedDateStr) : null;
+              
+              // Debug logging for absent status
+              if (a.is_absent) {
+                console.log(`ABSENT CHECK - ${caregiverName(a.caregiver_id)}:`, {
+                  is_absent: a.is_absent,
+                  absent_for_date: a.absent_for_date,
+                  selectedDateStr: selectedDateStr,
+                  datesMatch: a.absent_for_date === selectedDateStr,
+                  isAbsent: isAbsent,
+                  assignmentId: a.id,
+                  className: isAbsent ? "absent-row" : "normal-row"
+                });
+              }
+              
               let elders = getDisplayedEldersFor(a.caregiver_id);
               elders = elders.slice().sort((e1, e2) => {
                 const n1 = `${e1.elderly_fname} ${e1.elderly_lname}`.toLowerCase();
                 const n2 = `${e2.elderly_fname} ${e2.elderly_lname}`.toLowerCase();
                 return n1.localeCompare(n2);
               });
+              
+              // Determine row styling - priority: absent > emergency > normal
+              let rowClassName = "";
+              if (isAbsent) {
+                rowClassName = "absent-row";
+              } else if (isEmergency) {
+                rowClassName = "emergency-row";
+              }
+              
+              console.log(`ROW RENDER - ${caregiverName(a.caregiver_id)} (${a.id}): className="${rowClassName}", isAbsent=${isAbsent}, isEmergency=${isEmergency}`);
+              
               return (
-                <tr key={a.id} className={isAbsent ? "absent-row" : ""}>
-                  <td>{caregiverName(a.caregiver_id)}</td>
+                <tr key={a.id} className={rowClassName}>
+                  <td>
+                    {isEmergency && <span className="emergency-badge">🚨</span>}
+                    {caregiverName(a.caregiver_id)}
+                  </td>
                   <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
                   <td>{a.time_range?.start} - {a.time_range?.end}</td>
                   <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
                   <td>
                     {isAbsent ? (
-                      <>
-                        <span className="absent-text">Marked Absent Today</span>
-                        <button onClick={() => unmarkAbsent(a.id)} className="unabsent-btn">Unmark</button>
-                      </>
+                      <span className="absent-text">
+                        Absent on {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </span>
+                    ) : isEmergency ? (
+                      <span style={{ color: '#f39c12', fontWeight: 'bold', fontSize: '12px' }}>
+                        🚨 Emergency Coverage<br/>
+                        <small>
+                          {emergencyDetails.originalHouse && emergencyDetails.emergencyHouse 
+                            ? `Moved from ${emergencyDetails.originalHouse} to cover ${emergencyDetails.emergencyHouse}`
+                            : emergencyDetails.reason}
+                        </small>
+                      </span>
                     ) : (
-                      <button onClick={() => markAbsent(a.id)} className="absent-btn">Mark as Absent</button>
+                      <button onClick={() => markAbsent(a.id)} className="absent-btn">
+                        Mark Absent for {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </button>
                     )}
-                    <button onClick={() => openRestDayModal(a.id, a.caregiver_id)} className="restday-btn">Set Rest Days</button>
                   </td>
                 </tr>
               );
@@ -954,26 +1263,322 @@ const distributeCaregivers = async (months) => {
         </table>
       </div>
       </main>
-      {showRestDayModal && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <h3>Set Rest Days for {selectedCaregiverName}</h3>
-            <p>Select 2 rest days:</p>
-            <div className="days-checkboxes">
-              {daysOfWeek.map(day => (
-                <label key={day} style={{ display: "block" }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedRestDays.includes(day)}
-                    onChange={() => toggleRestDay(day)}
-                  />
-                  {day}
-                </label>
+
+      {/* Confirmation Popup */}
+      {showAbsentConfirm && pendingAbsentAssignment && (
+        <div className="popup-overlay">
+          <div className="popup-content">
+            <div className="popup-title">
+              Are you really sure you want to mark <span className="caregiver-name">{caregiverName(pendingAbsentAssignment.assignment.caregiver_id)}</span> as absent? You can't undo this action.
+            </div>
+            <div className="popup-buttons">
+              <button className="popup-btn yes" onClick={confirmMarkAbsent}>
+                Yes
+              </button>
+              <button className="popup-btn no" onClick={cancelMarkAbsent}>
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Emergency Coverage Modal */}
+      {showEmergencyModal && (
+        <div className="popup-overlay">
+          <div className="emergency-modal">
+            <div className="modal-header">
+              <h3>🚨 Emergency Coverage Required</h3>
+              <p>The following houses have no caregivers present on {emergencyOptions[0]?.dayName} ({emergencyOptions[0]?.targetDateStr})</p>
+            </div>
+            
+            <div className="modal-body">
+              {emergencyOptions.map((option, index) => (
+                <div key={`${option.emergencyHouse}_${option.emergencyShift}`} className="emergency-option">
+                  <div className="emergency-info">
+                    <strong>{option.emergencyHouse} - {option.emergencyShift} Shift</strong>
+                    <span className="absent-count">({option.totalAbsent} caregiver{option.totalAbsent > 1 ? 's' : ''} absent)</span>
+                  </div>
+                  
+                  {option.availableDonorHouses.length > 0 ? (
+                    <div className="donor-selection">
+                      <label>Select donor house and caregiver:</label>
+                      <select 
+                        value={`${selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`]?.donorHouse}_${selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`]?.caregiverId}` || ''}
+                        onChange={(e) => {
+                          const [donorHouse, caregiverId] = e.target.value.split('_');
+                          if (donorHouse && caregiverId) {
+                            setSelectedDonorChoices(prev => ({
+                              ...prev,
+                              [`${option.emergencyHouse}_${option.emergencyShift}`]: {
+                                donorHouse,
+                                caregiverId
+                              }
+                            }));
+                          }
+                        }}
+                        className="donor-select"
+                      >
+                        <option value="">Select caregiver...</option>
+                        {option.availableDonorHouses.map(donor => 
+                          donor.presentCaregivers.map(caregiver => (
+                            <option 
+                              key={`${donor.house}_${caregiver.caregiverId}`}
+                              value={`${donor.house}_${caregiver.caregiverId}`}
+                            >
+                              {donor.house} - {caregiverName(caregiver.caregiverId)} ({donor.availableCount} available)
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      
+                      {selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`] && (
+                        <div className="selected-choice">
+                          ✓ Will move <strong>{caregiverName(selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`].caregiverId)}</strong> from <strong>{selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`].donorHouse}</strong> to cover <strong>{option.emergencyHouse}</strong>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="no-donors">
+                      ❌ No available donors found for this shift
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
-            <div className="modal-actions">
-              <button onClick={saveRestDays} className="save-btn">Save</button>
-              <button onClick={() => setShowRestDayModal(false)} className="cancel-btn">Cancel</button>
+            
+            <div className="modal-footer">
+              <button 
+                className="execute-emergency-btn" 
+                onClick={executeEmergencyCoverage}
+                disabled={Object.keys(selectedDonorChoices).length === 0}
+              >
+                Execute Emergency Coverage
+              </button>
+              <button className="cancel-emergency-btn" onClick={cancelEmergencyCoverage}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Caregiver Integration Modal */}
+      {showNewCaregiverModal && (
+        <div className="popup-overlay">
+          <div className="integration-modal">
+            <div className="modal-header">
+              <h3>👥 New Caregiver Integration</h3>
+              <p>Integrate new caregivers into the existing schedule</p>
+            </div>
+            
+            <div className="modal-body">
+              {/* Caregiver Selection */}
+              <div className="caregiver-selection">
+                <h4>Select New Caregiver:</h4>
+                <div className="caregiver-list">
+                  {unassignedCaregivers.map(caregiver => (
+                    <div 
+                      key={caregiver.id} 
+                      className={`caregiver-item ${selectedNewCaregiver === caregiver.id ? 'selected' : ''}`}
+                      onClick={() => handleCaregiverSelection(caregiver.id)}
+                    >
+                      <span className="caregiver-name">{caregiver.user_fname} {caregiver.user_lname}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {selectedNewCaregiver && (
+                <>
+                  {/* Integration Mode Selection */}
+                  <div className="integration-mode">
+                    <h4>Assignment Method:</h4>
+                    <div className="mode-options">
+                      <label className="mode-option">
+                        <input 
+                          type="radio" 
+                          value="auto" 
+                          checked={integrationMode === 'auto'}
+                          onChange={(e) => {
+                            setIntegrationMode(e.target.value);
+                            setSelectedRecommendation(null);
+                          }}
+                        />
+                        <div className="mode-option-content">
+                          <span>🤖 Automatic (System Recommendation)</span>
+                          <small>System analyzes current schedule and recommends optimal placement</small>
+                        </div>
+                      </label>
+                      <label className="mode-option">
+                        <input 
+                          type="radio" 
+                          value="manual" 
+                          checked={integrationMode === 'manual'}
+                          onChange={(e) => {
+                            setIntegrationMode(e.target.value);
+                            setSelectedRecommendation(null);
+                          }}
+                        />
+                        <div className="mode-option-content">
+                          <span>✋ Manual Assignment</span>
+                          <small>Manually choose house, shift, and work days</small>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Automatic Recommendations */}
+                  {integrationMode === 'auto' && systemRecommendations.length > 0 && (
+                    <div className="recommendations">
+                      <h4>System Recommendations: (Select one to proceed)</h4>
+                      {systemRecommendations.map((rec, index) => (
+                        <div 
+                          key={index} 
+                          className={`recommendation-item ${selectedRecommendation === rec ? 'selected' : ''}`}
+                          onClick={() => setSelectedRecommendation(rec)}
+                          style={{ cursor: 'pointer', border: selectedRecommendation === rec ? '2px solid #007bff' : '1px solid #ddd' }}
+                        >
+                          <div className="rec-header">
+                            <span className="rec-rank">
+                              {selectedRecommendation === rec ? '✓ Selected' : `Option #${index + 1}`}
+                            </span>
+                            <span className="rec-coverage">Fixes {rec.weakSlotsCovered}/{rec.totalWeakSlots} gaps</span>
+                          </div>
+                          <div className="rec-details">
+                            <strong>{rec.houseName}</strong> - {rec.shift} Shift
+                            <div className="rec-days">Work Days: {rec.workDays.join(', ')}</div>
+                            <div className="rec-explanation">
+                              <small>{rec.explanation}</small>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {!selectedRecommendation && (
+                        <div className="selection-reminder">
+                          <small style={{ color: '#dc3545', fontStyle: 'italic' }}>
+                            Please click on one of the recommendations above to select it.
+                          </small>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Manual Assignment */}
+                  {integrationMode === 'manual' && (
+                    <div className="manual-assignment">
+                      <h4>Manual Assignment:</h4>
+                      
+                      <div className="assignment-fields">
+                        <div className="field-group">
+                          <label>House:</label>
+                          <select 
+                            value={manualAssignment.house} 
+                            onChange={(e) => setManualAssignment(prev => ({...prev, house: e.target.value}))}
+                          >
+                            <option value="">Select House...</option>
+                            {houses.map(house => (
+                              <option key={house.house_id} value={house.house_id}>
+                                {house.house_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="field-group">
+                          <label>Shift:</label>
+                          <select 
+                            value={manualAssignment.shift} 
+                            onChange={(e) => setManualAssignment(prev => ({...prev, shift: e.target.value}))}
+                          >
+                            <option value="">Select Shift...</option>
+                            {shiftDefs.map(shift => (
+                              <option key={shift.key} value={shift.key}>
+                                {shift.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="field-group">
+                          <label>Work Days (Select 5 consecutive days):</label>
+                          <div className="days-checkboxes">
+                            {daysOfWeek.map(day => (
+                              <label key={day} className="day-checkbox">
+                                <input 
+                                  type="checkbox"
+                                  checked={manualAssignment.workDays.includes(day)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      if (manualAssignment.workDays.length < 5) {
+                                        setManualAssignment(prev => ({
+                                          ...prev, 
+                                          workDays: [...prev.workDays, day]
+                                        }));
+                                      }
+                                    } else {
+                                      setManualAssignment(prev => ({
+                                        ...prev,
+                                        workDays: prev.workDays.filter(d => d !== day)
+                                      }));
+                                    }
+                                  }}
+                                />
+                                {day.slice(0, 3)}
+                              </label>
+                            ))}
+                          </div>
+                          <small>Selected: {manualAssignment.workDays.length}/5 days</small>
+                          {manualAssignment.workDays.length === 5 && !areWorkDaysConsecutive(manualAssignment.workDays) && (
+                            <small style={{ color: '#dc3545', display: 'block', marginTop: '4px', fontWeight: 'bold' }}>
+                              ⚠️ Rest days must be consecutive (2 consecutive days off)
+                            </small>
+                          )}
+                          {manualAssignment.workDays.length === 5 && areWorkDaysConsecutive(manualAssignment.workDays) && (
+                            <small style={{ color: '#28a745', display: 'block', marginTop: '4px', fontWeight: 'bold' }}>
+                              ✓ Rest days are consecutive
+                            </small>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            
+            <div className="modal-footer">
+              <button 
+                className="execute-integration-btn" 
+                onClick={executeNewCaregiverIntegration}
+                disabled={!selectedNewCaregiver || 
+                  (integrationMode === 'auto' && !selectedRecommendation) ||
+                  (integrationMode === 'manual' && (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length !== 5 || !areWorkDaysConsecutive(manualAssignment.workDays)))}
+              >
+                Integrate Caregiver
+              </button>
+              <button className="cancel-integration-btn" onClick={cancelNewCaregiverIntegration}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {showCustomAlert && (
+        <div className="popup-overlay">
+          <div className="popup-content custom-alert">
+            <div className="popup-title">
+              {customAlertTitle}
+            </div>
+            <div className="alert-message">
+              {customAlertMessage}
+            </div>
+            <div className="popup-buttons">
+              <button className="popup-btn ok-btn" onClick={closeCustomAlert}>
+                OK
+              </button>
             </div>
           </div>
         </div>
