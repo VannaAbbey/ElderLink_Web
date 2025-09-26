@@ -1,0 +1,83 @@
+/* Toggle row for view/edit buttons */
+.nurse-toggle-row {
+	display: flex;
+	align-items: center;
+	margin-bottom: 8px;
+}
+.nurse-toggle-btn {
+	font-size: 15px;
+	padding: 4px 16px;
+	border: none;
+	border-radius: 4px;
+	background: #f5f5f5;
+	color: #333;
+	cursor: pointer;
+	transition: background 0.2s;
+}
+.nurse-toggle-btn.left {
+	margin-right: 8px;
+}
+.nurse-toggle-btn:disabled {
+	background: #e0e0e0;
+	color: #888;
+	cursor: not-allowed;
+}
+
+/* Shift tabs */
+.shift-tabs {
+	display: flex;
+	margin-bottom: 12px;
+}
+.shift-tab {
+	margin-right: 8px;
+	padding: 6px 18px;
+	border: none;
+	border-radius: 4px;
+	background: #f5f5f5;
+	color: #333;
+	font-size: 15px;
+	cursor: pointer;
+	transition: background 0.2s;
+}
+.shift-tab.active-shift {
+	background: #3498db;
+	color: #fff;
+	font-weight: 600;
+}
+
+/* Day tabs */
+.day-tabs {
+	display: flex;
+	margin-top: 10px;
+	margin-bottom: 16px;
+}
+.day-tab {
+	margin-right: 6px;
+	padding: 6px 10px;
+	border: none;
+	border-bottom: 2px solid transparent;
+	background: #f5f5f5;
+	color: gray;
+	font-size: 15px;
+	border-radius: 4px 4px 0 0;
+	cursor: pointer;
+	transition: color 0.2s, border-bottom 0.2s, background 0.2s;
+}
+.day-tab.active-day {
+	border-bottom: 2px solid green;
+	color: green;
+	font-weight: 600;
+	background: #eafbe7;
+}
+
+.table-container {
+  background-color: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-width: 1250px; /* Narrow width for breathing space */
+  width: 100%;
+  margin: 0 auto; /* Center container on page */
+  padding: 15px;
+  position: relative;
+  top: -5px; /* Para dikit sa tabs */
+}
