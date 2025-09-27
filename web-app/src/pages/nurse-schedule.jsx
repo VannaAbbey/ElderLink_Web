@@ -1,16 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-  onSnapshot,
-  doc,
-  writeBatch,
-} from "firebase/firestore";
+import { onSnapshot, collection, query, where } from "firebase/firestore";
 import "./schedule.css";
 import Navbar from "./navbar";
+import { NurseScheduleService } from "../services/nurseScheduleService";
+import { markNurseAbsent, unmarkNurseAbsent, getTempReassignments } from "../services/nurseAbsenceService";
 
 export default function NurseSchedule() {
   const [nurses, setNurses] = useState([]);
@@ -18,14 +12,14 @@ export default function NurseSchedule() {
   const [elderlyList, setElderlyList] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [nurseElderlyAssignments, setNurseElderlyAssignments] = useState([]);
-  const [caregiverAssignments, setCaregiverAssignments] = useState([]);
-  const [elderlySchedule, setElderlySchedule] = useState([]);
+  const [tempReassignments, setTempReassignments] = useState([]);
+  // Removed caregiver dependencies - nurses work with all elderly in houses
   const [pendingAssignments, setPendingAssignments] = useState({});
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [viewMode, setViewMode] = useState("summary");
   const [activeShift, setActiveShift] = useState("1st");
-  const [activeDay, setActiveDay] = useState("Monday");
+  const [activeDay, setActiveDay] = useState("Sunday");
   const [notification, setNotification] = useState("");
   const [scheduleGeneration, setScheduleGeneration] = useState({
     isGenerating: false,
@@ -33,108 +27,89 @@ export default function NurseSchedule() {
     periodDuration: 30, // days
     lastShiftRotation: {} // nurseId -> lastShift
   });
+  const [expandedHouses, setExpandedHouses] = useState(new Set()); // Track which house sections are expanded
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [scheduleInfo, setScheduleInfo] = useState(null);
+  const [newNurses, setNewNurses] = useState([]); // Track new nurses not in current schedule
   const SHOW_ALL_DAYS = "__ALL_DAYS__";
 
-  const shiftDefs = [
-    { name: "6:00 AM - 2:00 PM", key: "1st", startTime: "06:00", endTime: "14:00" },
-    { name: "2:00 PM - 10:00 PM", key: "2nd", startTime: "14:00", endTime: "22:00" },
-    { name: "10:00 PM - 6:00 AM", key: "3rd", startTime: "22:00", endTime: "06:00" },
-    { name: "Rest Day", key: "rest", startTime: "", endTime: "" }
-  ];
+  // Initialize service instance
+  const nurseScheduleService = new NurseScheduleService(db);
 
-  const daysOfWeek = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+  const shiftDefs = NurseScheduleService.SHIFT_DEFS;
+  const daysOfWeek = NurseScheduleService.DAYS_OF_WEEK;
 
   // Load nurses, houses, and elderly
   useEffect(() => {
     (async () => {
-      const [nurseSnap, houseSnap, elderlySnap] = await Promise.all([
-        getDocs(query(collection(db, "users"), where("user_type", "==", "nurse"))),
-        getDocs(collection(db, "house")),
-        getDocs(collection(db, "elderly"))
-      ]);
-      
-      setNurses(nurseSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setHouses(houseSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setElderlyList(elderlySnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      const { nurses, houses, elderly } = await nurseScheduleService.loadAllData();
+      setNurses(nurses);
+      setHouses(houses);
+      setElderlyList(elderly);
     })();
   }, []);
 
-  // Listen for caregiver assignments and elderly schedule
+  // Real-time listener for nurses to detect new nurses immediately
   useEffect(() => {
-    const caregiverUnSub = onSnapshot(
-      query(collection(db, "cg_house_assign_v2"), where("is_current", "==", true)),
-      (snap) => {
-        setCaregiverAssignments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    const unsubscribe = onSnapshot(
+      query(collection(db, "users"), where("user_type", "==", "nurse")), 
+      (snapshot) => {
+        const nursesData = snapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter(nurse => nurse.scheduleStatus !== "inactive");
+        setNurses(nursesData);
       }
     );
-
-    const elderlyUnSub = onSnapshot(
-      collection(db, "elderly_caregiver_assign_v2"),
-      (snap) => {
-        setElderlySchedule(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      }
-    );
-
-    return () => {
-      caregiverUnSub();
-      elderlyUnSub();
-    };
+    
+    return () => unsubscribe();
   }, []);
+
+  // Removed caregiver dependency listeners - nurses now work with all elderly in assigned houses
 
   // Listen for assignments
   useEffect(() => {
-    const q = query(
-      collection(db, "nurse_shift_assign"),
-      where("is_current", "==", true)
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      setAssignments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = nurseScheduleService.subscribeToNurseShiftAssignments(setAssignments);
     return () => unsub();
   }, []);
 
   // Listen for nurse-elderly assignments
   useEffect(() => {
-    const q = query(collection(db, "nurse_elderly_assign"));
-    const unsub = onSnapshot(q, (snap) => {
-      setNurseElderlyAssignments(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    const unsub = nurseScheduleService.subscribeToNurseElderlyAssignments(setNurseElderlyAssignments);
     return () => unsub();
   }, []);
+
+  // Load temporary reassignments when date or shift changes
+  useEffect(() => {
+    const loadTempReassignments = async () => {
+      if (activeShift && selectedDate) {
+        const dateStr = formatDateString(selectedDate);
+        const tempAssigns = await getTempReassignments(dateStr, activeShift);
+        setTempReassignments(tempAssigns);
+      }
+    };
+    loadTempReassignments();
+  }, [selectedDate, activeShift]);
 
   // Initialize pending assignments when entering edit mode
   useEffect(() => {
     if (viewMode === "edit") {
-      // Initialize shift assignments
-      const initShifts = {};
-      nurses.forEach((n) => {
-        const current = assignments.filter((a) => a.nurse_id === n.id);
-        const dayToShift = {};
-        current.forEach((a) => {
-          a.days_assigned.forEach((day) => {
-            dayToShift[day] = a.shift;
-          });
-        });
-        initShifts[n.id] = dayToShift;
-      });
+      const initShifts = nurseScheduleService.initializePendingAssignments(nurses, assignments);
       setPendingAssignments(initShifts);
     }
   }, [viewMode, assignments, nurses]);
 
+  // Detect new nurses when nurses change (real-time updates)
+  useEffect(() => {
+    if (nurses.length > 0) {
+      const detectedNewNurses = nurseScheduleService.detectNewNurses(nurses, assignments);
+      setNewNurses(detectedNewNurses);
+    }
+  }, [nurses]); // Listen to nurses array changes for real-time updates
+
   // Check for schedule expiration and auto-regenerate if needed
   useEffect(() => {
     const checkScheduleExpiration = () => {
-      if (assignments.length === 0) return;
-      
-      // Check if any assignment has schedule_period information
-      const latestAssignment = assignments.find(a => a.schedule_period && a.schedule_period.end_date);
-      if (!latestAssignment) return;
-      
-      const endDate = new Date(latestAssignment.schedule_period.end_date.seconds * 1000);
-      const now = new Date();
-      
-      // If schedule has expired, auto-generate new one
-      if (now >= endDate) {
+      if (nurseScheduleService.checkScheduleExpiration(assignments)) {
         console.log('Schedule expired, auto-generating new schedule...');
         handleGenerateSchedule();
       }
@@ -149,448 +124,74 @@ export default function NurseSchedule() {
     return () => clearInterval(interval);
   }, [assignments.length]);
 
-  const nurseName = (nurseId) => {
-    const nurse = nurses.find((n) => n.id === nurseId);
-    return nurse ? `${nurse.user_fname} ${nurse.user_lname}` : "Unknown Nurse";
-  };
+  // Track schedule info from assignments for date picker validation
+  useEffect(() => {
+    if (!assignments || assignments.length === 0) return;
 
-  const houseName = (houseId) => {
-    const house = houses.find((h) => h.house_id === houseId || h.id === houseId);
-    return house ? house.house_name : "Unknown House";
-  };
+    // Get the first current assignment (they share same start/end dates)
+    const currentAssign = assignments.find(a => a.is_current);
+    if (!currentAssign) return;
 
-  const elderlyName = (elderlyId) => {
-    const elderly = elderlyList.find((e) => e.id === elderlyId);
-    return elderly ? `${elderly.elderly_fname} ${elderly.elderly_lname}` : "Unknown";
+    const start = currentAssign.start_date?.toDate();
+    const end = currentAssign.end_date?.toDate();
+
+    // Only set schedule info if both dates exist
+    if (start && end) {
+      setScheduleInfo({ start, end });
+    } else {
+      // Clear schedule info if dates don't exist (allows unrestricted date selection)
+      setScheduleInfo(null);
+    }
+  }, [assignments]);
+
+  // Validate selected date when schedule info changes
+  useEffect(() => {
+    if (scheduleInfo?.start && scheduleInfo?.end) {
+      const today = new Date();
+      const start = scheduleInfo.start;
+      const end = scheduleInfo.end;
+      
+      // If selected date is outside schedule range, reset to today (if within range) or start date
+      if (selectedDate < start || selectedDate > end) {
+        if (today >= start && today <= end) {
+          setSelectedDate(today);
+        } else {
+          setSelectedDate(start);
+        }
+      }
+    }
+  }, [scheduleInfo, selectedDate]);
+
+  const nurseName = (nurseId) => nurseScheduleService.getNurseName(nurseId, nurses);
+  const houseName = (houseId) => nurseScheduleService.getHouseName(houseId, houses);
+  const elderlyName = (elderlyId) => nurseScheduleService.getElderlyName(elderlyId, elderlyList);
+
+  // Date formatting function
+  const formatDateString = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
   // Get elderly assigned to nurse for a specific day
-  const getElderlyForNurseDay = (nurseId, day) => {
-    const assignment = nurseElderlyAssignments.find(
-      (a) => a.nurse_id === nurseId && a.day === day
-    );
-    return assignment?.elderly_ids || [];
-  };
+  const getElderlyForNurseDay = (nurseId, day) => 
+    nurseScheduleService.getElderlyForNurseDay(nurseId, day, nurseElderlyAssignments);
 
   // Get house for elderly (group elderly by house)
-  const getHouseForElderly = (elderlyId) => {
-    const elderly = elderlyList.find((e) => e.id === elderlyId);
-    return elderly?.house_id || null;
+  const getHouseForElderly = (elderlyId) => 
+    nurseScheduleService.getHouseForElderly(elderlyId, elderlyList);
+
+  // Helper function to check if nurse is absent on a specific date and day
+  const isNurseAbsentForDay = (assignment, date, day) => {
+    return assignment.is_absent && 
+           assignment.absent_for_date === formatDateString(date) && 
+           assignment.absent_for_day === day;
   };
 
-  // Helper function to get next shift in rotation
-  const getNextShift = (currentShift) => {
-    const shiftOrder = ["1st", "2nd", "3rd"];
-    const currentIndex = shiftOrder.indexOf(currentShift);
-    return shiftOrder[(currentIndex + 1) % shiftOrder.length];
-  };
-
-  // Get the last shift assigned to a nurse
-  const getLastShiftForNurse = (nurseId) => {
-    // Check current assignments first
-    const currentAssignments = assignments.filter(a => a.nurse_id === nurseId);
-    if (currentAssignments.length > 0) {
-      // Return the most recent shift (could be from any of their current assignments)
-      return currentAssignments[0].shift;
-    }
-    
-    // Check stored rotation data
-    return scheduleGeneration.lastShiftRotation[nurseId] || "3rd"; // Start with 3rd so first assignment is 1st
-  };
-
-  // Generate work-rest pattern: 5 work days + 2 rest days with better distribution
-  const generateWorkRestPattern = (startDayIndex, shift) => {
-    const pattern = {};
-    const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-    
-    // Generate 5 work days
-    for (let i = 0; i < 5; i++) {
-      const dayIndex = (startDayIndex + i) % 7;
-      pattern[daysOfWeek[dayIndex]] = shift;
-    }
-    
-    // Add 2 rest days
-    for (let i = 5; i < 7; i++) {
-      const dayIndex = (startDayIndex + i) % 7;
-      pattern[daysOfWeek[dayIndex]] = "rest";
-    }
-    
-    return pattern;
-  };
-
-  // Distribute nurses evenly across all days with staggered rest days for continuous coverage
-  const distributeNursesAcrossDays = (balancedNurseAssignments) => {
-    const monthlyAssignments = {};
-    const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-    
-    // Create a pool of all nurse-shift combinations
-    const nurseShiftPairs = [];
-    Object.entries(balancedNurseAssignments).forEach(([shift, nursesInShift]) => {
-      nursesInShift.forEach((nurse) => {
-        nurseShiftPairs.push({ nurse, shift });
-      });
-    });
-    
-    // Track daily nurse counts to ensure even distribution
-    const dailyNurseCounts = {};
-    daysOfWeek.forEach(day => dailyNurseCounts[day] = 0);
-    
-    // Track rest day distribution to ensure coverage
-    const restDayDistribution = {};
-    daysOfWeek.forEach(day => restDayDistribution[day] = 0);
-    
-    // Assign work patterns with staggered rest days for continuous coverage
-    nurseShiftPairs.forEach((nurseShift, index) => {
-      let bestStartDay = 0;
-      let bestScore = Infinity;
-      
-      // Try each possible start day and find the one with best overall distribution
-      for (let startDay = 0; startDay < 7; startDay++) {
-        // Calculate what the daily work counts and rest counts would be
-        const tempWorkCounts = { ...dailyNurseCounts };
-        const tempRestCounts = { ...restDayDistribution };
-        
-        // Calculate work days
-        for (let i = 0; i < 5; i++) { // 5 work days
-          const dayIndex = (startDay + i) % 7;
-          tempWorkCounts[daysOfWeek[dayIndex]]++;
-        }
-        
-        // Calculate rest days (2 consecutive rest days)
-        for (let i = 5; i < 7; i++) { // 2 rest days
-          const dayIndex = (startDay + i) % 7;
-          tempRestCounts[daysOfWeek[dayIndex]]++;
-        }
-        
-        // Score based on:
-        // 1. Work day distribution evenness (lower variance = better)
-        // 2. Rest day distribution evenness (we want rest days spread out)
-        // 3. Ensure no day has all nurses resting
-        // 4. Strong penalty to prevent days with zero coverage
-        
-        const workValues = Object.values(tempWorkCounts);
-        const restValues = Object.values(tempRestCounts);
-        
-        const maxWorkCount = Math.max(...workValues);
-        const minWorkCount = Math.min(...workValues);
-        const maxRestCount = Math.max(...restValues);
-        
-        // Penalize if any day would have too few workers or too many resting
-        const totalNurses = nurseShiftPairs.length;
-        const workSpread = maxWorkCount - minWorkCount;
-        const restPenalty = maxRestCount > Math.floor(totalNurses * 0.6) ? 1000 : 0; // Penalty if >60% rest on same day
-        
-        // Strong penalty for zero coverage days to ensure continuous coverage
-        let coveragePenalty = 0;
-        const worstCoverage = Math.min(...workValues);
-        if (worstCoverage === 0) {
-          coveragePenalty = 500; // Strong penalty to avoid zero coverage days
-        } else if (worstCoverage < Math.ceil(totalNurses * 0.1)) {
-          coveragePenalty = 100; // Medium penalty for very low coverage days
-        }
-        
-        // Additional penalty for 3rd shift coverage gaps specifically
-        let thirdShiftPenalty = 0;
-        if (nurseShift.shift === "3rd") {
-          // Count how many 3rd shift nurses would be working each day
-          const thirdShiftCount = nurseShiftPairs.filter(ns => ns.shift === "3rd").length;
-          if (thirdShiftCount > 0) {
-            // Apply penalty if 3rd shift coverage would be insufficient
-            const avgThirdShiftCoverage = (thirdShiftCount * 5) / 7; // 5 work days out of 7
-            if (avgThirdShiftCoverage < 1) {
-              thirdShiftPenalty = 200; // Penalty for insufficient 3rd shift coverage
-            }
-          }
-        }
-        
-        const score = workSpread + restPenalty + coveragePenalty + thirdShiftPenalty;
-        
-        if (score < bestScore) {
-          bestScore = score;
-          bestStartDay = startDay;
-        }
-      }
-      
-      // Apply the best start day and update actual counts
-      const nursePattern = generateWorkRestPattern(bestStartDay, nurseShift.shift);
-      monthlyAssignments[nurseShift.nurse.id] = nursePattern;
-      
-      // Update daily work counts
-      for (let i = 0; i < 5; i++) {
-        const dayIndex = (bestStartDay + i) % 7;
-        dailyNurseCounts[daysOfWeek[dayIndex]]++;
-      }
-      
-      // Update rest day counts
-      for (let i = 5; i < 7; i++) {
-        const dayIndex = (bestStartDay + i) % 7;
-        restDayDistribution[daysOfWeek[dayIndex]]++;
-      }
-    });
-    
-    return monthlyAssignments;
-  };
-
-  // Validate and fix coverage gaps to ensure every day has at least one nurse working
-  const validateAndFixCoverage = (assignments) => {
-    const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-    const fixedAssignments = { ...assignments };
-    
-    // Calculate daily coverage for each day
-    const dailyCoverage = {};
-    daysOfWeek.forEach(day => dailyCoverage[day] = 0);
-    
-    // Count nurses working each day
-    Object.values(assignments).forEach(nurseSchedule => {
-      Object.entries(nurseSchedule).forEach(([day, shift]) => {
-        if (shift !== "rest") {
-          dailyCoverage[day]++;
-        }
-      });
-    });
-    
-    // Find days with zero coverage
-    const zeroCoverageDays = daysOfWeek.filter(day => dailyCoverage[day] === 0);
-    
-    if (zeroCoverageDays.length > 0) {
-      console.log(`Fixing coverage gaps for days: ${zeroCoverageDays.join(", ")}`);
-      
-      // Find nurses with the most rest days to reassign
-      const nurseRestCounts = {};
-      Object.entries(assignments).forEach(([nurseId, schedule]) => {
-        nurseRestCounts[nurseId] = Object.values(schedule).filter(shift => shift === "rest").length;
-      });
-      
-      // Sort nurses by rest day count (descending)
-      const nursesByRestDays = Object.keys(nurseRestCounts)
-        .sort((a, b) => nurseRestCounts[b] - nurseRestCounts[a]);
-      
-      // For each zero coverage day, reassign a nurse from rest to work
-      zeroCoverageDays.forEach(day => {
-        for (const nurseId of nursesByRestDays) {
-          if (fixedAssignments[nurseId][day] === "rest") {
-            // Assign this nurse to 3rd shift on this day (overnight coverage)
-            fixedAssignments[nurseId][day] = "3rd";
-            console.log(`Assigned nurse ${nurseId} to 3rd shift on ${day} to fix coverage gap`);
-            break;
-          }
-        }
-      });
-    }
-    
-    return fixedAssignments;
-  };
-
-  // Generate complete monthly schedule with rotation and balanced shift distribution
-  const generateMonthlySchedule = () => {
-    const updatedShiftRotation = { ...scheduleGeneration.lastShiftRotation };
-    
-    // Calculate optimal shift distribution
-    const totalNurses = nurses.length;
-    const shiftDistribution = calculateOptimalShiftDistribution(totalNurses);
-    
-    // Group nurses by their next shift (after rotation)
-    const nursesByNextShift = { "1st": [], "2nd": [], "3rd": [] };
-    
-    nurses.forEach((nurse) => {
-      const lastShift = getLastShiftForNurse(nurse.id);
-      const nextShift = getNextShift(lastShift);
-      nursesByNextShift[nextShift].push(nurse);
-      updatedShiftRotation[nurse.id] = nextShift;
-    });
-    
-    // Balance shifts according to optimal distribution
-    const balancedNurseAssignments = balanceShiftDistribution(nursesByNextShift, shiftDistribution);
-    
-    // Distribute nurses across days to minimize daily overlap
-    const monthlyAssignments = distributeNursesAcrossDays(balancedNurseAssignments);
-    
-    // Validate and fix coverage gaps
-    const validatedAssignments = validateAndFixCoverage(monthlyAssignments);
-    
-    // Update the shift rotation tracking
-    setScheduleGeneration(prev => ({
-      ...prev,
-      lastShiftRotation: updatedShiftRotation
-    }));
-    
-    return validatedAssignments;
-  };
-
-  // Calculate optimal shift distribution based on total nurses
-  const calculateOptimalShiftDistribution = (totalNurses) => {
-    if (totalNurses <= 3) {
-      // For very small teams, ensure at least 1 nurse per shift
-      return { "1st": 1, "2nd": 1, "3rd": 1 };
-    } else if (totalNurses <= 6) {
-      // For medium teams, ensure at least 2 nurses on 3rd shift for better coverage
-      const thirdShift = Math.max(2, Math.floor(totalNurses * 0.25)); // 25% minimum, at least 2 nurses
-      const remaining = totalNurses - thirdShift;
-      const firstShift = Math.ceil(remaining / 2); // Slightly favor 1st shift
-      const secondShift = remaining - firstShift;
-      return { "1st": firstShift, "2nd": secondShift, "3rd": thirdShift };
-    } else {
-      // For larger teams, ensure adequate 3rd shift coverage
-      const thirdShift = Math.max(2, Math.floor(totalNurses * 0.2)); // 20% minimum, at least 2 nurses
-      const remaining = totalNurses - thirdShift;
-      const firstShift = Math.ceil(remaining / 2); // Slightly favor 1st shift
-      const secondShift = remaining - firstShift;
-      return { "1st": firstShift, "2nd": secondShift, "3rd": thirdShift };
-    }
-  };
-
-  // Balance nurse assignments to match optimal distribution
-  const balanceShiftDistribution = (nursesByNextShift, targetDistribution) => {
-    const balanced = { "1st": [], "2nd": [], "3rd": [] };
-    const shifts = ["1st", "2nd", "3rd"];
-    
-    // Start with the natural rotation assignments
-    shifts.forEach(shift => {
-      const availableNurses = [...nursesByNextShift[shift]];
-      const targetCount = targetDistribution[shift];
-      
-      // Take nurses up to the target count
-      balanced[shift] = availableNurses.splice(0, targetCount);
-    });
-    
-    // Collect remaining unassigned nurses
-    const unassigned = [];
-    shifts.forEach(shift => {
-      unassigned.push(...nursesByNextShift[shift].filter(nurse => 
-        !balanced["1st"].includes(nurse) && 
-        !balanced["2nd"].includes(nurse) && 
-        !balanced["3rd"].includes(nurse)
-      ));
-    });
-    
-    // Distribute remaining nurses to meet target distribution
-    shifts.forEach(shift => {
-      const currentCount = balanced[shift].length;
-      const targetCount = targetDistribution[shift];
-      const needed = targetCount - currentCount;
-      
-      if (needed > 0 && unassigned.length > 0) {
-        const nursesToAdd = unassigned.splice(0, Math.min(needed, unassigned.length));
-        balanced[shift].push(...nursesToAdd);
-      }
-    });
-    
-    // If there are still unassigned nurses, distribute them to 1st and 2nd shifts
-    let shiftIndex = 0;
-    while (unassigned.length > 0) {
-      const targetShift = shiftIndex % 2 === 0 ? "1st" : "2nd"; // Alternate between 1st and 2nd
-      balanced[targetShift].push(unassigned.shift());
-      shiftIndex++;
-    }
-    
-    return balanced;
-  };
-
-  // Helper function to split array into chunks
-  const splitIntoChunks = (arr, n) => {
-    if (!arr || arr.length === 0) return Array.from({ length: n }, () => []);
-    const res = Array.from({ length: n }, () => []);
-    for (let i = 0; i < arr.length; i++) {
-      res[i % n].push(arr[i]);
-    }
-    return res;
-  };
-
-  // Generate automatic elderly assignments - divide elderly in each house equally among nurses on the same shift
-  const generateElderlyAssignments = () => {
-    const assignments = {};
-    const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-
-    // Sort houses consistently (H001, H002, H003, H004, H005)
-    const sortedHouses = houses.sort((a, b) => {
-      const numA = parseInt(a.house_id.replace(/\D/g, ""), 10);
-      const numB = parseInt(b.house_id.replace(/\D/g, ""), 10);
-      return numA - numB;
-    });
-
-    for (const day of daysOfWeek) {
-      // Group nurses by shift for this day
-      const nursesByShift = {
-        "1st": [],
-        "2nd": [],
-        "3rd": []
-      };
-      
-      Object.entries(pendingAssignments).forEach(([nurseId, dayToShift]) => {
-        const shift = dayToShift[day];
-        if (shift && shift !== "rest") {
-          nursesByShift[shift].push(nurseId);
-        }
-      });
-
-      // Process each shift separately
-      ["1st", "2nd"].forEach(shift => {
-        const nursesOnShift = nursesByShift[shift];
-        
-        if (nursesOnShift.length === 0) return;
-
-        // Sort nurses alphabetically for consistent assignment
-        nursesOnShift.sort((a, b) => {
-          const nameA = nurseName(a).toLowerCase();
-          const nameB = nurseName(b).toLowerCase();
-          return nameA.localeCompare(nameB);
-        });
-
-        // Initialize assignments for all nurses on this shift
-        nursesOnShift.forEach(nurseId => {
-          if (!assignments[nurseId]) assignments[nurseId] = {};
-          assignments[nurseId][day] = [];
-        });
-
-        // Process each house and divide its elderly equally among nurses on this shift
-        sortedHouses.forEach(house => {
-          // Get all elderly in this house that are assigned to caregivers for this day and shift
-          const elderlyInHouse = elderlySchedule
-            .filter(ea => {
-              const elderly = elderlyList.find(e => e.id === ea.elderly_id);
-              const caregiver = caregiverAssignments.find(ca => ca.caregiver_id === ea.caregiver_id);
-              
-              return elderly && 
-                     caregiver && 
-                     elderly.house_id === house.house_id &&
-                     ea.day === day &&
-                     caregiver.shift === shift &&
-                     caregiver.days_assigned.includes(day);
-            })
-            .map(ea => ea.elderly_id);
-
-          // Remove duplicates and sort alphabetically
-          const uniqueElderlyInHouse = [...new Set(elderlyInHouse)];
-          const sortedElderly = uniqueElderlyInHouse.sort((a, b) => {
-            const elderlyA = elderlyList.find(e => e.id === a);
-            const elderlyB = elderlyList.find(e => e.id === b);
-            const nameA = elderlyA ? `${elderlyA.elderly_fname} ${elderlyA.elderly_lname}`.toLowerCase() : '';
-            const nameB = elderlyB ? `${elderlyB.elderly_fname} ${elderlyB.elderly_lname}`.toLowerCase() : '';
-            return nameA.localeCompare(nameB);
-          });
-
-          // Divide elderly in this house equally among nurses on this shift
-          if (sortedElderly.length > 0) {
-            const elderlyChunks = splitIntoChunks(sortedElderly, nursesOnShift.length);
-            
-            nursesOnShift.forEach((nurseId, index) => {
-              const elderlyChunk = elderlyChunks[index] || [];
-              assignments[nurseId][day].push(...elderlyChunk);
-            });
-          }
-        });
-      });
-
-      // For 3rd shift, no elderly assignments (no vital signs)
-      nursesByShift["3rd"].forEach(nurseId => {
-        if (!assignments[nurseId]) assignments[nurseId] = {};
-        assignments[nurseId][day] = [];
-      });
-    }
-
-    return assignments;
-  };
-
+  // ========== ACCORDION FUNCTIONALITY SECTION ==========
+  // This section contains all accordion-related functions for the schedule-page component
+  
   // Get house assignments for display purposes
   const getNurseHouseAssignments = (nurseId, day, shift) => {
     const assignment = nurseElderlyAssignments.find(
@@ -600,59 +201,265 @@ export default function NurseSchedule() {
   };
 
   // Group elderly by house for better display
-  const groupElderlyByHouse = (elderlyIds) => {
-    const grouped = {};
-    elderlyIds.forEach(elderlyId => {
-      const elderly = elderlyList.find(e => e.id === elderlyId);
-      if (elderly) {
-        const houseId = elderly.house_id;
-        if (!grouped[houseId]) grouped[houseId] = [];
-        grouped[houseId].push(elderly);
+  const groupElderlyByHouse = (elderlyIds) => 
+    nurseScheduleService.groupElderlyByHouse(elderlyIds, elderlyList);
+
+  // Toggle house expansion for accordion
+  const toggleHouseExpansion = (nurseId, houseId) => {
+    const key = `${nurseId}-${houseId}`;
+    setExpandedHouses(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(key)) {
+        newSet.delete(key);
+      } else {
+        newSet.add(key);
       }
+      return newSet;
     });
+  };
+
+  // Create accordion content for elderly assignments within schedule-page
+  const createAccordionContent = (elderlyAssignments, activeShift, activeDay, nurseId) => {
+    if (activeShift === "3rd") {
+      return <em style={{ color: "#888" }}>No elderly assigned for 3rd shift</em>;
+    }
+
+    // Get temporary reassignments TO this nurse for the current date
+    const dateStr = formatDateString(selectedDate);
+    const indexToDayName = {
+      0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
+      4: "Thursday", 5: "Friday", 6: "Saturday"
+    };
+    const currentDay = activeDay === SHOW_ALL_DAYS ? 
+      indexToDayName[selectedDate.getDay()] : 
+      activeDay;
     
-    // Sort houses and elderly within each house
-    const sortedGrouped = {};
-    Object.keys(grouped).sort((a, b) => {
-      const numA = parseInt(a.replace(/\D/g, ""), 10);
-      const numB = parseInt(b.replace(/\D/g, ""), 10);
-      return numA - numB;
-    }).forEach(houseId => {
-      sortedGrouped[houseId] = grouped[houseId].sort((a, b) => {
-        const nameA = `${a.elderly_fname} ${a.elderly_lname}`.toLowerCase();
-        const nameB = `${b.elderly_fname} ${b.elderly_lname}`.toLowerCase();
-        return nameA.localeCompare(nameB);
+    // Check if this nurse is absent for the current date and day
+    const nurseAssignment = assignments.find(a => a.nurse_id === nurseId && a.shift === activeShift);
+    const isThisNurseAbsent = nurseAssignment && 
+      nurseAssignment.is_absent && 
+      nurseAssignment.absent_for_date === dateStr && 
+      nurseAssignment.absent_for_day === currentDay;
+    
+    // Don't show temp assignments if the nurse is absent
+    const tempAssignmentsToNurse = !isThisNurseAbsent ? tempReassignments.filter(t => 
+      t.to_nurse_id === nurseId && 
+      t.date === dateStr && 
+      t.shift === activeShift &&
+      (activeDay === SHOW_ALL_DAYS || t.day.toLowerCase() === activeDay.toLowerCase())
+    ) : [];
+
+    // Get all elderly IDs from both regular and temporary assignments
+    const regularElderlyIds = elderlyAssignments.flatMap(ea => ea.elderly_ids || []);
+    const tempElderlyIds = tempAssignmentsToNurse.flatMap(t => t.elderly_ids || []);
+    const allElderlyIds = [...regularElderlyIds, ...tempElderlyIds];
+
+    if (allElderlyIds.length === 0) {
+      return <em style={{ color: "#888" }}>No elderly assigned</em>;
+    }
+
+    if (activeDay === SHOW_ALL_DAYS) {
+      // Group by day first, then by house
+      const dayGroups = {};
+      
+      // Add regular assignments
+      elderlyAssignments.forEach(ea => {
+        if (!dayGroups[ea.day]) dayGroups[ea.day] = [];
+        dayGroups[ea.day].push(...(ea.elderly_ids || []));
       });
-    });
-    
-    return sortedGrouped;
+      
+      // Add temporary assignments
+      tempAssignmentsToNurse.forEach(t => {
+        if (!dayGroups[t.day]) dayGroups[t.day] = [];
+        dayGroups[t.day].push(...(t.elderly_ids || []));
+      });
+
+      // Accordion JSX for schedule-page - Show All Days view
+      return (
+        <div className="assignment-accordion">
+          {Object.entries(dayGroups).map(([day, elderlyIds]) => {
+            const groupedByHouse = groupElderlyByHouse(elderlyIds);
+            return (
+              <div key={day} className="day-group">
+                <strong className="day-header">{day}:</strong>
+                {Object.keys(groupedByHouse).length > 0 ? (
+                  <div className="house-accordions">
+                    {Object.entries(groupedByHouse).map(([houseId, elderly]) => {
+                      const expansionKey = `${nurseId}-${houseId}-${day}`;
+                      const isExpanded = expandedHouses.has(expansionKey);
+                      return (
+                        <div key={houseId} className="house-accordion">
+                          <div 
+                            className="house-header"
+                            onClick={() => toggleHouseExpansion(nurseId, `${houseId}-${day}`)}
+                          >
+                            <div className="house-info">
+                              <span className="house-name">{houseName(houseId)} ({elderly.length})</span>
+                            </div>
+                            <span className="expand-icon">{isExpanded ? '−' : '+'}</span>
+                          </div>
+                          {isExpanded && (
+                            <div className="elderly-list">
+                              {elderly.map(e => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="no-assignments">No assignments</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    } else {
+      // Show specific day grouped by house - use combined elderly IDs
+      const groupedByHouse = groupElderlyByHouse(allElderlyIds);
+      
+      if (Object.keys(groupedByHouse).length === 0) {
+        return <em style={{ color: "#888" }}>No assignments</em>;
+      }
+
+      // Accordion JSX for schedule-page - Specific Day view
+      return (
+        <div className="assignment-accordion">
+          <div className="house-accordions">
+            {Object.entries(groupedByHouse).map(([houseId, elderly]) => {
+              const expansionKey = `${nurseId}-${houseId}`;
+              const isExpanded = expandedHouses.has(expansionKey);
+              return (
+                <div key={houseId} className="house-accordion">
+                  <div 
+                    className="house-header"
+                    onClick={() => toggleHouseExpansion(nurseId, houseId)}
+                  >
+                    <div className="house-info">
+                      <span className="house-name">{houseName(houseId)} ({elderly.length})</span>
+                    </div>
+                    <span className="expand-icon">{isExpanded ? '−' : '+'}</span>
+                  </div>
+                  {isExpanded && (
+                    <div className="elderly-list">
+                      {elderly.map(e => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {tempElderlyIds.length > 0 && (
+            <div style={{ fontSize: '0.8em', color: '#007bff', marginTop: '8px', fontStyle: 'italic' }}>
+              + {tempElderlyIds.length} temporarily assigned from absent nurses
+            </div>
+          )}
+        </div>
+      );
+    }
+  };
+  // ========== END OF ACCORDION FUNCTIONALITY SECTION ==========
+
+  // Filter assignments based on selected date
+  const getFilteredAssignments = () => {
+    if (activeDay === SHOW_ALL_DAYS) {
+      return assignments.filter((a) => a.shift === activeShift);
+    } else {
+      // Filter by both day and date range
+      return assignments.filter((a) => {
+        const matchesShift = a.shift === activeShift;
+        const matchesDay = a.days_assigned.includes(activeDay);
+        
+        // Check if selected date falls within assignment date range (if date fields exist)
+        const startDate = a.start_date?.toDate();
+        const endDate = a.end_date?.toDate();
+        
+        // If no date range is specified, just match shift and day
+        if (!startDate || !endDate) {
+          return matchesShift && matchesDay;
+        }
+        
+        // If date range exists, check if selected date falls within it
+        const selectedDateObj = new Date(selectedDate);
+        const withinDateRange = selectedDateObj >= startDate && selectedDateObj <= endDate;
+        
+        return matchesShift && matchesDay && withinDateRange;
+      });
+    }
+  };
+
+  // Handle marking nurse as absent
+  const handleMarkAbsent = async (assignmentId, nurseId) => {
+    try {
+      // Get the target date and day name
+      const targetDateStr = formatDateString(selectedDate);
+      const indexToDayName = {
+        0: "Sunday",
+        1: "Monday", 
+        2: "Tuesday",
+        3: "Wednesday",
+        4: "Thursday",
+        5: "Friday",
+        6: "Saturday"
+      };
+      const dayName = activeDay === SHOW_ALL_DAYS ? indexToDayName[selectedDate.getDay()] : activeDay;
+
+      const nurseName = nurseScheduleService.getNurseName(nurseId, nurses);
+      
+      if (!window.confirm(`Mark ${nurseName} as absent for ${dayName}, ${selectedDate.toLocaleDateString()}? Their elderly assignments will be redistributed to other nurses on the same shift.`)) {
+        return;
+      }
+
+      setSaving(true);
+      
+      console.log(`🚨 Marking nurse ${nurseName} as absent for ${targetDateStr} (${dayName})`);
+      
+      const result = await markNurseAbsent(
+        assignmentId,
+        assignments,
+        nurseElderlyAssignments,
+        tempReassignments,
+        targetDateStr,
+        dayName
+      );
+
+      // Refresh temporary reassignments
+      const updatedTempAssigns = await getTempReassignments(targetDateStr, activeShift);
+      setTempReassignments(updatedTempAssigns);
+
+      setNotification(`✅ ${nurseName} marked as absent. Elderly assignments have been redistributed.`);
+      setTimeout(() => setNotification(""), 5000);
+
+    } catch (error) {
+      console.error("Error marking nurse absent:", error);
+      setNotification(`❌ Failed to mark nurse as absent: ${error.message}`);
+      setTimeout(() => setNotification(""), 5000);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Clear all nurse schedules from Firestore
   const handleClearAll = async () => {
     if (!window.confirm("Are you sure you want to clear all nurse schedules and elderly assignments? This cannot be undone.")) return;
     setSaving(true);
-    const batch = writeBatch(db);
     
-    // Clear shift assignments
-    assignments.forEach((a) => {
-      if (nurses.some((n) => n.id === a.nurse_id)) {
-        batch.delete(doc(db, "nurse_shift_assign", a.id));
-      }
-    });
-
-    // Clear elderly assignments
-    nurseElderlyAssignments.forEach((a) => {
-      if (nurses.some((n) => n.id === a.nurse_id)) {
-        batch.delete(doc(db, "nurse_elderly_assign", a.id));
-      }
-    });
-
     try {
-      await batch.commit();
+      console.log("🎯 Clear All button clicked - starting operation...");
+      const result = await nurseScheduleService.clearAllSchedules(assignments, nurseElderlyAssignments, nurses);
+      
+      console.log("🎉 Clear operation completed:", result);
+      
       setPendingAssignments({});
       setEditing(false);
+      
+      // Show success notification
+      setNotification(`✅ Cleared ${result.shiftDeleteCount} shift assignments and ${result.elderlyDeleteCount} elderly assignments!`);
+      setTimeout(() => setNotification(""), 5000);
+      
     } catch (e) {
+      console.error("💥 Clear operation failed:", e);
       alert("Failed to clear schedules: " + e.message);
     }
     setSaving(false);
@@ -666,137 +473,30 @@ export default function NurseSchedule() {
     setSaving(true);
     
     try {
-      const batch = writeBatch(db);
+      const result = await nurseScheduleService.generateAndSaveSchedule(
+        nurses, 
+        assignments, 
+        nurseElderlyAssignments, 
+        scheduleGeneration.lastShiftRotation, 
+        elderlyList, 
+        houses,
+        scheduleGeneration.periodDuration
+      );
       
-      // Clear existing assignments first
-      assignments.forEach((a) => {
-        if (nurses.some((n) => n.id === a.nurse_id)) {
-          batch.delete(doc(db, "nurse_shift_assign", a.id));
-        }
-      });
+      setPendingAssignments(result.monthlyAssignments);
+      setScheduleGeneration(prev => ({
+        ...prev,
+        lastShiftRotation: result.updatedShiftRotation
+      }));
       
-      nurseElderlyAssignments.forEach((a) => {
-        if (nurses.some((n) => n.id === a.nurse_id)) {
-          batch.delete(doc(db, "nurse_elderly_assign", a.id));
-        }
-      });
+      // Refresh nurses data to update scheduleStatus and trigger real-time re-detection
+      const { nurses: updatedNurses } = await nurseScheduleService.loadAllData();
+      setNurses(updatedNurses);
       
-      // Generate new monthly schedule
-      const monthlyAssignments = generateMonthlySchedule();
+      const { shiftCounts, minDaily, maxDaily, minRest, maxRest } = result.statistics;
       
-      // Save new shift assignments
-      for (const nurseId of Object.keys(monthlyAssignments)) {
-        const dayToShift = monthlyAssignments[nurseId];
-        
-        // Group by shift
-        const byShift = {};
-        Object.entries(dayToShift).forEach(([day, shift]) => {
-          if (shift !== "rest") {
-            if (!byShift[shift]) byShift[shift] = [];
-            byShift[shift].push(day);
-          }
-        });
-        
-        // Create shift assignment documents
-        for (const [shift, days] of Object.entries(byShift)) {
-          const docId = `${nurseId}_${shift}`;
-          const ref = doc(db, "nurse_shift_assign", docId);
-          const shiftDef = shiftDefs.find((s) => s.key === shift);
-          const payload = {
-            nurse_id: nurseId,
-            shift,
-            shift_name: shiftDef?.name || "",
-            start_time: shiftDef?.startTime || "",
-            end_time: shiftDef?.endTime || "",
-            days_assigned: days,
-            is_current: true,
-            created_at: new Date(),
-            schedule_period: {
-              start_date: new Date(),
-              end_date: new Date(Date.now() + (scheduleGeneration.periodDuration * 24 * 60 * 60 * 1000)),
-              duration_days: scheduleGeneration.periodDuration,
-              auto_generated: true
-            }
-          };
-          batch.set(ref, payload, { merge: true });
-        }
-      }
-      
-      // Generate and save elderly assignments using the new schedule
-      setPendingAssignments(monthlyAssignments);
-      
-      // Commit all changes
-      await batch.commit();
-      
-      // Generate elderly assignments after shift assignments are saved
-      setTimeout(async () => {
-        const elderlyBatch = writeBatch(db);
-        const elderlyAssignments = generateElderlyAssignments();
-        
-        for (const nurseId of Object.keys(elderlyAssignments)) {
-          const dayToElderly = elderlyAssignments[nurseId] || {};
-          
-          for (const [day, elderlyIds] of Object.entries(dayToElderly)) {
-            if (elderlyIds && elderlyIds.length > 0) {
-              const nurseShift = monthlyAssignments[nurseId]?.[day];
-              if (nurseShift === "1st" || nurseShift === "2nd") {
-                const docId = `${nurseId}_${day}`;
-                const ref = doc(db, "nurse_elderly_assign", docId);
-                const payload = {
-                  nurse_id: nurseId,
-                  day,
-                  shift: nurseShift,
-                  elderly_ids: elderlyIds,
-                  house_ids: [...new Set(elderlyIds.map(getHouseForElderly).filter(Boolean))],
-                  created_at: new Date(),
-                  is_current: true,
-                  assignment_type: "automated_house_based_assignment",
-                  schedule_period: {
-                    start_date: new Date(),
-                    end_date: new Date(Date.now() + (scheduleGeneration.periodDuration * 24 * 60 * 60 * 1000)),
-                    auto_generated: true
-                  }
-                };
-                elderlyBatch.set(ref, payload, { merge: true });
-              }
-            }
-          }
-        }
-        
-        await elderlyBatch.commit();
-        
-        // Calculate and display shift distribution for user feedback
-        const shiftCounts = { "1st": 0, "2nd": 0, "3rd": 0 };
-        const dailyCounts = { "Monday": 0, "Tuesday": 0, "Wednesday": 0, "Thursday": 0, "Friday": 0, "Saturday": 0, "Sunday": 0 };
-        const restCounts = { "Monday": 0, "Tuesday": 0, "Wednesday": 0, "Thursday": 0, "Friday": 0, "Saturday": 0, "Sunday": 0 };
-        
-        Object.values(monthlyAssignments).forEach(nurseSchedule => {
-          Object.entries(nurseSchedule).forEach(([day, shift]) => {
-            if (shift !== "rest") {
-              shiftCounts[shift] = (shiftCounts[shift] || 0) + 1;
-              dailyCounts[day] = (dailyCounts[day] || 0) + 1;
-            } else {
-              restCounts[day] = (restCounts[day] || 0) + 1;
-            }
-          });
-        });
-        
-        // Since each nurse works 5 days, divide by 5 to get actual nurse count per shift
-        Object.keys(shiftCounts).forEach(shift => {
-          shiftCounts[shift] = shiftCounts[shift] / 5;
-        });
-        
-        // Calculate distribution ranges
-        const dailyValues = Object.values(dailyCounts);
-        const restValues = Object.values(restCounts);
-        const minDaily = Math.min(...dailyValues);
-        const maxDaily = Math.max(...dailyValues);
-        const minRest = Math.min(...restValues);
-        const maxRest = Math.max(...restValues);
-        
-        setNotification(`✅ Schedule generated! Shifts: 1st (${shiftCounts["1st"]}), 2nd (${shiftCounts["2nd"]}), 3rd (${shiftCounts["3rd"]}) nurses. Working: ${minDaily}-${maxDaily}/day, Resting: ${minRest}-${maxRest}/day. Continuous coverage ensured!`);
-        setTimeout(() => setNotification(""), 7000);
-      }, 1000);
+      setNotification(`✅ Schedule generated! Shifts: 1st (${shiftCounts["1st"]}), 2nd (${shiftCounts["2nd"]}), 3rd (${shiftCounts["3rd"]}) nurses. Working: ${minDaily}-${maxDaily}/day, Resting: ${minRest}-${maxRest}/day. All nurses integrated!`);
+      setTimeout(() => setNotification(""), 7000);
       
     } catch (e) {
       alert("Failed to generate schedule: " + e.message);
@@ -808,73 +508,23 @@ export default function NurseSchedule() {
 
   const handleSaveAll = async () => {
     setSaving(true);
-    const batch = writeBatch(db);
-
-    // Generate automated elderly assignments
-    const elderlyAssignments = generateElderlyAssignments();
-
-    // Save shift assignments
-    for (const nurseId of Object.keys(pendingAssignments)) {
-      const dayToShift = pendingAssignments[nurseId];
-
-      // Group by shift
-      const byShift = {};
-      Object.entries(dayToShift).forEach(([day, shift]) => {
-        if (shift !== "rest") {
-          if (!byShift[shift]) byShift[shift] = [];
-          byShift[shift].push(day);
-        }
-      });
-
-      // Create/update docs
-      for (const [shift, days] of Object.entries(byShift)) {
-        const docId = `${nurseId}_${shift}`;
-        const ref = doc(db, "nurse_shift_assign", docId);
-        const shiftDef = shiftDefs.find((s) => s.key === shift);
-        const payload = {
-          nurse_id: nurseId,
-          shift,
-          shift_name: shiftDef?.name || "",
-          start_time: shiftDef?.startTime || "",
-          end_time: shiftDef?.endTime || "",
-          days_assigned: days,
-          is_current: true,
-          created_at: new Date(),
-        };
-        batch.set(ref, payload, { merge: true });
-      }
-    }
-
-    // Save automated elderly assignments (only for 1st and 2nd shifts)
-    for (const nurseId of Object.keys(elderlyAssignments)) {
-      const dayToElderly = elderlyAssignments[nurseId] || {};
-      
-      for (const [day, elderlyIds] of Object.entries(dayToElderly)) {
-        if (elderlyIds && elderlyIds.length > 0) {
-          // Check if nurse is working 1st or 2nd shift on this day
-          const nurseShift = pendingAssignments[nurseId]?.[day];
-          if (nurseShift === "1st" || nurseShift === "2nd") {
-            const docId = `${nurseId}_${day}`;
-            const ref = doc(db, "nurse_elderly_assign", docId);
-            const payload = {
-              nurse_id: nurseId,
-              day,
-              shift: nurseShift,
-              elderly_ids: elderlyIds,
-              house_ids: [...new Set(elderlyIds.map(getHouseForElderly).filter(Boolean))],
-              created_at: new Date(),
-              is_current: true,
-              assignment_type: "automated_house_based_assignment"
-            };
-            batch.set(ref, payload, { merge: true });
-          }
-        }
-      }
-    }
-
+    
     try {
-      await batch.commit();
-      setNotification("Nurse schedules saved. Each nurse assigned to 1 primary house + share of any leftover houses.");
+      await nurseScheduleService.saveAllSchedules(
+        pendingAssignments, 
+        nurses, 
+        elderlyList, 
+        houses
+      );
+      
+      // Clear pending assignments
+      setPendingAssignments({});
+      
+      // Refresh nurses data to update scheduleStatus and trigger real-time re-detection
+      const { nurses: updatedNurses } = await nurseScheduleService.loadAllData();
+      setNurses(updatedNurses);
+      
+      setNotification("✅ Nurse schedules saved successfully! New nurses moved to Current Schedule.");
     } catch (e) {
       alert("Failed to save all: " + e.message);
     }
@@ -883,11 +533,46 @@ export default function NurseSchedule() {
     setTimeout(() => setNotification(""), 3000);
   };
 
+  // Handle copying schedule from existing nurse to new nurse
+  const handleCopySchedule = (fromNurseId, toNurseId) => {
+    const copiedSchedule = nurseScheduleService.copyScheduleFromNurse(fromNurseId, toNurseId, assignments);
+    setPendingAssignments(prev => ({
+      ...prev,
+      [toNurseId]: copiedSchedule
+    }));
+    setNotification(`✅ Copied schedule to ${nurseName(toNurseId)}`);
+    setTimeout(() => setNotification(""), 3000);
+  };
+
+  // Handle assigning specific shift to new nurse
+  const handleAssignShift = (nurseId, shift) => {
+    const shiftSchedule = nurseScheduleService.createBalancedSchedule(shift);
+    setPendingAssignments(prev => ({
+      ...prev,
+      [nurseId]: shiftSchedule
+    }));
+    setNotification(`✅ Assigned ${shift} shift to ${nurseName(nurseId)}`);
+    setTimeout(() => setNotification(""), 3000);
+  };
+
   return (
     <div className="schedule-page">
       <Navbar />
       <main className="schedule-container">
         <h2 className="page-title" style={{ marginBottom: 8 }}>Nurse Scheduling</h2>
+
+        {/* Schedule Info Display */}
+        {scheduleInfo && (
+          <div className="schedule-inline" style={{ marginBottom: 16 }}>
+            <span>
+              <strong>Schedule Period:</strong>{" "}
+              {scheduleInfo.start?.toLocaleDateString()} → {scheduleInfo.end?.toLocaleDateString()}
+            </span>
+            <span>
+              <strong>Selected Date:</strong> {selectedDate.toLocaleDateString()}
+            </span>
+          </div>
+        )}
 
         {/* Toggle buttons */}
         <div className="button-toggle" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -954,58 +639,208 @@ export default function NurseSchedule() {
                 {notification}
               </div>
             )}
+            
+            {/* New Nurses Alert */}
+            {newNurses.length > 0 && (
+              <div className="new-nurses-alert" style={{ 
+                background: 'linear-gradient(135deg, #fff3cd, #ffeaa7)', 
+                border: '2px solid #28a745', 
+                borderRadius: '8px', 
+                padding: '12px 16px', 
+                marginBottom: '16px', 
+                textAlign: 'center',
+                boxShadow: '0 4px 8px rgba(40, 167, 69, 0.2)'
+              }}>
+                <strong style={{ color: '#28a745', fontSize: '16px' }}>
+                  🎉 {newNurses.length} New Nurse{newNurses.length > 1 ? 's' : ''} Detected!
+                </strong>
+                <div style={{ color: '#666', fontSize: '14px', marginTop: '4px' }}>
+                  {newNurses.map(n => nurseName(n.id)).join(', ')} ready for scheduling
+                </div>
+              </div>
+            )}
             <div className="table-container">
-              <table className="schedule-table weekly-visual">
-                <thead>
-                  <tr>
-                    <th>Nurse</th>
-                    {daysOfWeek.map((day) => (
-                      <th key={day}>{day}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {nurses.map((nurse) => {
-                    const dayToShift = pendingAssignments[nurse.id] || {};
-                    return (
-                      <tr key={nurse.id}>
-                        <td style={{ fontWeight: 'bold' }}>{nurseName(nurse.id)}</td>
+              {/* New Nurses Section - Moved to Top for Better Visibility */}
+              {newNurses.length > 0 && (
+                <>
+                  <h3 style={{ marginBottom: '16px', color: '#28a745' }}>
+                    🆕 New Nurses ({newNurses.length})
+                  </h3>
+                  <div className="new-nurses-info" style={{ 
+                    background: '#e8f5e8', 
+                    border: '1px solid #28a745', 
+                    borderRadius: '8px', 
+                    padding: '12px', 
+                    marginBottom: '16px',
+                    fontSize: '14px'
+                  }}>
+                    <strong>New nurses detected!</strong> These nurses are not yet included in the current schedule. 
+                    Use the quick assignment buttons to integrate them.
+                  </div>
+                  
+                  <table className="nurse-edit-table new-nurse-table weekly-visual">
+                    <thead>
+                      <tr>
+                        <th>New Nurse</th>
+                        <th>Quick Actions</th>
                         {daysOfWeek.map((day) => (
-                          <td key={nurse.id + day} style={{ textAlign: "center" }}>
-                            <select
-                              value={dayToShift[day] || "rest"}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setPendingAssignments((prev) => ({
-                                  ...prev,
-                                  [nurse.id]: {
-                                    ...prev[nurse.id],
-                                    [day]: val,
-                                  },
-                                }));
-                              }}
-                            >
-                              {shiftDefs.map((shift) => (
-                                <option key={shift.key} value={shift.key}>{shift.name}</option>
-                              ))}
-                            </select>
-                            {(dayToShift[day] === "1st" || dayToShift[day] === "2nd") && (
-                              <div style={{ fontSize: '0.7em', color: '#0066cc', marginTop: '2px' }}>
-                                House + elderly assigned
-                              </div>
-                            )}
-                            {dayToShift[day] === "3rd" && (
-                              <div style={{ fontSize: '0.7em', color: '#999', marginTop: '2px' }}>
-                                No vital signs
-                              </div>
-                            )}
-                          </td>
+                          <th key={day}>{day}</th>
                         ))}
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {newNurses.map((nurse) => {
+                        const dayToShift = pendingAssignments[nurse.id] || {};
+                        const hasSchedule = Object.keys(dayToShift).length > 0;
+                        
+                        return (
+                          <tr key={nurse.id} className="new-nurse-row">
+                            <td style={{ fontWeight: 'bold', color: '#28a745' }}>
+                              {nurseName(nurse.id)}
+                              <div style={{ fontSize: '0.8em', color: '#666', fontWeight: 'normal' }}>
+                                Not scheduled
+                              </div>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <div className="quick-actions">
+                                <select
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val.startsWith('copy-')) {
+                                      const fromNurseId = val.replace('copy-', '');
+                                      handleCopySchedule(fromNurseId, nurse.id);
+                                    } else if (val && val !== '') {
+                                      handleAssignShift(nurse.id, val);
+                                    }
+                                    e.target.value = '';
+                                  }}
+                                  style={{ 
+                                    fontSize: '12px', 
+                                    padding: '4px', 
+                                    marginBottom: '4px',
+                                    width: '100%',
+                                    border: hasSchedule ? '2px solid #28a745' : '1px solid #ccc'
+                                  }}
+                                >
+                                  <option value="">Quick Assign...</option>
+                                  <optgroup label="Copy Schedule">
+                                    {nurses.filter(n => !newNurses.some(nn => nn.id === n.id) && assignments.some(a => a.nurse_id === n.id)).map(existingNurse => (
+                                      <option key={`copy-${existingNurse.id}`} value={`copy-${existingNurse.id}`}>
+                                        Copy from {nurseName(existingNurse.id)}
+                                      </option>
+                                    ))}
+                                  </optgroup>
+                                  <optgroup label="Assign Shift">
+                                    <option value="1st">1st Shift (6AM-2PM)</option>
+                                    <option value="2nd">2nd Shift (2PM-10PM)</option>
+                                    <option value="3rd">3rd Shift (10PM-6AM)</option>
+                                  </optgroup>
+                                </select>
+                              </div>
+                            </td>
+                            {daysOfWeek.map((day) => (
+                              <td key={nurse.id + day} style={{ textAlign: "center" }}>
+                                <select
+                                  value={dayToShift[day] || "rest"}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setPendingAssignments((prev) => ({
+                                      ...prev,
+                                      [nurse.id]: {
+                                        ...prev[nurse.id],
+                                        [day]: val,
+                                      },
+                                    }));
+                                  }}
+                                  style={{
+                                    backgroundColor: dayToShift[day] && dayToShift[day] !== 'rest' ? '#e8f5e8' : '#fff'
+                                  }}
+                                >
+                                  {shiftDefs.map((shift) => (
+                                    <option key={shift.key} value={shift.key}>{shift.name}</option>
+                                  ))}
+                                </select>
+                                {(dayToShift[day] === "1st" || dayToShift[day] === "2nd") && (
+                                  <div style={{ fontSize: '0.7em', color: '#28a745', marginTop: '2px' }}>
+                                    House + elderly assigned
+                                  </div>
+                                )}
+                                {dayToShift[day] === "3rd" && (
+                                  <div style={{ fontSize: '0.7em', color: '#999', marginTop: '2px' }}>
+                                    No vital signs
+                                  </div>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+              {/* Existing Scheduled Nurses */}
+              {nurses.filter(nurse => !newNurses.some(n => n.id === nurse.id)).length > 0 && (
+                <>
+                  <div style={{ marginTop: newNurses.length > 0 ? '32px' : '0' }}>
+                    <h3 style={{ marginBottom: '16px', color: '#216386' }}>Current Schedule</h3>
+                  </div>
+                  <table className="nurse-edit-table weekly-visual">
+                    <thead>
+                      <tr>
+                        <th>Nurse</th>
+                        {daysOfWeek.map((day) => (
+                          <th key={day}>{day}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {nurses.filter(nurse => !newNurses.some(n => n.id === nurse.id)).map((nurse) => {
+                        const dayToShift = pendingAssignments[nurse.id] || {};
+                        return (
+                          <tr key={nurse.id}>
+                            <td style={{ fontWeight: 'bold' }}>{nurseName(nurse.id)}</td>
+                            {daysOfWeek.map((day) => (
+                              <td key={nurse.id + day} style={{ textAlign: "center" }}>
+                                <select
+                                  value={dayToShift[day] || "rest"}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setPendingAssignments((prev) => ({
+                                      ...prev,
+                                      [nurse.id]: {
+                                        ...prev[nurse.id],
+                                        [day]: val,
+                                      },
+                                    }));
+                                  }}
+                                >
+                                  {shiftDefs.map((shift) => (
+                                    <option key={shift.key} value={shift.key}>{shift.name}</option>
+                                  ))}
+                                </select>
+                                {(dayToShift[day] === "1st" || dayToShift[day] === "2nd") && (
+                                  <div style={{ fontSize: '0.7em', color: '#0066cc', marginTop: '2px' }}>
+                                    House + elderly assigned
+                                  </div>
+                                )}
+                                {dayToShift[day] === "3rd" && (
+                                  <div style={{ fontSize: '0.7em', color: '#999', marginTop: '2px' }}>
+                                    No vital signs
+                                  </div>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+
             </div>
             <div className="save-container">
               <button
@@ -1030,19 +865,57 @@ export default function NurseSchedule() {
         {/* SUMMARY MODE */}
         {viewMode === "summary" && (
           <div className="table-container">
-            <div className="shift-tabs">
-              {shiftDefs.filter(s => s.key !== "rest").map((s) => (
-                <button
-                  key={s.key}
-                  className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`}
-                  onClick={() => setActiveShift(s.key)}
-                >
-                  {s.name}
-                </button>
-              ))}
+            <div className="table-header">
+              <div className="shift-tabs">
+                {shiftDefs.filter(s => s.key !== "rest").map((s) => (
+                  <button
+                    key={s.key}
+                    className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`}
+                    onClick={() => setActiveShift(s.key)}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+
+              <div className="date-picker-top-right">
+                <label htmlFor="nurse-date-picker" className="date-picker-label">
+                  Select Date:
+                </label>
+                <input
+                  id="nurse-date-picker"
+                  type="date"
+                  className="date-picker-input"
+                  value={formatDateString(selectedDate)}
+                  min={scheduleInfo?.start ? formatDateString(scheduleInfo.start) : undefined}
+                  max={scheduleInfo?.end ? formatDateString(scheduleInfo.end) : undefined}
+                  onChange={(e) => {
+                    const newDate = new Date(e.target.value);
+                    setSelectedDate(newDate);
+                    
+                    // Update active day based on selected date
+                    const indexToDayName = {
+                      0: "Sunday",
+                      1: "Monday", 
+                      2: "Tuesday",
+                      3: "Wednesday",
+                      4: "Thursday",
+                      5: "Friday",
+                      6: "Saturday"
+                    };
+                    
+                    const selectedDayName = indexToDayName[newDate.getDay()];
+                    
+                    // Only update activeDay if not showing all days
+                    if (activeDay !== SHOW_ALL_DAYS) {
+                      setActiveDay(selectedDayName);
+                    }
+                  }}
+                />
+              </div>
             </div>
 
-            <div className="shift-tabs">
+            <div className="shift-tabs" style={{ marginTop: '15px' }}>
               <button
                 key={SHOW_ALL_DAYS}
                 className={`shift-tab ${activeDay === SHOW_ALL_DAYS ? "active-shift" : ""}`}
@@ -1054,103 +927,165 @@ export default function NurseSchedule() {
                 <button
                   key={day}
                   className={`shift-tab ${activeDay === day ? "active-shift" : ""}`}
-                  onClick={() => setActiveDay(day)}
+                  onClick={() => {
+                    setActiveDay(day);
+                    
+                    // Update the date picker to match the selected day
+                    if (day !== SHOW_ALL_DAYS) {
+                      const currentDate = new Date(selectedDate);
+                      const currentDayOfWeek = currentDate.getDay(); // 0=Sunday, 1=Monday, etc.
+                      
+                      // Map day names to JavaScript's getDay() values
+                      const dayToIndex = {
+                        "Sunday": 0,
+                        "Monday": 1,
+                        "Tuesday": 2,
+                        "Wednesday": 3,
+                        "Thursday": 4,
+                        "Friday": 5,
+                        "Saturday": 6
+                      };
+                      
+                      const targetDayIndex = dayToIndex[day];
+                      
+                      if (targetDayIndex !== undefined) {
+                        // Calculate the difference in days
+                        const dayDifference = targetDayIndex - currentDayOfWeek;
+                        
+                        // Create new date by adding the difference
+                        const newDate = new Date(currentDate);
+                        newDate.setDate(currentDate.getDate() + dayDifference);
+                        
+                        // Only update if the new date is within schedule bounds (if they exist)
+                        const isWithinBounds = !scheduleInfo || 
+                          (newDate >= scheduleInfo.start && newDate <= scheduleInfo.end);
+                        
+                        if (isWithinBounds) {
+                          setSelectedDate(newDate);
+                        }
+                      }
+                    }
+                  }}
                 >
                   {day}
                 </button>
               ))}
             </div>
 
-            <table className="schedule-table shift-summary">
+            <table className="schedule-table shift-summary nurse-schedule-table">
               <thead>
                 <tr>
                   <th>Nurse</th>
-                  <th>Elderly Assigned</th>
+                  <th>House Assignments</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {(activeDay === SHOW_ALL_DAYS
-                  ? assignments.filter((a) => a.shift === activeShift)
-                  : assignments.filter((a) => a.shift === activeShift && a.days_assigned.includes(activeDay))
-                ).length > 0 ? (
-                  (activeDay === SHOW_ALL_DAYS
-                    ? assignments.filter((a) => a.shift === activeShift)
-                    : assignments.filter((a) => a.shift === activeShift && a.days_assigned.includes(activeDay))
-                  ).map((a) => {
+                {getFilteredAssignments().length > 0 ? (
+                  getFilteredAssignments().map((a) => {
                     // Get elderly assignments for this nurse
                     let elderlyAssignments = [];
                     
+                    // Check if nurse is absent for the current context
+                    const currentDateStr = formatDateString(selectedDate);
+                    const indexToDayName = {
+                      0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
+                      4: "Thursday", 5: "Friday", 6: "Saturday"
+                    };
+                    const currentDay = activeDay === SHOW_ALL_DAYS ? 
+                      indexToDayName[selectedDate.getDay()] : 
+                      activeDay;
+                    
+                    const isNurseAbsentToday = a.is_absent && 
+                      a.absent_for_date === currentDateStr && 
+                      a.absent_for_day === currentDay;
+
                     if (activeDay === SHOW_ALL_DAYS) {
-                      // Show all days' assignments
+                      // Show all days' assignments, but filter out days when nurse is absent
                       const allDaysAssignments = nurseElderlyAssignments
-                        .filter(ea => ea.nurse_id === a.nurse_id && ea.shift === activeShift);
+                        .filter(ea => {
+                          const assignmentMatches = ea.nurse_id === a.nurse_id && ea.shift === activeShift;
+                          // Check if nurse is absent for this specific day
+                          const isAbsentForThisDay = a.is_absent && 
+                            a.absent_for_date === currentDateStr && 
+                            a.absent_for_day === ea.day;
+                          return assignmentMatches && !isAbsentForThisDay;
+                        });
                       elderlyAssignments = allDaysAssignments;
                     } else {
-                      // Show specific day assignments
-                      const dayAssignment = nurseElderlyAssignments
-                        .find(ea => ea.nurse_id === a.nurse_id && ea.day === activeDay && ea.shift === activeShift);
-                      if (dayAssignment) {
-                        elderlyAssignments = [dayAssignment];
+                      // Show specific day assignments only if nurse is not absent for that day
+                      if (!isNurseAbsentToday) {
+                        const dayAssignment = nurseElderlyAssignments
+                          .find(ea => ea.nurse_id === a.nurse_id && ea.day === activeDay && ea.shift === activeShift);
+                        if (dayAssignment) {
+                          elderlyAssignments = [dayAssignment];
+                        }
                       }
                     }
 
                     return (
                       <tr key={a.id}>
-                        <td>{nurseName(a.nurse_id)}</td>
+                        <td style={{ 
+                          fontWeight: 'bold',
+                          color: isNurseAbsentToday ? '#999' : 'inherit',
+                          textDecoration: isNurseAbsentToday ? 'line-through' : 'none'
+                        }}>
+                          {nurseName(a.nurse_id)}
+                          {isNurseAbsentToday && <span style={{ color: '#dc3545', fontSize: '0.8em', marginLeft: '8px' }}>(ABSENT)</span>}
+                        </td>
                         <td>
-                          {activeShift === "3rd" ? (
-                            <em style={{ color: "#888" }}>No elderly assigned for 3rd shift</em>
-                          ) : elderlyAssignments.length > 0 ? (
-                            <div>
-                              {activeDay === SHOW_ALL_DAYS ? (
-                                // Group by day and house for all days view
-                                elderlyAssignments.map(ea => {
-                                  const groupedByHouse = groupElderlyByHouse(ea.elderly_ids || []);
-                                  return (
-                                    <div key={ea.id} style={{ marginBottom: '8px' }}>
-                                      <strong>{ea.day}:</strong>
-                                      {Object.keys(groupedByHouse).length > 0 ? (
-                                        Object.entries(groupedByHouse).map(([houseId, elderly]) => (
-                                          <div key={houseId} style={{ marginLeft: '8px', marginBottom: '4px' }}>
-                                            <strong style={{ color: '#0066cc' }}>{houseName(houseId)}:</strong>{' '}
-                                            {elderly.map(e => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}
-                                          </div>
-                                        ))
-                                      ) : (
-                                        <span style={{ marginLeft: '8px', fontStyle: 'italic', color: '#888' }}>No assignments</span>
-                                      )}
-                                    </div>
-                                  );
-                                })
-                              ) : (
-                                // Show elderly grouped by house for specific day
-                                (() => {
-                                  const allElderlyForDay = elderlyAssignments.flatMap(ea => ea.elderly_ids || []);
-                                  const groupedByHouse = groupElderlyByHouse(allElderlyForDay);
-                                  
-                                  return Object.keys(groupedByHouse).length > 0 ? (
-                                    Object.entries(groupedByHouse).map(([houseId, elderly]) => (
-                                      <div key={houseId} style={{ marginBottom: '4px' }}>
-                                        <strong style={{ color: '#0066cc' }}>{houseName(houseId)}:</strong>{' '}
-                                        {elderly.map(e => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <em style={{ color: "#888" }}>No assignments</em>
-                                  );
-                                })()
-                              )}
-                            </div>
-                          ) : (
-                            <em style={{ color: "#888" }}>No elderly assigned</em>
-                          )}
+                          {isNurseAbsentToday ? 
+                            <em style={{ color: "#888" }}>Nurse is absent - assignments redistributed</em> :
+                            createAccordionContent(elderlyAssignments, activeShift, activeDay, a.nurse_id)
+                          }
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            className="absent-btn"
+                            onClick={() => handleMarkAbsent(a.id, a.nurse_id)}
+                            disabled={saving}
+                            style={{
+                              backgroundColor: (() => {
+                                const indexToDayName = {
+                                  0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
+                                  4: "Thursday", 5: "Friday", 6: "Saturday"
+                                };
+                                const contextDay = activeDay === SHOW_ALL_DAYS ? 
+                                  indexToDayName[selectedDate.getDay()] : activeDay;
+                                return a.is_absent && a.absent_for_date === formatDateString(selectedDate) && 
+                                  a.absent_for_day === contextDay ? '#dc3545' : '#ffc107';
+                              })(),
+                              color: (() => {
+                                const indexToDayName = {
+                                  0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
+                                  4: "Thursday", 5: "Friday", 6: "Saturday"
+                                };
+                                const contextDay = activeDay === SHOW_ALL_DAYS ? 
+                                  indexToDayName[selectedDate.getDay()] : activeDay;
+                                return a.is_absent && a.absent_for_date === formatDateString(selectedDate) && 
+                                  a.absent_for_day === contextDay ? 'white' : 'black';
+                              })(),
+                              cursor: saving ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            {(() => {
+                              const indexToDayName = {
+                                0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
+                                4: "Thursday", 5: "Friday", 6: "Saturday"
+                              };
+                              const contextDay = activeDay === SHOW_ALL_DAYS ? 
+                                indexToDayName[selectedDate.getDay()] : activeDay;
+                              return a.is_absent && a.absent_for_date === formatDateString(selectedDate) && 
+                                a.absent_for_day === contextDay ? 'Absent' : 'Mark as Absent';
+                            })()}
+                          </button>
                         </td>
                       </tr>
                     );
                   })
                 ) : (
                   <tr>
-                    <td colSpan={2} style={{ textAlign: "center", color: "#888" }}>
+                    <td colSpan={3} style={{ textAlign: "center", color: "#888" }}>
                       <em>{activeDay === SHOW_ALL_DAYS ? "No Nurse Assigned for this shift." : "No Nurse Assigned for this day."}</em>
                     </td>
                   </tr>
