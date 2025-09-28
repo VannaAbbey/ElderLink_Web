@@ -45,7 +45,7 @@ export default function NurseSchedule() {
   // Listen for assignments
   useEffect(() => {
     const q = query(
-      collection(db, "nurse_shift_assign_v2"),
+      collection(db, "nurse_shift_assign"),
       where("is_current", "==", true)
     );
     const unsub = onSnapshot(q, (snap) => {
@@ -86,7 +86,7 @@ export default function NurseSchedule() {
     // Find all assignment docs for current nurses
     assignments.forEach((a) => {
       if (nurses.some((n) => n.id === a.nurse_id)) {
-        batch.delete(doc(db, "nurse_shift_assign_v2", a.id));
+        batch.delete(doc(db, "nurse_shift_assign", a.id));
       }
     });
     try {
@@ -120,7 +120,7 @@ export default function NurseSchedule() {
       // Create/update docs
       for (const [shift, days] of Object.entries(byShift)) {
         const docId = `${nurseId}_${shift}`;
-        const ref = doc(db, "nurse_shift_assign_v2", docId);
+        const ref = doc(db, "nurse_shift_assign", docId);
         const shiftDef = shiftDefs.find((s) => s.key === shift);
         const payload = {
           nurse_id: nurseId,
