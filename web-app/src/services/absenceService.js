@@ -18,7 +18,7 @@ import {
 } from "firebase/firestore";
 
 // Import functions that this service depends on
-import { fetchAssignments } from "./scheduleApi";
+import { fetchAssignments } from "./scheduleApi_backup";
 
 // Helper function for splitting arrays into chunks
 const splitIntoChunks = (arr, n) => {
