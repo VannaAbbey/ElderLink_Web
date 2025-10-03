@@ -414,8 +414,78 @@ export class NurseScheduleService {
     return res;
   }
 
+  // Get effective nurse assignments for a day/shift, accounting for absences and temp reassignments
+  async getEffectiveNurseAssignments(nursesOnShift, day, shift, tempReassignments, currentAssignments) {
+    const effectiveNurses = [];
+    const today = new Date().toISOString().slice(0, 10);
+    
+    for (const nurseId of nursesOnShift) {
+      // Check if this nurse is absent for today and this specific day
+      const nurseAssignment = currentAssignments.find(a => a.nurse_id === nurseId && a.shift === shift);
+      const isAbsentToday = nurseAssignment && 
+        nurseAssignment.is_absent && 
+        nurseAssignment.absent_for_date === today && 
+        nurseAssignment.absent_for_day === day;
+      
+      if (!isAbsentToday) {
+        effectiveNurses.push(nurseId);
+      }
+    }
+    
+    return effectiveNurses;
+  }
+
+  // Get current effective elderly assignments accounting for temporary reassignments
+  async getCurrentElderlyDistribution(day, shift, tempReassignments, existingElderlyAssignments, elderlyList = []) {
+    const today = new Date().toISOString().slice(0, 10);
+    const elderlyByNurse = {};
+    
+    // Start with base assignments
+    existingElderlyAssignments
+      .filter(ea => ea.day === day && ea.shift === shift)
+      .forEach(ea => {
+        if (!elderlyByNurse[ea.nurse_id]) {
+          elderlyByNurse[ea.nurse_id] = new Set();
+        }
+        if (ea.elderly_ids) {
+          // Filter out deceased elderly from existing assignments
+          ea.elderly_ids
+            .filter(elderlyId => {
+              const elderly = elderlyList.find(e => e.id === elderlyId);
+              return elderly && elderly.elderly_status !== "Deceased";
+            })
+            .forEach(elderlyId => elderlyByNurse[ea.nurse_id].add(elderlyId));
+        }
+      });
+    
+    // Apply temporary reassignments for today
+    tempReassignments
+      .filter(tr => tr.date === today && tr.day === day && tr.shift === shift)
+      .forEach(tr => {
+        // Remove from original nurse
+        if (elderlyByNurse[tr.from_nurse_id]) {
+          tr.elderly_ids.forEach(elderlyId => elderlyByNurse[tr.from_nurse_id].delete(elderlyId));
+        }
+        
+        // Add to receiving nurse  
+        if (!elderlyByNurse[tr.to_nurse_id]) {
+          elderlyByNurse[tr.to_nurse_id] = new Set();
+        }
+        tr.elderly_ids.forEach(elderlyId => elderlyByNurse[tr.to_nurse_id].add(elderlyId));
+      });
+    
+    // Convert Sets back to arrays
+    const result = {};
+    Object.keys(elderlyByNurse).forEach(nurseId => {
+      result[nurseId] = Array.from(elderlyByNurse[nurseId]);
+    });
+    
+    return result;
+  }
+
   // Generate automatic elderly assignments - divide elderly in each house equally among nurses on the same shift
-  generateElderlyAssignments(pendingAssignments, houses, elderlyList, nurses) {
+  // Now accounts for temporary reassignments due to nurse absences
+  async generateElderlyAssignments(pendingAssignments, houses, elderlyList, nurses, tempReassignments = [], currentAssignments = [], existingElderlyAssignments = []) {
     const assignments = {};
 
     // Sort houses consistently (H001, H002, H003, H004, H005)
@@ -441,13 +511,29 @@ export class NurseScheduleService {
       });
 
       // Process each shift separately
-      ["1st", "2nd"].forEach(shift => {
+      for (const shift of ["1st", "2nd"]) {
         const nursesOnShift = nursesByShift[shift];
         
-        if (nursesOnShift.length === 0) return;
+        if (nursesOnShift.length === 0) continue;
 
-        // Sort nurses alphabetically for consistent assignment
-        nursesOnShift.sort((a, b) => {
+        // Get effective nurses (excluding absent ones)
+        const effectiveNurses = await this.getEffectiveNurseAssignments(
+          nursesOnShift, day, shift, tempReassignments, currentAssignments
+        );
+
+        console.log(`📅 ${day} ${shift} shift: ${nursesOnShift.length} total nurses, ${effectiveNurses.length} effective (non-absent)`);
+
+        if (effectiveNurses.length === 0) {
+          // All nurses are absent - skip this day/shift
+          nursesOnShift.forEach(nurseId => {
+            if (!assignments[nurseId]) assignments[nurseId] = {};
+            assignments[nurseId][day] = [];
+          });
+          continue;
+        }
+
+        // Sort effective nurses alphabetically for consistent assignment  
+        effectiveNurses.sort((a, b) => {
           const nameA = this.getNurseName(a, nurses).toLowerCase();
           const nameB = this.getNurseName(b, nurses).toLowerCase();
           return nameA.localeCompare(nameB);
@@ -459,38 +545,84 @@ export class NurseScheduleService {
           assignments[nurseId][day] = [];
         });
 
-        // Collect ALL elderly from ALL houses first, then divide among nurses
-        const allElderlyForShift = [];
-        
-        sortedHouses.forEach(house => {
-          // Get all elderly in this house - nurses check vital signs for ALL elderly regardless of caregiver assignments
-          const elderlyInHouse = elderlyList
-            .filter(elderly => elderly.house_id === house.house_id)
-            .map(elderly => elderly.id);
+        // Check if we're adding new nurses to existing assignments
+        const hasExistingAssignments = existingElderlyAssignments.some(
+          ea => ea.day === day && ea.shift === shift
+        );
 
-          // Add to the master list
-          allElderlyForShift.push(...elderlyInHouse);
-        });
-
-        // Sort all elderly alphabetically for consistent assignment
-        const sortedAllElderly = allElderlyForShift.sort((a, b) => {
-          const elderlyA = elderlyList.find(e => e.id === a);
-          const elderlyB = elderlyList.find(e => e.id === b);
-          const nameA = elderlyA ? `${elderlyA.elderly_fname} ${elderlyA.elderly_lname}`.toLowerCase() : '';
-          const nameB = elderlyB ? `${elderlyB.elderly_fname} ${elderlyB.elderly_lname}`.toLowerCase() : '';
-          return nameA.localeCompare(nameB);
-        });
-
-        // Divide ALL elderly equally among nurses on this shift (once per day, not per house)
-        if (sortedAllElderly.length > 0) {
-          const elderlyChunks = this.splitIntoChunks(sortedAllElderly, nursesOnShift.length);
+        if (hasExistingAssignments && tempReassignments.length > 0) {
+          console.log(`🔄 Redistributing existing assignments with temporary reassignments for ${day} ${shift}`);
           
-          nursesOnShift.forEach((nurseId, index) => {
-            const elderlyChunk = elderlyChunks[index] || [];
-            assignments[nurseId][day] = elderlyChunk; // Assign directly, don't push
+          // Get current effective distribution (accounting for temp reassignments)
+          const currentDistribution = await this.getCurrentElderlyDistribution(
+            day, shift, tempReassignments, existingElderlyAssignments, elderlyList
+          );
+          
+          // Collect all elderly currently being handled
+          const allElderlyBeingHandled = new Set();
+          Object.values(currentDistribution).forEach(elderlyIds => {
+            elderlyIds.forEach(elderlyId => allElderlyBeingHandled.add(elderlyId));
           });
+          
+          // Redistribute among ALL effective nurses (including new ones)
+          const allElderlyArray = Array.from(allElderlyBeingHandled);
+          
+          // Filter out deceased elderly and sort alphabetically for consistent assignment
+          const liveElderlyArray = allElderlyArray.filter(elderlyId => {
+            const elderly = elderlyList.find(e => e.id === elderlyId);
+            return elderly && elderly.elderly_status !== "Deceased";
+          });
+          
+          const sortedElderly = liveElderlyArray.sort((a, b) => {
+            const elderlyA = elderlyList.find(e => e.id === a);
+            const elderlyB = elderlyList.find(e => e.id === b);
+            const nameA = elderlyA ? `${elderlyA.elderly_fname} ${elderlyA.elderly_lname}`.toLowerCase() : '';
+            const nameB = elderlyB ? `${elderlyB.elderly_fname} ${elderlyB.elderly_lname}`.toLowerCase() : '';
+            return nameA.localeCompare(nameB);
+          });
+          
+          if (sortedElderly.length > 0) {
+            const elderlyChunks = this.splitIntoChunks(sortedElderly, effectiveNurses.length);
+            
+            effectiveNurses.forEach((nurseId, index) => {
+              const elderlyChunk = elderlyChunks[index] || [];
+              assignments[nurseId][day] = elderlyChunk;
+            });
+            
+            console.log(`✅ Redistributed ${sortedElderly.length} elderly among ${effectiveNurses.length} effective nurses`);
+          }
+        } else {
+          // Standard assignment - collect ALL elderly from ALL houses
+          console.log(`📝 Standard elderly assignment for ${day} ${shift}`);
+          
+          const allElderlyForShift = [];
+          
+          sortedHouses.forEach(house => {
+            const elderlyInHouse = elderlyList
+              .filter(elderly => elderly.house_id === house.house_id && elderly.elderly_status !== "Deceased")
+              .map(elderly => elderly.id);
+            allElderlyForShift.push(...elderlyInHouse);
+          });
+
+          // Sort all elderly alphabetically for consistent assignment
+          const sortedAllElderly = allElderlyForShift.sort((a, b) => {
+            const elderlyA = elderlyList.find(e => e.id === a);
+            const elderlyB = elderlyList.find(e => e.id === b);
+            const nameA = elderlyA ? `${elderlyA.elderly_fname} ${elderlyA.elderly_lname}`.toLowerCase() : '';
+            const nameB = elderlyB ? `${elderlyB.elderly_fname} ${elderlyB.elderly_lname}`.toLowerCase() : '';
+            return nameA.localeCompare(nameB);
+          });
+
+          if (sortedAllElderly.length > 0) {
+            const elderlyChunks = this.splitIntoChunks(sortedAllElderly, effectiveNurses.length);
+            
+            effectiveNurses.forEach((nurseId, index) => {
+              const elderlyChunk = elderlyChunks[index] || [];
+              assignments[nurseId][day] = elderlyChunk;
+            });
+          }
         }
-      });
+      }
 
       // For 3rd shift, no elderly assignments (no vital signs during overnight)
       nursesByShift["3rd"].forEach(nurseId => {
@@ -672,16 +804,54 @@ export class NurseScheduleService {
         }
       });
 
-      console.log(`🗑️ About to delete ${shiftDeleteCount} shift assignments and ${elderlyDeleteCount} elderly assignments`);
+      // Query and delete ALL temporary reassignments from nurse_temp_reassignments
+      console.log("🔍 Querying nurse_temp_reassignments collection...");
+      const tempReassignQuery = query(collection(this.db, "nurse_temp_reassignments"));
+      const tempReassignSnapshot = await getDocs(tempReassignQuery);
+      
+      console.log(`� Found ${tempReassignSnapshot.docs.length} total documents in nurse_temp_reassignments`);
+      
+      let tempReassignDeleteCount = 0;
+      tempReassignSnapshot.docs.forEach(docRef => {
+        const data = docRef.data();
+        // Delete temp reassignments involving any of our nurses (either from or to)
+        if (nurseIds.includes(data.from_nurse_id) || nurseIds.includes(data.to_nurse_id)) {
+          batch.delete(docRef.ref);
+          tempReassignDeleteCount++;
+          console.log(`📝 Marking temp reassignment for deletion: ${docRef.id} (from: ${data.from_nurse_id}, to: ${data.to_nurse_id})`);
+        }
+      });
+
+      // Query and delete ALL nurse absence records from nurse_cg_absence
+      console.log("🔍 Querying nurse_cg_absence collection...");
+      const absenceQuery = query(collection(this.db, "nurse_cg_absence"));
+      const absenceSnapshot = await getDocs(absenceQuery);
+      
+      console.log(`📊 Found ${absenceSnapshot.docs.length} total documents in nurse_cg_absence`);
+      
+      let absenceDeleteCount = 0;
+      absenceSnapshot.docs.forEach(docRef => {
+        const data = docRef.data();
+        // Delete absence records for any of our nurses
+        if (nurseIds.includes(data.staff_id)) {
+          batch.delete(docRef.ref);
+          absenceDeleteCount++;
+          console.log(`📝 Marking absence record for deletion: ${docRef.id} (staff_id: ${data.staff_id}, date: ${data.absent_for_date})`);
+        }
+      });
+
+      console.log(`🗑️ About to delete ${shiftDeleteCount} shift assignments, ${elderlyDeleteCount} elderly assignments, ${tempReassignDeleteCount} temporary reassignments, and ${absenceDeleteCount} absence records`);
       
       await batch.commit();
       
-      console.log(`✅ Successfully cleared ${shiftDeleteCount} shift assignments and ${elderlyDeleteCount} elderly assignments for ${nurseIds.length} nurses`);
+      console.log(`✅ Successfully cleared ${shiftDeleteCount} shift assignments, ${elderlyDeleteCount} elderly assignments, ${tempReassignDeleteCount} temporary reassignments, and ${absenceDeleteCount} absence records for ${nurseIds.length} nurses`);
       
       return {
         success: true,
         shiftDeleteCount,
         elderlyDeleteCount,
+        tempReassignDeleteCount,
+        absenceDeleteCount,
         nurseCount: nurseIds.length
       };
       
@@ -706,12 +876,35 @@ export class NurseScheduleService {
   ) {
     const batch = writeBatch(this.db);
 
-    // Generate automated elderly assignments
-    const elderlyAssignments = this.generateElderlyAssignments(
+    // Get current temporary reassignments and existing assignments for proper redistribution
+    const today = new Date().toISOString().slice(0, 10);
+    const tempReassignments = await this.getCurrentTempReassignments(today);
+    const currentAssignments = await this.getCurrentNurseAssignments();
+    const existingElderlyAssignments = await this.getCurrentElderlyAssignments();
+    
+    // 🔄 Clear existing temporary reassignments when integrating new nurses
+    // This prevents old temp assignments from persisting after redistribution
+    console.log("🧹 Clearing existing temporary reassignments for redistribution...");
+    const tempReassignQuery = query(
+      collection(this.db, "nurse_temp_reassignments"),
+      where("date", "==", today)
+    );
+    const tempReassignSnapshot = await getDocs(tempReassignQuery);
+    
+    tempReassignSnapshot.forEach(doc => {
+      batch.delete(doc.ref);
+      console.log(`🗑️ Removed temporary reassignment: ${doc.id}`);
+    });
+    
+    // Generate automated elderly assignments accounting for temporary reassignments
+    const elderlyAssignments = await this.generateElderlyAssignments(
       pendingAssignments, 
       houses, 
       elderlyList, 
-      nurses
+      nurses,
+      tempReassignments,
+      currentAssignments,
+      existingElderlyAssignments
     );
 
     // Update nurse status to "active" for nurses being integrated
@@ -879,11 +1072,15 @@ export class NurseScheduleService {
     
     // Generate and save elderly assignments after shift assignments are saved
     const elderlyBatch = writeBatch(this.db);
-    const elderlyAssignments = this.generateElderlyAssignments(
+    // For auto-generation, no existing temp reassignments or assignments to consider
+    const elderlyAssignments = await this.generateElderlyAssignments(
       monthlyAssignments, 
       houses, 
       elderlyList, 
-      nurses
+      nurses,
+      [], // no temp reassignments for new schedule
+      [], // no current assignments for new schedule  
+      []  // no existing elderly assignments for new schedule
     );
     
     for (const nurseId of Object.keys(elderlyAssignments)) {
@@ -1060,5 +1257,44 @@ export class NurseScheduleService {
       last_modified_at: assignment.last_modified_at,
       sync_status: assignment.sync_status || "pending_sync"
     };
+  }
+
+  // Helper methods for getting current assignments and temporary reassignments
+  async getCurrentTempReassignments(dateStr) {
+    try {
+      const q = query(
+        collection(this.db, "nurse_temp_reassignments"),
+        where("date", "==", dateStr)
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+      console.error("Error getting current temp reassignments:", error);
+      return [];
+    }
+  }
+
+  async getCurrentNurseAssignments() {
+    try {
+      const q = query(
+        collection(this.db, "nurse_shift_assign"),
+        where("is_current", "==", true)
+      );
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+      console.error("Error getting current nurse assignments:", error);
+      return [];
+    }
+  }
+
+  async getCurrentElderlyAssignments() {
+    try {
+      const snapshot = await getDocs(collection(this.db, "nurse_elderly_assign"));
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+      console.error("Error getting current elderly assignments:", error);
+      return [];
+    }
   }
 }

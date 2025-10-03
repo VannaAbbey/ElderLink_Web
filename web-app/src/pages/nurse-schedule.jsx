@@ -4,7 +4,7 @@ import { onSnapshot, collection, query, where } from "firebase/firestore";
 import "./schedule.css";
 import Navbar from "./navbar";
 import { NurseScheduleService } from "../services/nurseScheduleService";
-import { markNurseAbsent, unmarkNurseAbsent, getTempReassignments } from "../services/nurseAbsenceService";
+import { markNurseAbsent, getTempReassignments, hasAbsenceForDate, batchCheckAbsencesForDate } from "../services/nurseAbsenceService";
 
 export default function NurseSchedule() {
   const [nurses, setNurses] = useState([]);
@@ -31,6 +31,7 @@ export default function NurseSchedule() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [scheduleInfo, setScheduleInfo] = useState(null);
   const [newNurses, setNewNurses] = useState([]); // Track new nurses not in current schedule
+  const [nurseAbsences, setNurseAbsences] = useState({}); // Track absence status by nurse-date-shift
   const SHOW_ALL_DAYS = "__ALL_DAYS__";
 
   // Initialize service instance
@@ -89,6 +90,43 @@ export default function NurseSchedule() {
     };
     loadTempReassignments();
   }, [selectedDate, activeShift]);
+
+  // Load comprehensive absence data for current context (batch optimized)
+  useEffect(() => {
+    const loadAbsenceData = async () => {
+      if (nurses.length > 0 && selectedDate && activeShift) {
+        const dateStr = formatDateString(selectedDate);
+        
+        // Check which nurses need absence data loading
+        const nursesNeedingData = nurses.filter(nurse => {
+          const key = `${nurse.id}-${dateStr}-${activeShift}`;
+          return nurseAbsences[key] === undefined;
+        });
+        
+        if (nursesNeedingData.length > 0) {
+          console.log(`📊 Batch loading absence data for ${nursesNeedingData.length} nurses on ${dateStr} - ${activeShift}`);
+          
+          // Use batch function for better performance
+          const nurseIds = nursesNeedingData.map(n => n.id);
+          const batchResults = await batchCheckAbsencesForDate(nurseIds, dateStr, activeShift);
+          
+          // Update state with batch results while preserving existing data
+          setNurseAbsences(prev => {
+            const updated = { ...prev };
+            nursesNeedingData.forEach(nurse => {
+              const key = `${nurse.id}-${dateStr}-${activeShift}`;
+              const batchKey = `${nurse.id}-${dateStr}-${activeShift}`;
+              updated[key] = batchResults[batchKey] || false;
+            });
+            return updated;
+          });
+          
+          console.log(`✅ Batch loaded absence data for ${nursesNeedingData.length} nurses`);
+        }
+      }
+    };
+    loadAbsenceData();
+  }, [nurses.length, selectedDate, activeShift]); // Optimized dependencies
 
   // Initialize pending assignments when entering edit mode
   useEffect(() => {
@@ -182,11 +220,37 @@ export default function NurseSchedule() {
   const getHouseForElderly = (elderlyId) => 
     nurseScheduleService.getHouseForElderly(elderlyId, elderlyList);
 
-  // Helper function to check if nurse is absent on a specific date and day
-  const isNurseAbsentForDay = (assignment, date, day) => {
-    return assignment.is_absent && 
-           assignment.absent_for_date === formatDateString(date) && 
-           assignment.absent_for_day === day;
+  // Helper function to refresh absence data for a specific nurse
+  const refreshNurseAbsenceData = async (nurseId, dateStr, shift) => {
+    try {
+      const result = await hasAbsenceForDate(nurseId, dateStr, shift);
+      const key = `${nurseId}-${dateStr}-${shift}`;
+      setNurseAbsences(prev => ({
+        ...prev,
+        [key]: result.hasAbsence
+      }));
+      return result.hasAbsence;
+    } catch (error) {
+      console.error("Error refreshing nurse absence data:", error);
+      return false;
+    }
+  };
+
+  // Helper function to check if nurse is absent on a specific date and day (comprehensive check)
+  const isNurseAbsentForDay = (nurseId, date, shift) => {
+    const dateStr = formatDateString(date);
+    const key = `${nurseId}-${dateStr}-${shift}`;
+    
+    // Use comprehensive absence data from nurse_cg_absence collection
+    const isAbsent = nurseAbsences[key];
+    
+    // If we don't have the data, trigger a refresh but return false for now
+    if (isAbsent === undefined) {
+      refreshNurseAbsenceData(nurseId, dateStr, shift);
+      return false;
+    }
+    
+    return isAbsent === true;
   };
 
   // ========== ACCORDION FUNCTIONALITY SECTION ==========
@@ -234,12 +298,8 @@ export default function NurseSchedule() {
       indexToDayName[selectedDate.getDay()] : 
       activeDay;
     
-    // Check if this nurse is absent for the current date and day
-    const nurseAssignment = assignments.find(a => a.nurse_id === nurseId && a.shift === activeShift);
-    const isThisNurseAbsent = nurseAssignment && 
-      nurseAssignment.is_absent && 
-      nurseAssignment.absent_for_date === dateStr && 
-      nurseAssignment.absent_for_day === currentDay;
+    // Check if this nurse is absent for the current date and day (comprehensive check)
+    const isThisNurseAbsent = isNurseAbsentForDay(nurseId, selectedDate, activeShift);
     
     // Don't show temp assignments if the nurse is absent
     const tempAssignmentsToNurse = !isThisNurseAbsent ? tempReassignments.filter(t => 
@@ -389,7 +449,7 @@ export default function NurseSchedule() {
     }
   };
 
-  // Handle marking nurse as absent
+  // Handle marking nurse as absent (PERMANENT - cannot be undone)
   const handleMarkAbsent = async (assignmentId, nurseId) => {
     try {
       // Get the target date and day name
@@ -405,31 +465,86 @@ export default function NurseSchedule() {
       };
       const dayName = activeDay === SHOW_ALL_DAYS ? indexToDayName[selectedDate.getDay()] : activeDay;
 
-      const nurseName = nurseScheduleService.getNurseName(nurseId, nurses);
+      const nurseFullName = nurseScheduleService.getNurseName(nurseId, nurses);
       
-      if (!window.confirm(`Mark ${nurseName} as absent for ${dayName}, ${selectedDate.toLocaleDateString()}? Their elderly assignments will be redistributed to other nurses on the same shift.`)) {
+      // Check if nurse is already marked absent for this specific date and day using comprehensive check
+      const isAlreadyAbsent = isNurseAbsentForDay(nurseId, selectedDate, activeShift);
+      if (isAlreadyAbsent) {
+        alert(`${nurseFullName} is already marked as PERMANENTLY ABSENT for ${dayName}, ${selectedDate.toLocaleDateString()}`);
         return;
       }
+      
+      // Also check if we have absence data but it's still loading
+      const absenceKey = `${nurseId}-${targetDateStr}-${activeShift}`;
+      if (nurseAbsences[absenceKey] === undefined) {
+        // Data is still loading, refresh and check again
+        const currentStatus = await refreshNurseAbsenceData(nurseId, targetDateStr, activeShift);
+        if (currentStatus) {
+          alert(`${nurseFullName} is already marked as PERMANENTLY ABSENT for ${dayName}, ${selectedDate.toLocaleDateString()}`);
+          return;
+        }
+      }
+
+      // Enhanced confirmation dialog with permanent warning
+      const confirmed = window.confirm(
+        `⚠️ PERMANENT ACTION - CANNOT BE UNDONE ⚠️\n\n` +
+        `Mark ${nurseFullName} as ABSENT for:\n` +
+        `• Date: ${selectedDate.toLocaleDateString()}\n` +
+        `• Day: ${dayName}\n` +
+        `• Shift: ${activeShift}\n\n` +
+        `⚠️ WARNING: This action is PERMANENT and CANNOT be reversed!\n\n` +
+        `The nurse will remain marked as absent for this specific date and shift permanently.\n` +
+        `Their elderly assignments will be redistributed to other available nurses.\n\n` +
+        `Are you absolutely sure you want to proceed?`
+      );
+      
+      if (!confirmed) return;
 
       setSaving(true);
       
-      console.log(`🚨 Marking nurse ${nurseName} as absent for ${targetDateStr} (${dayName})`);
+      console.log(`🚨 PERMANENTLY marking nurse ${nurseFullName} as absent for ${targetDateStr} (${dayName})`);
+      console.log(`Current absence state:`, nurseAbsences[absenceKey]);
       
-      const result = await markNurseAbsent(
+      const markResult = await markNurseAbsent(
         assignmentId,
         assignments,
         nurseElderlyAssignments,
         tempReassignments,
         targetDateStr,
-        dayName
+        dayName,
+        'supervisor_marked', // reason
+        `Permanently marked absent by supervisor on ${new Date().toLocaleString()}`, // notes
+        'supervisor' // marked by
       );
 
       // Refresh temporary reassignments
       const updatedTempAssigns = await getTempReassignments(targetDateStr, activeShift);
       setTempReassignments(updatedTempAssigns);
 
-      setNotification(`✅ ${nurseName} marked as absent. Elderly assignments have been redistributed.`);
-      setTimeout(() => setNotification(""), 5000);
+      // Immediately update absence state to reflect the new absence (optimistic update)
+      const stateKey = `${nurseId}-${targetDateStr}-${activeShift}`;
+      setNurseAbsences(prev => ({
+        ...prev,
+        [stateKey]: true // We know it's absent since we just marked it
+      }));
+      
+      console.log(`✅ Updated absence state for ${nurseId} on ${targetDateStr}`);
+
+      // Force a refresh of absence data to ensure persistence across tab switches
+      setTimeout(async () => {
+        const verifyResult = await hasAbsenceForDate(nurseId, targetDateStr, activeShift);
+        console.log(`🔍 Verification: Nurse ${nurseId} absence status:`, verifyResult);
+        if (verifyResult.hasAbsence) {
+          const verifyKey = `${nurseId}-${targetDateStr}-${activeShift}`;
+          setNurseAbsences(prev => ({
+            ...prev,
+            [verifyKey]: true
+          }));
+        }
+      }, 1000);
+
+      setNotification(`🔒 ${nurseFullName} PERMANENTLY marked as absent. This action cannot be undone. Elderly assignments redistributed.`);
+      setTimeout(() => setNotification(""), 7000);
 
     } catch (error) {
       console.error("Error marking nurse absent:", error);
@@ -524,8 +639,9 @@ export default function NurseSchedule() {
       const { nurses: updatedNurses } = await nurseScheduleService.loadAllData();
       setNurses(updatedNurses);
       
-      setNotification("✅ Nurse schedules saved successfully! New nurses moved to Current Schedule.");
+      setNotification("✅ Nurse schedules saved successfully! Elderly assignments redistributed considering temporary reassignments.");
     } catch (e) {
+      console.error("Save all error:", e);
       alert("Failed to save all: " + e.message);
     }
     setSaving(false);
@@ -996,9 +1112,7 @@ export default function NurseSchedule() {
                       indexToDayName[selectedDate.getDay()] : 
                       activeDay;
                     
-                    const isNurseAbsentToday = a.is_absent && 
-                      a.absent_for_date === currentDateStr && 
-                      a.absent_for_day === currentDay;
+                    const isNurseAbsentToday = isNurseAbsentForDay(a.nurse_id, selectedDate, activeShift);
 
                     if (activeDay === SHOW_ALL_DAYS) {
                       // Show all days' assignments, but filter out days when nurse is absent
@@ -1040,45 +1154,59 @@ export default function NurseSchedule() {
                           }
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <button
-                            className="absent-btn"
-                            onClick={() => handleMarkAbsent(a.id, a.nurse_id)}
-                            disabled={saving}
-                            style={{
-                              backgroundColor: (() => {
-                                const indexToDayName = {
-                                  0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
-                                  4: "Thursday", 5: "Friday", 6: "Saturday"
-                                };
-                                const contextDay = activeDay === SHOW_ALL_DAYS ? 
-                                  indexToDayName[selectedDate.getDay()] : activeDay;
-                                return a.is_absent && a.absent_for_date === formatDateString(selectedDate) && 
-                                  a.absent_for_day === contextDay ? '#dc3545' : '#ffc107';
-                              })(),
-                              color: (() => {
-                                const indexToDayName = {
-                                  0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
-                                  4: "Thursday", 5: "Friday", 6: "Saturday"
-                                };
-                                const contextDay = activeDay === SHOW_ALL_DAYS ? 
-                                  indexToDayName[selectedDate.getDay()] : activeDay;
-                                return a.is_absent && a.absent_for_date === formatDateString(selectedDate) && 
-                                  a.absent_for_day === contextDay ? 'white' : 'black';
-                              })(),
-                              cursor: saving ? 'not-allowed' : 'pointer'
-                            }}
-                          >
-                            {(() => {
-                              const indexToDayName = {
-                                0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
-                                4: "Thursday", 5: "Friday", 6: "Saturday"
-                              };
-                              const contextDay = activeDay === SHOW_ALL_DAYS ? 
-                                indexToDayName[selectedDate.getDay()] : activeDay;
-                              return a.is_absent && a.absent_for_date === formatDateString(selectedDate) && 
-                                a.absent_for_day === contextDay ? 'Absent' : 'Mark as Absent';
-                            })()}
-                          </button>
+                          {(() => {
+                            const indexToDayName = {
+                              0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
+                              4: "Thursday", 5: "Friday", 6: "Saturday"
+                            };
+                            const contextDay = activeDay === SHOW_ALL_DAYS ? 
+                              indexToDayName[selectedDate.getDay()] : activeDay;
+                            
+                            const isAbsentForContext = isNurseAbsentForDay(a.nurse_id, selectedDate, activeShift);
+
+                            if (isAbsentForContext) {
+                              return (
+                                <div style={{
+                                  padding: '10px 16px',
+                                  backgroundColor: '#dc3545',
+                                  color: 'white',
+                                  borderRadius: '6px',
+                                  fontWeight: 'bold',
+                                  fontSize: '14px',
+                                  textAlign: 'center',
+                                  border: '2px solid #b02a37'
+                                }}>
+                                  🔒 PERMANENTLY ABSENT
+                                  <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.9 }}>
+                                    {contextDay}, {selectedDate.toLocaleDateString()}
+                                  </div>
+                                </div>
+                              );
+                            } else {
+                              return (
+                                <button
+                                  className="absent-btn"
+                                  onClick={() => handleMarkAbsent(a.id, a.nurse_id)}
+                                  disabled={saving}
+                                  style={{
+                                    backgroundColor: '#dc3545',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '10px 16px',
+                                    borderRadius: '6px',
+                                    fontWeight: 'bold',
+                                    fontSize: '14px',
+                                    cursor: saving ? 'not-allowed' : 'pointer',
+                                    transition: 'background-color 0.2s'
+                                  }}
+                                  onMouseOver={e => !saving && (e.target.style.backgroundColor = '#c82333')}
+                                  onMouseOut={e => !saving && (e.target.style.backgroundColor = '#dc3545')}
+                                >
+                                  {saving ? 'Processing...' : '🚫 Mark as Absent'}
+                                </button>
+                              );
+                            }
+                          })()}
                         </td>
                       </tr>
                     );
