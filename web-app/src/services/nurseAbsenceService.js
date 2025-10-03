@@ -14,7 +14,9 @@ import {
   updateDoc, 
   addDoc, 
   deleteDoc, 
-  Timestamp 
+  Timestamp,
+  limit,
+  orderBy
 } from "firebase/firestore";
 
 // Helper function for splitting arrays into chunks
@@ -35,7 +37,11 @@ export const markNurseAbsent = async (
   // NEW: pass the date string (YYYY-MM-DD) or null to mean "today"
   targetDateStr = null,
   // NEW: pass the day name ("Monday", "Tuesday", ...) or null to be derived from targetDateStr or today
-  dayNameParam = null
+  dayNameParam = null,
+  // NEW: optional reason and notes for absence history
+  reason = null,
+  notes = null,
+  markedBy = "admin"
 ) => {
   try {
     const assign = assignments.find((a) => a.id === assignDocId);
@@ -63,20 +69,7 @@ export const markNurseAbsent = async (
     });
     console.log(`Target Date: ${useDateStr}, Day: ${dayName}`);
 
-    // 1. Mark the nurse as absent for the target date and day only
-    await updateDoc(doc(db, "nurse_shift_assign_v2", assignDocId), {
-      is_absent: true,
-      absent_at: Timestamp.now(),
-      absent_for_date: useDateStr,
-      absent_for_day: dayName
-    });
-
-    // Update local 'assign' object so subsequent filtering uses the updated value
-    assign.is_absent = true;
-    assign.absent_for_date = useDateStr;
-    assign.absent_for_day = dayName;
-
-    // 2. Get the nurse's assigned elderly for the TARGET DAY only
+    // 1. Get the nurse's assigned elderly for the TARGET DAY only
     console.log(`Total nurse-elderly assignments in system: ${nurseElderlyAssignments.length}`);
     console.log(`Looking for elderly with nurse_id: ${assign.nurse_id}, day: ${dayName}, shift: ${assign.shift}`);
 
@@ -132,9 +125,8 @@ export const markNurseAbsent = async (
       a.is_current &&
       // ensure they are scheduled to work on the target day
       Array.isArray(a.days_assigned) &&
-      a.days_assigned.map(d => d.toLowerCase()).includes(dayName.toLowerCase()) &&
-      // exclude those marked absent for same date and day
-      !(a.is_absent && a.absent_for_date === useDateStr && a.absent_for_day === dayName)
+      a.days_assigned.map(d => d.toLowerCase()).includes(dayName.toLowerCase())
+      // Note: We'll check for absences using hasAbsenceForDate if needed
     );
 
     console.log(`Found ${otherAssigns.length} other nurses available to cover:`);
@@ -191,8 +183,63 @@ export const markNurseAbsent = async (
 
     await Promise.all(promises);
     console.log(`✅ ${promises.length} temporary reassignments created successfully`);
+
+    // 6. Create PERMANENT absence history record in nurse_cg_absence collection
+    const tempReassignmentIds = promises.length > 0 ? [] : []; // Will be populated with actual IDs after Promise.all resolves
+    const absenceHistoryData = {
+      // Staff identification
+      staff_id: assign.nurse_id,
+      staff_type: "nurse",
+      staff_name: assign.nurse_name || "Unknown Nurse", // TODO: Get from nurses array if needed
+      
+      // Absence details
+      absent_for_date: useDateStr,
+      absent_for_day: dayName,
+      shift: assign.shift,
+      
+      // Timing
+      marked_absent_at: Timestamp.now(),
+      marked_present_at: null, // Will NEVER be set - absence is permanent
+      
+      // Status
+      status: "permanent", // PERMANENT absence - cannot be undone
+      
+      // Context and metadata
+      reason: reason || "supervisor_marked",
+      notes: notes || `Permanently marked absent by supervisor - cannot be undone. Recorded at ${new Date().toLocaleString()}`,
+      marked_by: markedBy,
+      
+      // Affected assignments (for audit and historical purposes)
+      affected_assignments: {
+        elderly_ids: allElderIds,
+        temp_reassignments_created: tempReassignmentIds, // Will be updated with actual IDs
+        original_assignment_id: assignDocId
+      },
+      
+      // Mobile app integration
+      sync_status: "pending_sync",
+      last_sync_date: null,
+      
+      // Audit trail
+      created_at: Timestamp.now(),
+      last_modified_at: Timestamp.now(),
+      
+      // Permanent record indicators
+      is_permanent: true,
+      can_be_undone: false,
+      action_type: "permanent_absence"
+    };
+
+    console.log(`📝 Creating absence history record:`, absenceHistoryData);
+    const historyDocRef = await addDoc(collection(db, "nurse_cg_absence"), absenceHistoryData);
+    console.log(`✅ Absence history record created with ID: ${historyDocRef.id}`);
+
     console.log(`=== END NURSE ABSENCE DEBUGGING ===`);
-    return { success: true, message: "Nurse marked as absent and elderly reassigned" };
+    return { 
+      success: true, 
+      message: "Nurse marked as absent and elderly reassigned",
+      absenceHistoryId: historyDocRef.id
+    };
 
   } catch (error) {
     console.error("Error marking nurse absent:", error);
@@ -200,50 +247,21 @@ export const markNurseAbsent = async (
   }
 };
 
-export const unmarkNurseAbsent = async (assignDocId, assignments) => {
-  try {
-    const assign = assignments.find(a => a.id === assignDocId);
-    if (!assign) throw new Error("Assignment not found");
+// NOTE: unmarkNurseAbsent function has been REMOVED
+// Marking a nurse as absent is now a PERMANENT action that cannot be undone
+// This ensures absence records maintain their integrity for audit and historical purposes
 
-    const todayStr = new Date().toISOString().slice(0, 10);
-
-    // 1. Clear absence for today only
-    await updateDoc(doc(db, "nurse_shift_assign_v2", assignDocId), {
-      is_absent: false,
-      absent_at: null,
-      absent_for_date: null,
-      absent_for_day: null,
-    });
-
-    // 2. Remove temporary reassignments for today from this nurse
-    const snap = await getDocs(query(
-      collection(db, "nurse_temp_reassignments"),
-      where("date", "==", todayStr)
-    ));
-
-    const delPromises = snap.docs
-      .filter(d => d.data().from_nurse_id === assign.nurse_id)
-      .map(d => deleteDoc(doc(db, "nurse_temp_reassignments", d.id)));
-
-    await Promise.all(delPromises);
-    return { success: true, message: "Nurse absence cleared" };
-
-  } catch (error) {
-    console.error("Error unmarking nurse absent:", error);
-    throw new Error("Failed to clear nurse absence");
-  }
-};
-
-// Reset daily absences
+// Reset daily absences (LEGACY function - only for cleanup of old nurse_shift_assign data)
+// New absences are tracked in nurse_cg_absence and don't need daily resets
 export const resetDailyNurseAbsences = async () => {
   try {
     const todayStr = new Date().toISOString().slice(0, 10);
-    const snap = await getDocs(collection(db, "nurse_shift_assign_v2"));
+    const snap = await getDocs(collection(db, "nurse_shift_assign"));
 
     const resetPromises = snap.docs
       .filter((d) => d.data().is_absent && d.data().absent_for_date !== todayStr)
       .map((d) =>
-        updateDoc(doc(db, "nurse_shift_assign_v2", d.id), {
+        updateDoc(doc(db, "nurse_shift_assign", d.id), {
           is_absent: false,
           absent_at: null,
           absent_for_date: null,
@@ -282,18 +300,57 @@ export const getTempReassignments = async (dateStr = null, shift = null) => {
   }
 };
 
-// Check if a nurse is absent for a specific date and day
-export const isNurseAbsent = (assignment, dateStr, dayName = null) => {
-  if (!assignment.is_absent || assignment.absent_for_date !== dateStr) {
-    return false;
+// NOTE: isNurseAbsent function removed - use hasAbsenceForDate() instead
+// The old function relied on assignment fields which could be unreliable for multi-day absences
+// Use hasAbsenceForDate(nurseId, dateStr, shift) for comprehensive absence checking
+
+// Check if a nurse has ANY absence history for a specific date (comprehensive check)
+export const hasAbsenceForDate = async (nurseId, dateStr, shift = null) => {
+  try {
+    console.log(`🔍 Checking absence for nurse ${nurseId} on ${dateStr} shift ${shift}`);
+    
+    // Prioritize checking absence history first (more reliable for permanent absences)
+    let historyQuery = query(
+      collection(db, "nurse_cg_absence"),
+      where("staff_id", "==", nurseId),
+      where("absent_for_date", "==", dateStr)
+    );
+    
+    if (shift) {
+      historyQuery = query(historyQuery, where("shift", "==", shift));
+    }
+    
+    const historySnapshot = await getDocs(historyQuery);
+    if (historySnapshot.size > 0) {
+      console.log(`✅ Found absence in history for nurse ${nurseId}`);
+      return { hasAbsence: true, source: "absence_history" };
+    }
+    
+    // Then check current assignment status as fallback
+    let assignmentQuery = query(
+      collection(db, "nurse_shift_assign"),
+      where("nurse_id", "==", nurseId),
+      where("is_absent", "==", true),
+      where("absent_for_date", "==", dateStr)
+    );
+    
+    if (shift) {
+      assignmentQuery = query(assignmentQuery, where("shift", "==", shift));
+    }
+    
+    const assignmentSnapshot = await getDocs(assignmentQuery);
+    if (assignmentSnapshot.size > 0) {
+      console.log(`✅ Found absence in current assignments for nurse ${nurseId}`);
+      return { hasAbsence: true, source: "current_assignment" };
+    }
+    
+    console.log(`❌ No absence found for nurse ${nurseId} on ${dateStr}`);
+    return { hasAbsence: false, source: null };
+    
+  } catch (error) {
+    console.error("Error checking absence for date:", error);
+    return { hasAbsence: false, source: null, error: error.message };
   }
-  
-  // If dayName is provided, also check the day
-  if (dayName && assignment.absent_for_day) {
-    return assignment.absent_for_day.toLowerCase() === dayName.toLowerCase();
-  }
-  
-  return true;
 };
 
 // Get effective elderly assignments for a nurse on a specific date (including temp reassignments)
@@ -410,3 +467,362 @@ export const batchUpdateTempReassignmentSyncStatus = async (updates) => {
     return { success: false, error: error.message };
   }
 };
+
+// ========== STAFF ABSENCE HISTORY HELPER FUNCTIONS ==========
+// These functions provide comprehensive absence history tracking for nurses
+// (extensible to caregivers in the future)
+
+// Get complete absence history for a staff member
+export const getStaffAbsenceHistory = async (staffId, staffType = "nurse", options = {}) => {
+  try {
+    const {
+      limit = null,
+      startDate = null,
+      endDate = null,
+      status = null, // "active", "completed", or null for all
+      orderBy = "marked_absent_at",
+      orderDirection = "desc"
+    } = options;
+
+    let q = query(
+      collection(db, "nurse_cg_absence"),
+      where("staff_id", "==", staffId),
+      where("staff_type", "==", staffType)
+    );
+
+    // Add date range filters if provided
+    if (startDate) {
+      q = query(q, where("absent_for_date", ">=", startDate));
+    }
+    if (endDate) {
+      q = query(q, where("absent_for_date", "<=", endDate));
+    }
+
+    // Add status filter if provided
+    if (status) {
+      q = query(q, where("status", "==", status));
+    }
+
+    // Add ordering and limit
+    q = query(q, orderBy(orderBy, orderDirection));
+    if (limit) {
+      q = query(q, limit(limit));
+    }
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+  } catch (error) {
+    console.error("Error getting staff absence history:", error);
+    return [];
+  }
+};
+
+// Get current active absences for a staff member
+export const getCurrentAbsences = async (staffId, staffType = "nurse") => {
+  try {
+    const q = query(
+      collection(db, "nurse_cg_absence"),
+      where("staff_id", "==", staffId),
+      where("staff_type", "==", staffType),
+      where("status", "==", "active")
+    );
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+  } catch (error) {
+    console.error("Error getting current absences:", error);
+    return [];
+  }
+};
+
+// Get absence history for a specific date range
+export const getAbsenceHistoryByDateRange = async (startDate, endDate, staffType = "nurse") => {
+  try {
+    let q = query(
+      collection(db, "nurse_cg_absence"),
+      where("staff_type", "==", staffType),
+      where("absent_for_date", ">=", startDate),
+      where("absent_for_date", "<=", endDate)
+    );
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+  } catch (error) {
+    console.error("Error getting absence history by date range:", error);
+    return [];
+  }
+};
+
+// Get absence statistics for a staff member
+export const getAbsenceStatistics = async (staffId, staffType = "nurse", options = {}) => {
+  try {
+    const {
+      startDate = null,
+      endDate = null
+    } = options;
+
+    const historyOptions = { startDate, endDate };
+    const history = await getStaffAbsenceHistory(staffId, staffType, historyOptions);
+
+    const stats = {
+      totalAbsences: history.length,
+      activeAbsences: history.filter(h => h.status === "active").length,
+      completedAbsences: history.filter(h => h.status === "completed").length,
+      absencesByReason: {},
+      absencesByShift: { "1st": 0, "2nd": 0, "3rd": 0 },
+      absencesByMonth: {},
+      averageAbsenceDuration: 0 // in hours, only for completed absences
+    };
+
+    // Calculate statistics
+    let totalDurationHours = 0;
+    let completedCount = 0;
+
+    history.forEach(absence => {
+      // Count by reason
+      const reason = absence.reason || "unspecified";
+      stats.absencesByReason[reason] = (stats.absencesByReason[reason] || 0) + 1;
+
+      // Count by shift
+      if (absence.shift) {
+        stats.absencesByShift[absence.shift]++;
+      }
+
+      // Count by month
+      const month = absence.absent_for_date.substring(0, 7); // YYYY-MM
+      stats.absencesByMonth[month] = (stats.absencesByMonth[month] || 0) + 1;
+
+      // Calculate duration for completed absences
+      if (absence.status === "completed" && absence.marked_absent_at && absence.marked_present_at) {
+        const startTime = absence.marked_absent_at.toDate();
+        const endTime = absence.marked_present_at.toDate();
+        const durationHours = (endTime - startTime) / (1000 * 60 * 60);
+        totalDurationHours += durationHours;
+        completedCount++;
+      }
+    });
+
+    if (completedCount > 0) {
+      stats.averageAbsenceDuration = totalDurationHours / completedCount;
+    }
+
+    return stats;
+
+  } catch (error) {
+    console.error("Error calculating absence statistics:", error);
+    return null;
+  }
+};
+
+// Check if staff member has any active absences for a specific date
+export const hasActiveAbsenceForDate = async (staffId, staffType, targetDate, shift = null) => {
+  try {
+    let q = query(
+      collection(db, "nurse_cg_absence"),
+      where("staff_id", "==", staffId),
+      where("staff_type", "==", staffType),
+      where("absent_for_date", "==", targetDate),
+      where("status", "==", "active")
+    );
+
+    if (shift) {
+      q = query(q, where("shift", "==", shift));
+    }
+
+    const snapshot = await getDocs(q);
+    return snapshot.size > 0;
+
+  } catch (error) {
+    console.error("Error checking active absence for date:", error);
+    return false;
+  }
+};
+
+// Update absence history sync status for mobile app
+export const updateAbsenceHistorySyncStatus = async (historyId, status, lastSyncDate = null) => {
+  try {
+    const updateData = {
+      sync_status: status,
+      last_modified_at: Timestamp.now()
+    };
+    
+    if (lastSyncDate) {
+      updateData.last_sync_date = Timestamp.fromDate(lastSyncDate);
+    }
+    
+    await updateDoc(doc(db, "nurse_cg_absence", historyId), updateData);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating absence history sync status:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Get absence history records pending sync for mobile app
+export const getAbsenceHistoryPendingSync = async (staffType = "nurse") => {
+  try {
+    let q = query(
+      collection(db, "nurse_cg_absence"),
+      where("sync_status", "==", "pending_sync")
+    );
+
+    if (staffType) {
+      q = query(q, where("staff_type", "==", staffType));
+    }
+
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (error) {
+    console.error("Error getting absence history pending sync:", error);
+    return [];
+  }
+};
+
+// Get mobile app compatible format for absence history
+export const getAbsenceHistoryMobileFormat = (absenceRecord) => {
+  return {
+    id: absenceRecord.id,
+    staff_id: absenceRecord.staff_id,
+    staff_type: absenceRecord.staff_type,
+    staff_name: absenceRecord.staff_name,
+    absent_for_date: absenceRecord.absent_for_date,
+    absent_for_day: absenceRecord.absent_for_day,
+    shift: absenceRecord.shift,
+    marked_absent_at: absenceRecord.marked_absent_at,
+    marked_present_at: absenceRecord.marked_present_at,
+    status: absenceRecord.status,
+    reason: absenceRecord.reason,
+    notes: absenceRecord.notes,
+    marked_by: absenceRecord.marked_by,
+    affected_assignments: absenceRecord.affected_assignments,
+    sync_status: absenceRecord.sync_status,
+    last_sync_date: absenceRecord.last_sync_date,
+    created_at: absenceRecord.created_at,
+    last_modified_at: absenceRecord.last_modified_at
+  };
+};
+
+// Get all absence dates for a nurse (from absence history)
+export const getAllAbsenceDatesForNurse = async (nurseId, options = {}) => {
+  try {
+    const {
+      startDate = null,
+      endDate = null,
+      shift = null,
+      status = null
+    } = options;
+
+    let q = query(
+      collection(db, "nurse_cg_absence"),
+      where("staff_id", "==", nurseId),
+      where("staff_type", "==", "nurse")
+    );
+
+    // Add filters
+    if (startDate) {
+      q = query(q, where("absent_for_date", ">=", startDate));
+    }
+    if (endDate) {
+      q = query(q, where("absent_for_date", "<=", endDate));
+    }
+    if (shift) {
+      q = query(q, where("shift", "==", shift));
+    }
+    if (status) {
+      q = query(q, where("status", "==", status));
+    }
+
+    const snapshot = await getDocs(q);
+    const absences = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // Group by date for easy lookup
+    const absencesByDate = {};
+    absences.forEach(absence => {
+      const date = absence.absent_for_date;
+      if (!absencesByDate[date]) {
+        absencesByDate[date] = [];
+      }
+      absencesByDate[date].push(absence);
+    });
+
+    return {
+      allAbsences: absences,
+      absencesByDate: absencesByDate,
+      totalAbsenceDays: Object.keys(absencesByDate).length,
+      totalAbsenceRecords: absences.length
+    };
+
+  } catch (error) {
+    console.error("Error getting all absence dates for nurse:", error);
+    return {
+      allAbsences: [],
+      absencesByDate: {},
+      totalAbsenceDays: 0,
+      totalAbsenceRecords: 0,
+      error: error.message
+    };
+  }
+};
+
+// Batch check absence status for multiple nurses on a specific date and shift (performance optimized)
+export const batchCheckAbsencesForDate = async (nurseIds, dateStr, shift = null) => {
+  try {
+    console.log(`🔍 Batch checking absences for ${nurseIds.length} nurses on ${dateStr} shift ${shift}`);
+    
+    const results = {};
+    
+    // Initialize all results as false
+    nurseIds.forEach(nurseId => {
+      const key = `${nurseId}-${dateStr}-${shift || 'all'}`;
+      results[key] = false;
+    });
+    
+    // Query absence history for all nurses at once
+    let historyQuery = query(
+      collection(db, "nurse_cg_absence"),
+      where("staff_id", "in", nurseIds),
+      where("absent_for_date", "==", dateStr)
+    );
+    
+    if (shift) {
+      historyQuery = query(historyQuery, where("shift", "==", shift));
+    }
+    
+    const historySnapshot = await getDocs(historyQuery);
+    historySnapshot.forEach(doc => {
+      const data = doc.data();
+      const key = `${data.staff_id}-${dateStr}-${shift || 'all'}`;
+      results[key] = true;
+    });
+    
+    // Query current assignments for remaining nurses
+    let assignmentQuery = query(
+      collection(db, "nurse_shift_assign"),
+      where("nurse_id", "in", nurseIds),
+      where("is_absent", "==", true),
+      where("absent_for_date", "==", dateStr)
+    );
+    
+    if (shift) {
+      assignmentQuery = query(assignmentQuery, where("shift", "==", shift));
+    }
+    
+    const assignmentSnapshot = await getDocs(assignmentQuery);
+    assignmentSnapshot.forEach(doc => {
+      const data = doc.data();
+      const key = `${data.nurse_id}-${dateStr}-${shift || 'all'}`;
+      results[key] = true;
+    });
+    
+    console.log(`✅ Batch check completed for ${Object.keys(results).length} nurse-date combinations`);
+    return results;
+    
+  } catch (error) {
+    console.error("Error batch checking absences:", error);
+    return {};
+  }
+};
+
