@@ -1178,7 +1178,6 @@ export default function Schedule() {
             <tr>
               <th>Caregiver Name</th>
               <th>Work Days</th>
-              <th>Time</th>
               <th>Elderly Assigned</th>
               <th>Action</th>
             </tr>
@@ -1234,7 +1233,6 @@ export default function Schedule() {
                     {caregiverName(a.caregiver_id)}
                   </td>
                   <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
-                  <td>{a.time_range?.start} - {a.time_range?.end}</td>
                   <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
                   <td>
                     {isAbsent ? (
