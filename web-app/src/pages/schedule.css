@@ -245,6 +245,17 @@
   background-color: rgba(255, 182, 193, 0.6) !important;
 }
 
+/* Row styling for caregivers on leave */
+.schedule-table tr.on-leave-row {
+  background-color: rgba(76, 175, 80, 0.2) !important;
+  border-left: 4px solid #4caf50 !important;
+  font-weight: bold;
+}
+
+.schedule-table tr.on-leave-row td {
+  background-color: rgba(76, 175, 80, 0.2) !important;
+}
+
 /* Row styling for emergency coverage caregivers */
 .schedule-table tr.emergency-row {
   background-color: rgba(255, 193, 7, 0.4) !important;
@@ -272,6 +283,16 @@
 .absent-text {
   color: red;
   margin-right: 8px;
+}
+
+/* Text notice for caregivers on leave */
+.on-leave-text {
+  color: #4caf50;
+  font-weight: bold;
+  margin-right: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 /* Buttons */
@@ -1473,6 +1494,209 @@
     max-height: 200px;
     padding-top: 10px;
     padding-bottom: 10px;
+  }
+}
+
+/* ===== SEARCH PANEL STYLES ===== */
+.search-panel {
+  position: relative;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.caregiver-search-input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 16px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  outline: none;
+  background: white;
+  transition: border-color 0.2s ease;
+}
+
+.caregiver-search-input:focus {
+  border-color: #216386;
+  box-shadow: 0 0 0 3px rgba(33, 99, 134, 0.1);
+}
+
+.clear-search-btn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #999;
+  padding: 4px;
+  line-height: 1;
+  transition: color 0.2s ease;
+}
+
+.clear-search-btn:hover {
+  color: #666;
+}
+
+.search-results-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 2px solid #ddd;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.search-results-header {
+  padding: 12px 16px;
+  background: #f8f9fa;
+  font-weight: bold;
+  color: #216386;
+  border-bottom: 1px solid #eee;
+}
+
+.no-results {
+  padding: 20px 16px;
+  text-align: center;
+  color: #999;
+  font-style: italic;
+}
+
+.search-result-item {
+  padding: 16px;
+  border-bottom: 1px solid #eee;
+  transition: background-color 0.2s ease;
+}
+
+.search-result-item:hover {
+  background-color: #f8f9fa;
+}
+
+.search-result-item:last-child {
+  border-bottom: none;
+}
+
+.search-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.caregiver-name {
+  font-weight: bold;
+  font-size: 16px;
+  color: #333;
+}
+
+.search-result-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.absence-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.absence-badge.absent {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.absence-badge.on-leave {
+  background: #e8f5e8;
+  color: #2e7d32;
+}
+
+.emergency-badge {
+  padding: 4px 8px;
+  background: #fff3e0;
+  color: #f57c00;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.search-result-details {
+  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.search-result-details > div {
+  margin-bottom: 4px;
+}
+
+.assignment-info strong,
+.work-days strong,
+.elderly-count strong {
+  color: #666;
+  font-weight: 600;
+}
+
+.elderly-names {
+  color: #888;
+  font-size: 13px;
+  padding-left: 16px;
+}
+
+.navigate-btn {
+  background: #216386;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  transition: background-color 0.2s ease;
+}
+
+.navigate-btn:hover {
+  background: #1a5070;
+}
+
+/* Responsive adjustments for search */
+@media (max-width: 768px) {
+  .search-panel {
+    max-width: none;
+    margin: 0 16px 20px 16px;
+  }
+  
+  .caregiver-search-input {
+    font-size: 14px;
+    padding: 10px 14px;
+  }
+  
+  .search-result-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .search-result-badges {
+    align-self: flex-end;
+  }
+  
+  .search-result-details {
+    font-size: 13px;
   }
 }
 

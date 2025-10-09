@@ -24,6 +24,7 @@ export default function Schedule() {
   const [assignments, setAssignments] = useState([]);
   const [elderlyAssigns, setElderlyAssigns] = useState([]);
   const [tempReassigns, setTempReassigns] = useState([]);
+  const [absences, setAbsences] = useState([]);
 
   const [duration, setDuration] = useState(6);
   const [customDuration, setCustomDuration] = useState("");
@@ -59,6 +60,11 @@ export default function Schedule() {
   const [activeDay, setActiveDay] = useState("Monday");
   // ========== END DAYS OF WEEK TABS SECTION ==========
 
+  // Search functionality states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+
   const [scheduleInfo, setScheduleInfo] = useState(null);
   const [daysLeft, setDaysLeft] = useState(null);
   const [showAbsentConfirm, setShowAbsentConfirm] = useState(false);
@@ -81,6 +87,33 @@ export default function Schedule() {
   const [currentVersion, setCurrentVersion] = useState(0);
 
   const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+  // Helper function to check if a caregiver is absent on a specific date
+  const isCaregiverAbsent = (caregiverId, dateStr) => {
+    return absences.some(absence => 
+      absence.user_id === caregiverId && 
+      absence.absence_date === dateStr && 
+      absence.status === "active"
+    );
+  };
+
+  // Helper function to get caregiver absence details (type and status)
+  const getCaregiverAbsenceDetails = (caregiverId, dateStr) => {
+    const absence = absences.find(absence => 
+      absence.user_id === caregiverId && 
+      absence.absence_date === dateStr && 
+      absence.status === "active"
+    );
+    return absence ? {
+      type: absence.absence_type || "absent",
+      reason: absence.leave_reason || null,
+      isAbsent: true
+    } : {
+      type: null,
+      reason: null,
+      isAbsent: false
+    };
+  };
 
   // Validation function to check if rest days are consecutive
   const areWorkDaysConsecutive = (workDays) => {
@@ -125,6 +158,70 @@ export default function Schedule() {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  };
+
+  // Search functionality
+  const handleSearch = (query) => {
+    setSearchQuery(query);
+    
+    if (!query.trim()) {
+      setShowSearchResults(false);
+      setSearchResults([]);
+      return;
+    }
+
+    const results = [];
+    const selectedDateStr = formatDateString(selectedDate);
+    const queryLower = query.toLowerCase();
+
+    // Search through all assignments
+    assignments.forEach(assignment => {
+      if (!assignment.is_current) return;
+
+      const caregiver = caregivers.find(cg => cg.id === assignment.caregiver_id);
+      if (!caregiver) return;
+
+      const caregiverName = `${caregiver.user_fname} ${caregiver.user_lname}`.toLowerCase();
+      
+      // Check if caregiver name matches search query
+      if (caregiverName.includes(queryLower)) {
+        const house = houses.find(h => h.house_id === assignment.house_id);
+        const houseName = house?.house_name || assignment.house_id;
+        
+        // Get absence status
+        const absenceDetails = getCaregiverAbsenceDetails(assignment.caregiver_id, selectedDateStr);
+        
+        // Get assigned elderly for this caregiver
+        const assignedElderly = getDisplayedEldersFor(assignment.caregiver_id);
+        
+        // Check if providing emergency coverage
+        const isEmergency = isProvidingEmergencyCoverage(assignment.caregiver_id, selectedDateStr);
+        
+        results.push({
+          caregiver: caregiver,
+          assignment: assignment,
+          houseName: houseName,
+          absenceDetails: absenceDetails,
+          assignedElderly: assignedElderly,
+          isEmergency: isEmergency
+        });
+      }
+    });
+
+    setSearchResults(results);
+    setShowSearchResults(true);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setShowSearchResults(false);
+    setSearchResults([]);
+  };
+
+  const navigateToCaregiver = (houseId, shift) => {
+    setActiveHouseId(houseId);
+    setActiveShift(shift);
+    setShowSearchResults(false);
   };
 
 
@@ -178,7 +275,7 @@ export default function Schedule() {
   useEffect(() => {
     // build the query to only get current schedules
     const q = query(
-      collection(db, "cg_house_assign_v2"),
+      collection(db, "cg_house_assign"),
       where("is_current", "==", true)
     );
 
@@ -199,7 +296,7 @@ export default function Schedule() {
   useEffect(() => {
   if (viewMode === "history") {
     const q = query(
-      collection(db, "cg_house_assign_v2"),
+      collection(db, "cg_house_assign"),
       where("is_current", "==", false)
     );
 
@@ -218,7 +315,7 @@ export default function Schedule() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
-      collection(db, "elderly_caregiver_assign_v2"),
+      collection(db, "elderly_caregiver_assign"),
       (snapshot) => {
         setElderlyAssigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
       }
@@ -231,6 +328,19 @@ export default function Schedule() {
       collection(db, "temp_reassignments"),
       (snapshot) => {
         setTempReassigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      query(
+        collection(db, "nurse_cg_absence"),
+        where("status", "==", "active")
+      ),
+      (snapshot) => {
+        setAbsences(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
       }
     );
     return () => unsubscribe();
@@ -668,18 +778,20 @@ export default function Schedule() {
     setPendingAbsentAssignment(null);
   };
 
-  // --- Optional: reset absences automatically on component mount ---
+  // --- Reset outdated absences (from previous days only) on component mount ---
   useEffect(() => {
-    const resetAbsences = async () => {
+    const resetOutdatedAbsences = async () => {
       try {
-        await AbsenceService.resetDailyAbsences();
+        console.log("🔄 Schedule component mounted - checking for outdated absences...");
+        const result = await AbsenceService.resetDailyAbsences();
+        console.log("📋 Reset result:", result);
         await loadAllAssignments();
       } catch (error) {
-        console.error("Error resetting daily absences:", error);
+        console.error("Error resetting outdated absences:", error);
       }
     };
 
-    resetAbsences();
+    resetOutdatedAbsences();
   }, []);
 
   // Check if caregiver is providing emergency coverage
@@ -723,8 +835,7 @@ export default function Schedule() {
   console.log(`Selected date: ${selectedDateStr} (${dayName}), Current version: ${currentVersion}`);
   
   // First, check if this caregiver is marked as absent for this specific date
-  const caregiverAssignment = assignments.find(a => a.caregiver_id === caregiverId && a.is_current);
-  const isAbsentForThisDate = caregiverAssignment && caregiverAssignment.is_absent && caregiverAssignment.absent_for_date === selectedDateStr;
+  const isAbsentForThisDate = isCaregiverAbsent(caregiverId, selectedDateStr);
   
   if (isAbsentForThisDate) {
     console.log(`Caregiver ${caregiverId} is marked ABSENT for ${selectedDateStr} - showing no elderly assignments`);
@@ -738,7 +849,7 @@ export default function Schedule() {
         ea.assign_version === currentVersion &&
         ea.day?.toLowerCase() === dayName.toLowerCase()
     )
-    .map((ea) => ea.elderly_id);
+    .flatMap((ea) => ea.elderly_ids || []); // Handle array structure
   
   console.log(`Base assignments for ${caregiverId} on ${dayName}: ${base.length}`, base);
 
@@ -749,7 +860,7 @@ export default function Schedule() {
         t.date === selectedDateStr &&
         t.assign_version === currentVersion
     )
-    .map((t) => t.elderly_id);
+    .flatMap((t) => t.elderly_ids || []); // Handle array structure
     
   console.log(`Temp assignments TO ${caregiverId} for ${selectedDateStr}: ${toTemp.length}`, toTemp);
 
@@ -760,7 +871,7 @@ export default function Schedule() {
         t.date === selectedDateStr &&
         t.assign_version === currentVersion
     )
-    .map((t) => t.elderly_id);
+    .flatMap((t) => t.elderly_ids || []); // Handle array structure
     
   console.log(`Temp assignments FROM ${caregiverId} for ${selectedDateStr}: ${fromTemp.length}`, fromTemp);
 
@@ -1076,6 +1187,84 @@ export default function Schedule() {
         <button onClick={handleNewCaregiverIntegration} style={{ marginLeft: 8, background: '#28a745', color: 'white' }}>👥 Add New Caregiver</button>
       </div>
 
+      {/* Search Bar */}
+      <div className="search-panel">
+        <div className="search-input-wrapper">
+          <input
+            type="text"
+            placeholder="🔍 Search caregiver by name..."
+            value={searchQuery}
+            onChange={(e) => handleSearch(e.target.value)}
+            className="caregiver-search-input"
+          />
+          {searchQuery && (
+            <button onClick={clearSearch} className="clear-search-btn">
+              ✕
+            </button>
+          )}
+        </div>
+        
+        {showSearchResults && (
+          <div className="search-results-dropdown">
+            {searchResults.length === 0 ? (
+              <div className="no-results">
+                No caregivers found matching "{searchQuery}"
+              </div>
+            ) : (
+              <>
+                <div className="search-results-header">
+                  Found {searchResults.length} caregiver{searchResults.length !== 1 ? 's' : ''}
+                </div>
+                {searchResults.map((result, index) => (
+                  <div key={index} className="search-result-item">
+                    <div className="search-result-header">
+                      <span className="caregiver-name">
+                        {result.caregiver.user_fname} {result.caregiver.user_lname}
+                      </span>
+                      <span className="search-result-badges">
+                        {result.absenceDetails.isAbsent && (
+                          <span className={`absence-badge ${result.absenceDetails.type === 'on_leave' ? 'on-leave' : 'absent'}`}>
+                            {result.absenceDetails.type === 'on_leave' ? '🏖️ On Leave' : '❌ Absent'}
+                          </span>
+                        )}
+                        {result.isEmergency && (
+                          <span className="emergency-badge">🚨 Emergency</span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="search-result-details">
+                      <div className="assignment-info">
+                        <strong>Assignment:</strong> {result.houseName} - {result.assignment.shift} Shift
+                      </div>
+                      <div className="work-days">
+                        <strong>Work Days:</strong> {result.assignment.days_assigned?.join(', ') || 'Not assigned'}
+                      </div>
+                      <div className="elderly-count">
+                        <strong>Elderly Assigned:</strong> {result.assignedElderly.length} elder{result.assignedElderly.length !== 1 ? 's' : ''}
+                      </div>
+                      {result.assignedElderly.length > 0 && (
+                        <div className="elderly-names">
+                          {result.assignedElderly.slice(0, 3).map(elder => 
+                            `${elder.elderly_fname} ${elder.elderly_lname}`
+                          ).join(', ')}
+                          {result.assignedElderly.length > 3 && ` +${result.assignedElderly.length - 3} more`}
+                        </div>
+                      )}
+                    </div>
+                    <button 
+                      onClick={() => navigateToCaregiver(result.assignment.house_id, result.assignment.shift)}
+                      className="navigate-btn"
+                    >
+                      View in Schedule →
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       {showOverlay && (
         <div className="overlay">
           <div className="overlay-content">
@@ -1189,23 +1378,23 @@ export default function Schedule() {
               // Use the selected date from date picker to determine the day
               const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
               
-              // Enhanced absent check with debugging
-              const isAbsent = !!a.is_absent && a.absent_for_date === selectedDateStr;
+              // Check absence status using centralized collection with detailed info
+              const absenceDetails = getCaregiverAbsenceDetails(a.caregiver_id, selectedDateStr);
+              const isAbsent = absenceDetails.isAbsent;
+              const isOnLeave = absenceDetails.type === "on_leave";
               
               // Check if providing emergency coverage
               const isEmergency = isProvidingEmergencyCoverage(a.caregiver_id, selectedDateStr);
               const emergencyDetails = isEmergency ? getEmergencyCoverageDetails(a.caregiver_id, selectedDateStr) : null;
               
               // Debug logging for absent status
-              if (a.is_absent) {
+              if (isAbsent) {
                 console.log(`ABSENT CHECK - ${caregiverName(a.caregiver_id)}:`, {
-                  is_absent: a.is_absent,
-                  absent_for_date: a.absent_for_date,
+                  caregiverId: a.caregiver_id,
                   selectedDateStr: selectedDateStr,
-                  datesMatch: a.absent_for_date === selectedDateStr,
                   isAbsent: isAbsent,
                   assignmentId: a.id,
-                  className: isAbsent ? "absent-row" : "normal-row"
+                  className: "absent-row"
                 });
               }
               
@@ -1216,9 +1405,11 @@ export default function Schedule() {
                 return n1.localeCompare(n2);
               });
               
-              // Determine row styling - priority: absent > emergency > normal
+              // Determine row styling - priority: on leave > absent > emergency > normal
               let rowClassName = "";
-              if (isAbsent) {
+              if (isOnLeave) {
+                rowClassName = "on-leave-row";
+              } else if (isAbsent) {
                 rowClassName = "absent-row";
               } else if (isEmergency) {
                 rowClassName = "emergency-row";
@@ -1235,9 +1426,18 @@ export default function Schedule() {
                   <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
                   <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
                   <td>
-                    {isAbsent ? (
+                    {isOnLeave ? (
+                      <span className="on-leave-text">
+                        🏖️ On Leave on {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}<br/>
+                        {absenceDetails.reason && (
+                          <small style={{ color: '#4caf50', fontStyle: 'italic' }}>
+                            {absenceDetails.reason}
+                          </small>
+                        )}
+                      </span>
+                    ) : isAbsent ? (
                       <span className="absent-text">
-                        Absent on {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        ❌ Absent on {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                       </span>
                     ) : isEmergency ? (
                       <span style={{ color: '#f39c12', fontWeight: 'bold', fontSize: '12px' }}>
