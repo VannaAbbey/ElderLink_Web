@@ -585,3 +585,281 @@
     font-size: 0.9rem;
   }
 }
+
+/* ======================
+   LEAVE CONFIRMATION MODAL STYLES
+   ====================== */
+
+.leave-confirmation-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 11000;
+  padding: 20px;
+}
+
+.leave-confirmation-content {
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  animation: modalSlideIn 0.3s ease-out;
+}
+
+.leave-confirmation-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #e0e0e0;
+  background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+  border-radius: 12px 12px 0 0;
+}
+
+.leave-confirmation-header h3 {
+  margin: 0;
+  color: white;
+  font-family: 'Poppins', sans-serif;
+  font-size: 1.4rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.leave-confirmation-body {
+  padding: 24px;
+}
+
+.leave-details-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.leave-detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #4caf50;
+}
+
+.leave-detail-label {
+  font-weight: 600;
+  color: #333;
+  font-size: 14px;
+}
+
+.leave-detail-value {
+  color: #666;
+  font-size: 14px;
+  text-align: right;
+  max-width: 60%;
+  word-wrap: break-word;
+}
+
+.leave-duration-highlight {
+  background: linear-gradient(135deg, #4caf50, #45a049);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.leave-warning-box {
+  background: #fff8e1;
+  border: 1px solid #ffb74d;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.leave-warning-text {
+  color: #f57c00;
+  font-size: 14px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.leave-confirmation-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding: 20px 24px;
+  border-top: 1px solid #e0e0e0;
+  background: #f8f9fa;
+  border-radius: 0 0 12px 12px;
+}
+
+.leave-confirm-btn,
+.leave-cancel-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-family: 'Poppins', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-width: 100px;
+}
+
+.leave-confirm-btn {
+  background: linear-gradient(135deg, #4caf50, #45a049);
+  color: white;
+}
+
+.leave-confirm-btn:hover {
+  background: linear-gradient(135deg, #45a049, #388e3c);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+.leave-cancel-btn {
+  background: #6c757d;
+  color: white;
+}
+
+.leave-cancel-btn:hover {
+  background: #5a6268;
+  transform: translateY(-1px);
+}
+
+/* On Leave Status Styling */
+.status-on-leave {
+  color: #4caf50;
+  font-weight: bold;
+  padding: 2px 8px;
+  background: #e8f5e8;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.on-leave-badge {
+  background: linear-gradient(135deg, #4caf50, #45a049);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Leave processing indicator */
+.leave-processing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.leave-processing-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #4caf50;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 10px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Responsive leave confirmation modal */
+@media (max-width: 768px) {
+  .leave-confirmation-content {
+    max-width: 90vw;
+    margin: 0 10px;
+  }
+  
+  .leave-detail-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .leave-detail-value {
+    max-width: 100%;
+    text-align: left;
+  }
+  
+  .leave-confirmation-actions {
+    flex-direction: column-reverse;
+  }
+  
+  .leave-confirm-btn,
+  .leave-cancel-btn {
+    width: 100%;
+  }
+}
+
+/* ======================
+   USER REGISTRATION STYLES
+   ====================== */
+
+/* User Registration Card */
+.user-registration-card {
+  border-left: 4px solid #2196f3;
+  background: linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%);
+}
+
+.user-registration-card .user-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 20px;
+  opacity: 0.7;
+}
+
+.user-registration-card .user-type {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.user-registration-card .user-type.caregiver {
+  background-color: #e8f5e8;
+  color: #2e7d32;
+}
+
+.user-registration-card .user-type.nurse {
+  background-color: #e3f2fd;
+  color: #1976d2;
+}
+
+/* Modal User Registration Styles */
+.user-notification {
+  border-left: 4px solid #2196f3;
+  background: linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%);
+}
+
+.user-modal-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 15px;
+  opacity: 0.7;
+}
+
+.user-badge {
+  background-color: #2196f3;
+  color: white;
+}

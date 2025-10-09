@@ -503,8 +503,8 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
       // Enhanced shift distribution with bedridden house priority
       const shiftCaregivers = distributeToShifts(assignedCGs, shiftDefs, house.house_id);
 
-      // house elders (all elderly that belong to this house)
-      const houseElders = elderly.filter((e) => e.house_id === house.house_id) || [];
+      // house elders (all elderly that belong to this house and are alive)
+      const houseElders = elderly.filter((e) => e.house_id === house.house_id && e.elderly_status !== "Deceased") || [];
       
       console.log(`House elderly: ${houseElders.length} total`);
       console.log(`Elderly names: ${houseElders.map(e => `${e.elderly_fname} ${e.elderly_lname}`).join(', ')}`);
@@ -642,8 +642,6 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
             start_date,
             end_date,
             time_range,
-            is_absent: false,
-            absent_at: null,
             is_current: true,
             version: nextVersion,
             created_at: Timestamp.now(),
@@ -730,33 +728,44 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
             const caregiver = shiftCaregivers[0];
             console.log(`   👤 SINGLE CAREGIVER: ${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname} gets ALL ${sortedHouseElders.length} elderly on ${day}`);
             
+            // Mark all elderly as assigned
             for (const elder of sortedHouseElders) {
               assignedElderlyIds.add(elder.id);
-              
-              const elderRef = doc(collection(db, "elderly_caregiver_assign"));
-              batch.set(elderRef, {
-                caregiver_id: caregiver.caregiver_id,
-                elderly_id: elder.id,
-                assigned_at: Timestamp.now(),
-                assign_version: nextVersion,
-                assign_id: caregiver.assignRefId,
-                status: "active",
-                day: day,
-                shift: shiftKey,
-                house_id: house.house_id,
-                house_name: house.house_name,
-                assignment_type: "single_caregiver_gets_all_house_elderly_per_day",
-                caregiver_name: `${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname}`.toLowerCase(),
-                elderly_name: `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase(),
-                debug_info: `${day}_${shiftKey}_single_cg_all_elderly`
-              });
-              writeCount++;
+            }
+            
+            // Create single assignment document with elderly_ids array
+            const elderRef = doc(collection(db, "elderly_caregiver_assign"));
+            const assignmentData = {
+              caregiver_id: caregiver.caregiver_id,
+              elderly_ids: sortedHouseElders.map(elder => elder.id), // Array of elderly IDs
+              assigned_at: Timestamp.now(),
+              assign_version: nextVersion,
+              assign_id: caregiver.assignRefId,
+              status: "active",
+              day: day,
+              shift: shiftKey,
+              house_id: house.house_id,
+              house_name: house.house_name,
+              assignment_type: "single_caregiver_gets_all_house_elderly_per_day",
+              caregiver_name: `${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname}`.toLowerCase(),
+              elderly_names: sortedHouseElders.map(elder => `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase()), // Array of names
+              debug_info: `${day}_${shiftKey}_single_cg_all_elderly`
+            };
 
-              if (writeCount >= BATCH_SIZE) {
-                await batch.commit();
-                batch = writeBatch(db);
-                writeCount = 0;
-              }
+            // Add overnight shift fields for 3rd shift only
+            if (shiftKey === "3rd") {
+              assignmentData.start_day = day;
+              assignmentData.end_day = getNextDay(day);
+              console.log(`🌙 3rd shift overnight: ${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname} works ${assignmentData.start_day} → ${assignmentData.end_day}`);
+            }
+
+            batch.set(elderRef, assignmentData);
+            writeCount++;
+
+            if (writeCount >= BATCH_SIZE) {
+              await batch.commit();
+              batch = writeBatch(db);
+              writeCount = 0;
             }
             
             console.log(`   ✅ ${caregiver.caregiver.user_fname} assigned ALL ${sortedHouseElders.length} elderly on ${day} ${shiftKey} shift`);
@@ -784,33 +793,44 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
               
               console.log(`   👤 ${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname}: gets ${elderlyChunk.length} elderly on ${day} (${elderlyChunk.map(e => `${e.elderly_fname} ${e.elderly_lname}`).join(', ')})`);
               
+              // Mark all elderly in chunk as assigned
               for (const elder of elderlyChunk) {
                 assignedElderlyIds.add(elder.id);
-                
-                const elderRef = doc(collection(db, "elderly_caregiver_assign"));
-                batch.set(elderRef, {
-                  caregiver_id: caregiver.caregiver_id,
-                  elderly_id: elder.id,
-                  assigned_at: Timestamp.now(),
-                  assign_version: nextVersion,
-                  assign_id: caregiver.assignRefId,
-                  status: "active",
-                  day: day,
-                  shift: shiftKey,
-                  house_id: house.house_id,
-                  house_name: house.house_name,
-                  assignment_type: "multiple_caregivers_split_house_elderly_per_day",
-                  caregiver_name: `${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname}`.toLowerCase(),
-                  elderly_name: `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase(),
-                  debug_info: `${day}_${shiftKey}_multi_cg_split_elderly`
-                });
-                writeCount++;
+              }
+              
+              // Create single assignment document with elderly_ids array
+              const elderRef = doc(collection(db, "elderly_caregiver_assign"));
+              const assignmentData = {
+                caregiver_id: caregiver.caregiver_id,
+                elderly_ids: elderlyChunk.map(elder => elder.id), // Array of elderly IDs
+                assigned_at: Timestamp.now(),
+                assign_version: nextVersion,
+                assign_id: caregiver.assignRefId,
+                status: "active",
+                day: day,
+                shift: shiftKey,
+                house_id: house.house_id,
+                house_name: house.house_name,
+                assignment_type: "multiple_caregivers_split_house_elderly_per_day",
+                caregiver_name: `${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname}`.toLowerCase(),
+                elderly_names: elderlyChunk.map(elder => `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase()), // Array of names
+                debug_info: `${day}_${shiftKey}_multi_cg_split_elderly`
+              };
 
-                if (writeCount >= BATCH_SIZE) {
-                  await batch.commit();
-                  batch = writeBatch(db);
-                  writeCount = 0;
-                }
+              // Add overnight shift fields for 3rd shift only
+              if (shiftKey === "3rd") {
+                assignmentData.start_day = day;
+                assignmentData.end_day = getNextDay(day);
+                console.log(`🌙 3rd shift overnight: ${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname} works ${assignmentData.start_day} → ${assignmentData.end_day}`);
+              }
+
+              batch.set(elderRef, assignmentData);
+              writeCount++;
+
+              if (writeCount >= BATCH_SIZE) {
+                await batch.commit();
+                batch = writeBatch(db);
+                writeCount = 0;
               }
             }
             
@@ -897,7 +917,7 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
     }
 
     // Activity log
-    await addDoc(collection(db, "activity_logs"), {
+    await addDoc(collection(db, "activity_logs_v2"), {
       action: "Generate Schedule (Enhanced with House-Based Elderly Distribution)",
       version: nextVersion,
       time: Timestamp.now(),
@@ -986,6 +1006,7 @@ export const clearSchedule = async () => {
     await deleteCollection("cg_house_assign");
     await deleteCollection("elderly_caregiver_assign");
     await deleteCollection("temp_reassignments");
+    await deleteCollection("nurse_cg_absence"); 
 
     console.log("All schedule collections cleared successfully");
     return { success: true, message: "Schedule cleared successfully" };
@@ -1090,6 +1111,45 @@ export const findOrphanedElderlyAssignments = async (shouldDelete = false) => {
 // Used by both main schedule generator and new caregiver integration
 // ============================================================================
 
+// Helper function to get the next day for 3rd shift overnight assignments
+const getNextDay = (currentDay) => {
+  const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const currentIndex = daysOfWeek.indexOf(currentDay);
+  return daysOfWeek[(currentIndex + 1) % 7];
+};
+
+/**
+ * Utility function for mobile app: Check if a caregiver is working on a specific date
+ * Handles 3rd shift overnight logic where shifts span across two calendar days
+ * @param {Object} elderlyAssignment - Assignment object from elderly_caregiver_assign
+ * @param {string} checkDate - Day name to check (e.g., "Monday", "Tuesday")
+ * @returns {boolean} True if the caregiver is working on the specified date
+ */
+export const isCaregiverWorkingOnDate = (elderlyAssignment, checkDate) => {
+  if (!elderlyAssignment || !checkDate) return false;
+  
+  const checkDayLower = checkDate.toLowerCase();
+  
+  // For 3rd shift (overnight), check both start_day and end_day
+  if (elderlyAssignment.shift === "3rd") {
+    // New assignments will have start_day and end_day fields
+    if (elderlyAssignment.start_day && elderlyAssignment.end_day) {
+      return elderlyAssignment.start_day?.toLowerCase() === checkDayLower ||
+             elderlyAssignment.end_day?.toLowerCase() === checkDayLower;
+    }
+    
+    // Legacy assignments only have 'day' field - for 3rd shift, also check next day
+    if (elderlyAssignment.day) {
+      const startDay = elderlyAssignment.day.toLowerCase();
+      const endDay = getNextDay(elderlyAssignment.day).toLowerCase();
+      return startDay === checkDayLower || endDay === checkDayLower;
+    }
+  }
+  
+  // For 1st and 2nd shift, use regular day matching
+  return elderlyAssignment.day?.toLowerCase() === checkDayLower;
+};
+
 /**
  * Distributes elderly among caregivers for a specific day and shift
  * Uses the same logic as the main schedule generator
@@ -1123,31 +1183,38 @@ export const distributeElderlyForDayShift = (elderlyList, workingCaregivers, day
   console.log(`👥 Distributing ${sortedElderly.length} elderly among ${workingCaregivers.length} caregivers on ${day} ${shift} shift`);
   
   if (workingCaregivers.length === 1) {
-    // SINGLE CAREGIVER: Gets ALL house elderly for this day (same as main generator)
+    // SINGLE CAREGIVER: Gets ALL house elderly for this day (array-based assignment)
     const caregiver = workingCaregivers[0];
     console.log(`👤 Single caregiver gets ALL ${sortedElderly.length} elderly on ${day}`);
     
-    for (const elder of sortedElderly) {
-      assignments.push({
-        caregiver_id: caregiver.caregiver_id,
-        elderly_id: elder.id,
-        assigned_at: Timestamp.now(),
-        assign_version: assignmentMetadata.version,
-        assign_id: assignmentMetadata.assign_id,
-        status: "active",
-        day: day,
-        shift: shift,
-        house_id: assignmentMetadata.house_id,
-        house_name: assignmentMetadata.house_name,
-        assignment_type: "single_caregiver_gets_all_house_elderly_per_day",
-        caregiver_name: caregiver.caregiver_name || `${caregiver.user_fname || ''} ${caregiver.user_lname || ''}`.toLowerCase(),
-        elderly_name: `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase(),
-        debug_info: `${day}_${shift}_single_cg_all_elderly`
-      });
+    const assignment = {
+      caregiver_id: caregiver.caregiver_id,
+      elderly_ids: sortedElderly.map(elder => elder.id), // Array of elderly IDs
+      assigned_at: Timestamp.now(),
+      assign_version: assignmentMetadata.version,
+      assign_id: assignmentMetadata.assign_id,
+      status: "active",
+      day: day,
+      shift: shift,
+      house_id: assignmentMetadata.house_id,
+      house_name: assignmentMetadata.house_name,
+      assignment_type: "single_caregiver_gets_all_house_elderly_per_day",
+      caregiver_name: caregiver.caregiver_name || `${caregiver.user_fname || ''} ${caregiver.user_lname || ''}`.toLowerCase(),
+      elderly_names: sortedElderly.map(elder => `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase()), // Array of names
+      debug_info: `${day}_${shift}_single_cg_all_elderly`
+    };
+
+    // Add overnight shift fields for 3rd shift only
+    if (shift === "3rd") {
+      assignment.start_day = day;
+      assignment.end_day = getNextDay(day);
+      console.log(`🌙 3rd shift overnight: ${assignment.start_day} → ${assignment.end_day}`);
     }
+
+    assignments.push(assignment);
     
   } else {
-    // MULTIPLE CAREGIVERS: Split elderly equally for this day (same as main generator)
+    // MULTIPLE CAREGIVERS: Split elderly equally for this day (array-based assignments)
     console.log(`👥 Multiple caregivers: Split ${sortedElderly.length} elderly among ${workingCaregivers.length} caregivers`);
     
     // Create balanced chunks for each caregiver (identical to main generator logic)
@@ -1162,31 +1229,38 @@ export const distributeElderlyForDayShift = (elderlyList, workingCaregivers, day
       elderlyChunks[chunkIndex].push(sortedElderly[i]);
     }
     
-    // Assign each chunk to respective caregiver
+    // Create one assignment document per caregiver with array of elderly
     for (let cgIndex = 0; cgIndex < workingCaregivers.length; cgIndex++) {
       const caregiver = workingCaregivers[cgIndex];
       const elderlyChunk = elderlyChunks[cgIndex];
       
       console.log(`👤 ${caregiver.caregiver_name || `${caregiver.user_fname} ${caregiver.user_lname}`}: gets ${elderlyChunk.length} elderly on ${day}`);
       
-      for (const elder of elderlyChunk) {
-        assignments.push({
-          caregiver_id: caregiver.caregiver_id,
-          elderly_id: elder.id,
-          assigned_at: Timestamp.now(),
-          assign_version: assignmentMetadata.version,
-          assign_id: assignmentMetadata.assign_id,
-          status: "active",
-          day: day,
-          shift: shift,
-          house_id: assignmentMetadata.house_id,
-          house_name: assignmentMetadata.house_name,
-          assignment_type: "multiple_caregivers_split_house_elderly_per_day",
-          caregiver_name: caregiver.caregiver_name || `${caregiver.user_fname || ''} ${caregiver.user_lname || ''}`.toLowerCase(),
-          elderly_name: `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase(),
-          debug_info: `${day}_${shift}_multi_cg_split_elderly`
-        });
+      const assignment = {
+        caregiver_id: caregiver.caregiver_id,
+        elderly_ids: elderlyChunk.map(elder => elder.id), // Array of elderly IDs
+        assigned_at: Timestamp.now(),
+        assign_version: assignmentMetadata.version,
+        assign_id: assignmentMetadata.assign_id,
+        status: "active",
+        day: day,
+        shift: shift,
+        house_id: assignmentMetadata.house_id,
+        house_name: assignmentMetadata.house_name,
+        assignment_type: "multiple_caregivers_split_house_elderly_per_day",
+        caregiver_name: caregiver.caregiver_name || `${caregiver.user_fname || ''} ${caregiver.user_lname || ''}`.toLowerCase(),
+        elderly_names: elderlyChunk.map(elder => `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase()), // Array of names
+        debug_info: `${day}_${shift}_multi_cg_split_elderly`
+      };
+
+      // Add overnight shift fields for 3rd shift only
+      if (shift === "3rd") {
+        assignment.start_day = day;
+        assignment.end_day = getNextDay(day);
+        console.log(`🌙 3rd shift overnight: ${caregiver.caregiver_name} works ${assignment.start_day} → ${assignment.end_day}`);
       }
+
+      assignments.push(assignment);
     }
   }
   
