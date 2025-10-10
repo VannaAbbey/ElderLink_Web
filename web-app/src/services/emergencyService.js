@@ -64,26 +64,32 @@ export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, e
     
     // Fill coverage map
     for (const assignment of currentAssignments) {
-      const { house_id, shift, caregiver_id } = assignment;
-      if (!coverageMap[house_id] || !coverageMap[house_id][shift]) continue;
+      const { house_id, shift } = assignment;
+      const caregiverId = assignment.user_id || assignment.caregiver_id; // Handle both field names
       
-      const isAbsentToday = absentUserIds.has(caregiver_id);
+      if (!coverageMap[house_id] || !coverageMap[house_id][shift]) continue;
+      if (!caregiverId) {
+        console.warn(`⚠️ Assignment ${assignment.id} has no user_id or caregiver_id, skipping`);
+        continue;
+      }
+      
+      const isAbsentToday = absentUserIds.has(caregiverId);
       
       // Skip caregivers who are providing emergency coverage elsewhere
       const isEmergencyCoverage = tempReassigns.some(tr =>
-        tr.to_caregiver_id === caregiver_id &&
+        tr.to_user_id === caregiverId &&
         tr.date === targetDateStr &&
-        tr.from_caregiver_id === "EMERGENCY_ABSENT"
+        tr.from_user_id === "EMERGENCY_ABSENT"
       );
       
       if (isEmergencyCoverage) {
-        console.log(`⚡ Caregiver ${caregiver_id} is providing emergency coverage elsewhere, not counting in ${house_id} ${shift}`);
+        console.log(`⚡ Caregiver ${caregiverId} is providing emergency coverage elsewhere, not counting in ${house_id} ${shift}`);
         continue; // Skip this assignment as the caregiver is covering another house
       }
       
       coverageMap[house_id][shift].total++;
       coverageMap[house_id][shift].caregivers.push({
-        caregiverId: caregiver_id,
+        caregiverId: caregiverId,
         assignmentId: assignment.id,
         isAbsent: isAbsentToday
       });
@@ -98,7 +104,7 @@ export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, e
     // Account for emergency coverage caregivers in the houses they're covering
     const emergencyCoverageByHouseShift = {};
     tempReassigns
-      .filter(tr => tr.date === targetDateStr && tr.from_caregiver_id === "EMERGENCY_ABSENT")
+      .filter(tr => tr.date === targetDateStr && tr.from_user_id === "EMERGENCY_ABSENT")
       .forEach(tr => {
         // Parse the reason to find which house/shift this covers
         const reasonMatch = tr.reason?.match(/Emergency coverage for (\w+) (\w+) shift/i);
@@ -110,7 +116,7 @@ export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, e
           if (!emergencyCoverageByHouseShift[key]) {
             emergencyCoverageByHouseShift[key] = [];
           }
-          emergencyCoverageByHouseShift[key].push(tr.to_caregiver_id);
+          emergencyCoverageByHouseShift[key].push(tr.to_user_id);
         }
       });
     
@@ -266,20 +272,25 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
       (a.days_assigned || []).map(d => d.toLowerCase()).includes(dayName.toLowerCase())
     );
     
-    const absentCaregivers = potentialAbsentCaregivers.filter(a => absentUserIds.has(a.caregiver_id));
+    const absentCaregivers = potentialAbsentCaregivers.filter(a => {
+      const userId = a.user_id || a.caregiver_id;
+      return userId && absentUserIds.has(userId);
+    });
     
     // Get elderly assignments for the emergency house/shift/day
     const emergencyElderlyIds = [];
     for (const absentCaregiver of absentCaregivers) {
+      const absentUserId = absentCaregiver.user_id || absentCaregiver.caregiver_id;
+      
       // Get base elderly assignments (handle array structure)
       const baseElderly = elderlyAssigns.filter(ea =>
-        ea.caregiver_id === absentCaregiver.caregiver_id &&
+        ea.user_id === absentUserId &&
         ea.day?.toLowerCase() === dayName.toLowerCase()
       ).flatMap(ea => ea.elderly_ids || []); // Handle array structure
       
       // Get temp assignments TO this absent caregiver
       const tempElderlyTo = tempReassigns.filter(tr =>
-        tr.to_caregiver_id === absentCaregiver.caregiver_id &&
+        tr.to_user_id === absentUserId &&
         tr.date === targetDateStr
       ).flatMap(tr => tr.elderly_ids || []); // Handle array structure
       
@@ -290,12 +301,12 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
     
     // Get donor caregiver's current elderly assignments (handle array structure)
     const donorBaseElderly = elderlyAssigns.filter(ea =>
-      ea.caregiver_id === caregiverId &&
+      ea.user_id === caregiverId &&
       ea.day?.toLowerCase() === dayName.toLowerCase()
     ).flatMap(ea => ea.elderly_ids || []); // Handle array structure
     
     const donorTempElderlyTo = tempReassigns.filter(tr =>
-      tr.to_caregiver_id === caregiverId &&
+      tr.to_user_id === caregiverId &&
       tr.date === targetDateStr
     ).flatMap(tr => tr.elderly_ids || []); // Handle array structure
     
@@ -306,11 +317,16 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
     // 1. Assign ALL emergency elderly to the donor caregiver
     const uniqueEmergencyElderlyIds = [...new Set(emergencyElderlyIds)]; // Remove duplicates
     if (uniqueEmergencyElderlyIds.length > 0) {
-      const emergencyTempRef = doc(collection(db, "temp_reassignments"));
+      const emergencyTempRef = doc(collection(db, "temporary_assignments"));
       batch.set(emergencyTempRef, {
-        from_caregiver_id: "EMERGENCY_ABSENT", // Special marker
-        to_caregiver_id: caregiverId,
+        from_user_id: "EMERGENCY_ABSENT", // Special marker
+        to_user_id: caregiverId,
         elderly_ids: uniqueEmergencyElderlyIds, // Array of elderly IDs instead of single elderly_id
+        assignment_type: "emergency_coverage",
+        day: dayName,
+        shift: emergencyShift,
+        status: "active",
+        expires_at: null,
         date: targetDateStr,
         assign_version: assignments.find(a => a.is_current)?.version || 1,
         reason: `Emergency coverage for ${emergencyHouse} ${emergencyShift} shift from ${donorHouse}`,
@@ -323,17 +339,28 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
     }
     
     // 2. Find remaining caregivers in donor house for redistribution
-    const potentialDonorCaregivers = assignments.filter(a =>
-      a.house_id === donorHouse &&
-      a.shift === emergencyShift &&
-      a.is_current &&
-      a.caregiver_id !== caregiverId &&
-      (a.days_assigned || []).map(d => d.toLowerCase()).includes(dayName.toLowerCase())
-    );
+    const potentialDonorCaregivers = assignments.filter(a => {
+      const userId = a.user_id || a.caregiver_id;
+      return a.house_id === donorHouse &&
+        a.shift === emergencyShift &&
+        a.is_current &&
+        userId !== caregiverId &&
+        (a.days_assigned || []).map(d => d.toLowerCase()).includes(dayName.toLowerCase());
+    });
     
-    const remainingDonorCaregivers = potentialDonorCaregivers.filter(a => !absentUserIds.has(a.caregiver_id));
+    const remainingDonorCaregivers = potentialDonorCaregivers.filter(a => {
+      const userId = a.user_id || a.caregiver_id;
+      return userId && !absentUserIds.has(userId);
+    });
+    
+    console.log(`📋 Donor house ${donorHouse} redistribution analysis:`);
+    console.log(`   - Potential caregivers in ${donorHouse} ${emergencyShift} shift working on ${dayName}: ${potentialDonorCaregivers.length}`);
+    console.log(`   - Remaining (non-absent) caregivers: ${remainingDonorCaregivers.length}`);
+    console.log(`   - Donor caregiver ${caregiverId}'s elderly to redistribute: ${donorCurrentElderly.length}`);
     
     if (remainingDonorCaregivers.length > 0 && donorCurrentElderly.length > 0) {
+      console.log(`♻️  REDISTRIBUTING ${donorCurrentElderly.length} elderly among ${remainingDonorCaregivers.length} caregivers`);
+      
       // Distribute donor's elderly among remaining caregivers using array-based structure
       const elderlyPerCaregiver = Math.ceil(donorCurrentElderly.length / remainingDonorCaregivers.length);
       
@@ -343,7 +370,7 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
         const recipientIndex = Math.floor(i / elderlyPerCaregiver);
         if (recipientIndex < remainingDonorCaregivers.length) {
           const recipientCaregiver = remainingDonorCaregivers[recipientIndex];
-          const recipientId = recipientCaregiver.caregiver_id;
+          const recipientId = recipientCaregiver.user_id || recipientCaregiver.caregiver_id;
           
           if (!elderlyChunks[recipientId]) {
             elderlyChunks[recipientId] = [];
@@ -352,24 +379,42 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
         }
       }
       
+      console.log(`📦 Redistribution plan:`, Object.entries(elderlyChunks).map(([id, elderly]) => 
+        `Caregiver ${id}: ${elderly.length} elderly`
+      ));
+      
       // Create single document per recipient with elderly_ids array
       for (const [recipientId, elderlyIds] of Object.entries(elderlyChunks)) {
         if (elderlyIds.length > 0) {
-          const redistributionRef = doc(collection(db, "temp_reassignments"));
+          console.log(`   ✅ Creating redistribution: ${elderlyIds.length} elderly from ${caregiverId} → ${recipientId}`);
+          
+          const redistributionRef = doc(collection(db, "temporary_assignments"));
           batch.set(redistributionRef, {
-            from_caregiver_id: caregiverId,
-            to_caregiver_id: recipientId,
+            from_user_id: caregiverId,
+            to_user_id: recipientId,
             elderly_ids: elderlyIds, // Array of elderly IDs instead of single elderly_id
+            assignment_type: "emergency_redistribution", // Changed to differentiate from emergency coverage
+            day: dayName,
+            shift: emergencyShift,
+            status: "active",
+            expires_at: null,
             date: targetDateStr,
             assign_version: assignments.find(a => a.is_current)?.version || 1,
-            reason: `Redistribution due to emergency coverage transfer`,
+            reason: `Redistribution from ${caregiverId} in ${donorHouse} due to emergency coverage transfer to ${emergencyHouse}`,
             created_at: Timestamp.now()
           });
           writeCount++;
         }
       }
       
-      console.log(`♻️  Redistributed ${donorCurrentElderly.length} elderly among ${remainingDonorCaregivers.length} remaining caregivers`);
+      console.log(`✅ Successfully created ${Object.keys(elderlyChunks).length} redistribution documents for ${donorCurrentElderly.length} elderly`);
+    } else {
+      if (remainingDonorCaregivers.length === 0) {
+        console.warn(`⚠️  NO remaining caregivers in ${donorHouse} to redistribute elderly to!`);
+      }
+      if (donorCurrentElderly.length === 0) {
+        console.log(`ℹ️  Donor caregiver ${caregiverId} has no elderly to redistribute`);
+      }
     }
     
     emergencyReassignments.push({
@@ -440,14 +485,20 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
   
   // Fill coverage map
   for (const assignment of currentAssignments) {
-    const { house_id, shift, caregiver_id } = assignment;
-    if (!coverageMap[house_id] || !coverageMap[house_id][shift]) continue;
+    const { house_id, shift } = assignment;
+    const caregiverId = assignment.user_id || assignment.caregiver_id;
     
-    const isAbsentToday = absentUserIds.has(caregiver_id);
+    if (!coverageMap[house_id] || !coverageMap[house_id][shift]) continue;
+    if (!caregiverId) {
+      console.warn(`⚠️ Assignment ${assignment.id} has no user_id or caregiver_id, skipping`);
+      continue;
+    }
+    
+    const isAbsentToday = absentUserIds.has(caregiverId);
     
     coverageMap[house_id][shift].total++;
     coverageMap[house_id][shift].caregivers.push({
-      caregiverId: caregiver_id,
+      caregiverId: caregiverId,
       assignmentId: assignment.id,
       isAbsent: isAbsentToday
     });
@@ -523,13 +574,13 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
     for (const absentCaregiver of need.absentCaregivers) {
       // Get base elderly assignments
       const baseElderly = elderlyAssigns.filter(ea =>
-        ea.caregiver_id === absentCaregiver.caregiverId &&
+        ea.user_id === absentCaregiver.caregiverId &&
         ea.day?.toLowerCase() === dayName.toLowerCase()
       ).flatMap(ea => ea.elderly_ids || []); // Handle array structure
       
       // Get temp assignments TO this absent caregiver
       const tempElderlyTo = tempReassigns.filter(tr =>
-        tr.to_caregiver_id === absentCaregiver.caregiverId &&
+        tr.to_user_id === absentCaregiver.caregiverId &&
         tr.date === targetDateStr
       ).flatMap(tr => tr.elderly_ids || []); // Handle array structure
       
@@ -540,12 +591,12 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
     
     // Get donor caregiver's current elderly assignments
     const donorBaseElderly = elderlyAssigns.filter(ea =>
-      ea.caregiver_id === donorCaregiver.caregiverId &&
+      ea.user_id === donorCaregiver.caregiverId &&
       ea.day?.toLowerCase() === dayName.toLowerCase()
     ).flatMap(ea => ea.elderly_ids || []); // Handle array structure
     
     const donorTempElderlyTo = tempReassigns.filter(tr =>
-      tr.to_caregiver_id === donorCaregiver.caregiverId &&
+      tr.to_user_id === donorCaregiver.caregiverId &&
       tr.date === targetDateStr
     ).flatMap(tr => tr.elderly_ids || []); // Handle array structure
     
@@ -560,11 +611,16 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
     // 1. Assign ALL emergency elderly to the donor caregiver  
     const uniqueEmergencyElderlyIds = [...new Set(emergencyElderlyIds)]; // Remove duplicates
     if (uniqueEmergencyElderlyIds.length > 0) {
-      const emergencyTempRef = doc(collection(db, "temp_reassignments"));
+      const emergencyTempRef = doc(collection(db, "temporary_assignments"));
       batch.set(emergencyTempRef, {
-        from_caregiver_id: "EMERGENCY_ABSENT", // Special marker
-        to_caregiver_id: donorCaregiver.caregiverId,
+        from_user_id: "EMERGENCY_ABSENT", // Special marker
+        to_user_id: donorCaregiver.caregiverId,
         elderly_ids: uniqueEmergencyElderlyIds, // Array of elderly IDs instead of single elderly_id
+        assignment_type: "emergency_coverage",
+        day: dayName,
+        shift: need.shift,
+        status: "active",
+        expires_at: null,
         date: targetDateStr,
         assign_version: currentAssignments[0]?.version || 1,
         reason: `Emergency coverage for ${need.house} ${need.shift} shift from ${suitableDonor.house}`,
@@ -603,11 +659,16 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
       // Create single document per recipient with elderly_ids array
       for (const [recipientId, elderlyIds] of Object.entries(elderlyChunks)) {
         if (elderlyIds.length > 0) {
-          const redistributionRef = doc(collection(db, "temp_reassignments"));
+          const redistributionRef = doc(collection(db, "temporary_assignments"));
           batch.set(redistributionRef, {
-            from_caregiver_id: donorCaregiver.caregiverId,
-            to_caregiver_id: recipientId,
+            from_user_id: donorCaregiver.caregiverId,
+            to_user_id: recipientId,
             elderly_ids: elderlyIds, // Array of elderly IDs instead of single elderly_id
+            assignment_type: "emergency_coverage",
+            day: dayName,
+            shift: need.shift,
+            status: "active",
+            expires_at: null,
             date: targetDateStr,
             assign_version: currentAssignments[0]?.version || 1,
             reason: `Redistribution due to emergency coverage transfer`,

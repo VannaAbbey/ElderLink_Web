@@ -242,8 +242,9 @@ export const fetchStaticData = async () => {
 export const fetchAssignments = async (isCurrent = true) => {
   try {
     const q = query(
-      collection(db, "cg_house_assign"), 
-      where("is_current", "==", isCurrent)
+      collection(db, "house_shift_assignments"), 
+      where("is_current", "==", isCurrent),
+      where("user_type", "==", "caregiver")
     );
     const snap = await getDocs(q);
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -257,8 +258,9 @@ export const fetchElderlyAssignments = async () => {
   try {
     const snap = await getDocs(
       query(
-        collection(db, "elderly_caregiver_assign"),
-        where("status", "==", "active")
+        collection(db, "elderly_assignments"),
+        where("status", "==", "active"),
+        where("user_type", "==", "caregiver")
       )
     );
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -270,17 +272,20 @@ export const fetchElderlyAssignments = async () => {
 
 export const fetchTempReassignments = async () => {
   try {
-    const snap = await getDocs(collection(db, "temp_reassignments"));
+    const snap = await getDocs(collection(db, "temporary_assignments"));
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (error) {
-    console.error("Error fetching temp reassignments:", error);
-    throw new Error("Failed to fetch temp reassignments");
+    console.error("Error fetching temporary assignments:", error);
+    throw new Error("Failed to fetch temporary assignments");
   }
 };
 
 export const getMaxVersion = async () => {
   try {
-    const snap = await getDocs(collection(db, "cg_house_assign"));
+    const snap = await getDocs(query(
+      collection(db, "house_shift_assignments"),
+      where("user_type", "==", "caregiver")
+    ));
     if (snap.empty) return 0;
     const versions = snap.docs.map((d) => d.data().version || 0);
     return Math.max(...versions);
@@ -292,15 +297,26 @@ export const getMaxVersion = async () => {
 
 const getLastHouseMap = async () => {
   try {
+    // Query without orderBy to avoid composite index requirement
     const snap = await getDocs(
-      query(collection(db, "cg_house_assign"), orderBy("created_at", "desc"))
+      query(
+        collection(db, "house_shift_assignments"), 
+        where("user_type", "==", "caregiver")
+      )
     );
 
+    // Sort documents by created_at in memory instead
+    const sortedDocs = snap.docs.sort((a, b) => {
+      const aTime = a.data().created_at?.toMillis() || 0;
+      const bTime = b.data().created_at?.toMillis() || 0;
+      return bTime - aTime; // Descending order (newest first)
+    });
+
     const lastMap = {};
-    snap.docs.forEach((d) => {
+    sortedDocs.forEach((d) => {
       const data = d.data();
-      if (!lastMap[data.caregiver_id]) {
-        lastMap[data.caregiver_id] = data.house_id;
+      if (!lastMap[data.user_id]) {
+        lastMap[data.user_id] = data.house_id;
       }
     });
     return lastMap;
@@ -313,6 +329,58 @@ const getLastHouseMap = async () => {
 // Main schedule generation function
 export const generateSchedule = async (months, { caregivers, houses, elderly }) => {
   try {
+    // 🔹 0. Validate caregivers exist in database (prevent orphaned assignments)
+    console.log(`🔍 Validating ${caregivers.length} caregivers before schedule generation...`);
+    const caregiverIdsFromDb = await getDocs(
+      query(collection(db, "users"), where("user_type", "==", "caregiver"))
+    );
+    const validCaregiverIds = new Set(caregiverIdsFromDb.docs.map(doc => doc.id));
+    
+    // Filter out any caregivers that don't exist in the database
+    const validCaregivers = caregivers.filter(cg => {
+      const isValid = validCaregiverIds.has(cg.id);
+      if (!isValid) {
+        console.warn(`⚠️ Skipping invalid caregiver: ${cg.id} (${cg.user_fname} ${cg.user_lname}) - not found in users collection`);
+      }
+      return isValid;
+    });
+    
+    if (validCaregivers.length === 0) {
+      throw new Error("No valid caregivers found in database");
+    }
+    
+    if (validCaregivers.length < caregivers.length) {
+      console.warn(`⚠️ Filtered out ${caregivers.length - validCaregivers.length} invalid caregivers`);
+    }
+    
+    console.log(`✅ Using ${validCaregivers.length} validated caregivers for schedule generation`);
+    
+    // Use validated caregivers for the rest of the function
+    caregivers = validCaregivers;
+    
+    // 🔹 0.1 Clean up any existing orphaned assignments before generating new schedule
+    console.log(`🧹 Checking for orphaned assignments from deleted caregivers...`);
+    try {
+      const orphanedResult = await findOrphanedAssignments(false); // Don't delete yet, just check
+      if (orphanedResult.count > 0) {
+        console.warn(`⚠️ Found ${orphanedResult.count} orphaned house_shift_assignments`);
+        orphanedResult.assignments.forEach(assignment => {
+          console.warn(`  - Assignment ${assignment.id}: user_id=${assignment.user_id} (caregiver deleted)`);
+        });
+      }
+      
+      const orphanedElderlyResult = await findOrphanedElderlyAssignments(false); // Don't delete yet, just check
+      if (orphanedElderlyResult.count > 0) {
+        console.warn(`⚠️ Found ${orphanedElderlyResult.count} orphaned elderly_assignments`);
+      }
+      
+      // Note: These will be automatically cleaned up when we deactivate current assignments below
+      console.log(`✅ Orphaned assignment check complete`);
+    } catch (cleanupError) {
+      console.warn(`⚠️ Error checking for orphaned assignments:`, cleanupError);
+      // Continue with schedule generation even if cleanup check fails
+    }
+    
     // Configuration constants
     const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
     const shiftDefs = [
@@ -323,14 +391,18 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
 
     // 🔹 1. Deactivate current assignments
     const allAssignSnap = await getDocs(
-      query(collection(db, "cg_house_assign"), where("is_current", "==", true))
+      query(
+        collection(db, "house_shift_assignments"), 
+        where("is_current", "==", true),
+        where("user_type", "==", "caregiver")
+      )
     );
 
     let batch = writeBatch(db);
     let writeCount = 0;
 
     for (const d of allAssignSnap.docs) {
-      batch.update(doc(db, "cg_house_assign", d.id), { is_current: false });
+      batch.update(doc(db, "house_shift_assignments", d.id), { is_current: false });
       writeCount++;
       if (writeCount >= BATCH_SIZE) {
         await batch.commit();
@@ -497,6 +569,28 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
         console.warn(`⚠️  No caregivers assigned to ${house.house_name} (${house.house_id})`);
         continue;
       }
+      
+      // 🔹 8.1 Validate all caregivers exist before processing house
+      console.log(`🔍 Validating ${assignedCGs.length} caregivers for ${house.house_name}...`);
+      const invalidCaregivers = assignedCGs.filter(cg => !validCaregiverIds.has(cg.id));
+      if (invalidCaregivers.length > 0) {
+        console.error(`❌ Found ${invalidCaregivers.length} invalid caregivers in ${house.house_name}:`);
+        invalidCaregivers.forEach(cg => {
+          console.error(`  - ${cg.id}: ${cg.user_fname} ${cg.user_lname} (NOT IN DATABASE)`);
+        });
+        throw new Error(`Cannot generate schedule: ${invalidCaregivers.length} caregivers not found in database`);
+      }
+      
+      // Log all caregivers being assigned to this house
+      console.log(`✅ All ${assignedCGs.length} caregivers validated for ${house.house_name}:`);
+      assignedCGs.forEach((cg, idx) => {
+        console.log(`  ${idx + 1}. ${cg.user_fname} ${cg.user_lname} (ID: ${cg.id})`);
+      });
+      
+      if (!assignedCGs.length) {
+        console.warn(`⚠️  No caregivers assigned to ${house.house_name} (${house.house_id})`);
+        continue;
+      }
 
       console.log(`\n🏠 Processing ${house.house_name} (${house.house_id}) with ${assignedCGs.length} caregivers`);
 
@@ -629,20 +723,29 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
           
           console.log(`✅ ${cg.user_fname} ${cg.user_lname}: ${days_assigned.join(', ')}`);
           
-          // create cg_house_assign doc for the caregiver/shift
+          // create house_shift_assignments doc for the caregiver/shift
           const shift = shiftDefs[s].key;
-          const time_range = shiftDefs[s].time_range;
+          const shiftDef = shiftDefs[s];
 
-          const assignRef = doc(collection(db, "cg_house_assign"));
+          const assignRef = doc(collection(db, "house_shift_assignments"));
           batch.set(assignRef, {
-            caregiver_id: cg.id,
+            user_id: cg.id,
+            user_type: "caregiver",
+            assignment_type: "auto_generated_schedule",
             house_id: house.house_id,
             shift,
+            shift_name: shiftDef.name,
+            start_time: shiftDef.time_range.start,
+            end_time: shiftDef.time_range.end,
             days_assigned,
-            start_date,
-            end_date,
-            time_range,
+            schedule_period: {
+              auto_generated: true,
+              duration_days: months * 30, // Convert months to days
+              start_date,
+              end_date
+            },
             is_current: true,
+            status: "active",
             version: nextVersion,
             created_at: Timestamp.now(),
           });
@@ -734,22 +837,22 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
             }
             
             // Create single assignment document with elderly_ids array
-            const elderRef = doc(collection(db, "elderly_caregiver_assign"));
+            const elderRef = doc(collection(db, "elderly_assignments"));
             const assignmentData = {
-              caregiver_id: caregiver.caregiver_id,
+              assign_id: elderRef.id, // Use auto-generated doc ID
+              user_id: caregiver.caregiver_id,
+              user_type: "caregiver",
+              user_fname: caregiver.caregiver.user_fname,
+              user_lname: caregiver.caregiver.user_lname,
               elderly_ids: sortedHouseElders.map(elder => elder.id), // Array of elderly IDs
               assigned_at: Timestamp.now(),
               assign_version: nextVersion,
-              assign_id: caregiver.assignRefId,
               status: "active",
+              is_current: true,
               day: day,
               shift: shiftKey,
-              house_id: house.house_id,
-              house_name: house.house_name,
-              assignment_type: "single_caregiver_gets_all_house_elderly_per_day",
-              caregiver_name: `${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname}`.toLowerCase(),
-              elderly_names: sortedHouseElders.map(elder => `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase()), // Array of names
-              debug_info: `${day}_${shiftKey}_single_cg_all_elderly`
+              house_id: [house.house_id], // Array for consistency with nurses
+              assignment_type: "single_caregiver_gets_all_house_elderly_per_day"
             };
 
             // Add overnight shift fields for 3rd shift only
@@ -799,22 +902,22 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
               }
               
               // Create single assignment document with elderly_ids array
-              const elderRef = doc(collection(db, "elderly_caregiver_assign"));
+              const elderRef = doc(collection(db, "elderly_assignments"));
               const assignmentData = {
-                caregiver_id: caregiver.caregiver_id,
+                assign_id: elderRef.id, // Use auto-generated doc ID
+                user_id: caregiver.caregiver_id,
+                user_type: "caregiver",
+                user_fname: caregiver.caregiver.user_fname,
+                user_lname: caregiver.caregiver.user_lname,
                 elderly_ids: elderlyChunk.map(elder => elder.id), // Array of elderly IDs
                 assigned_at: Timestamp.now(),
                 assign_version: nextVersion,
-                assign_id: caregiver.assignRefId,
                 status: "active",
+                is_current: true,
                 day: day,
                 shift: shiftKey,
-                house_id: house.house_id,
-                house_name: house.house_name,
-                assignment_type: "multiple_caregivers_split_house_elderly_per_day",
-                caregiver_name: `${caregiver.caregiver.user_fname} ${caregiver.caregiver.user_lname}`.toLowerCase(),
-                elderly_names: elderlyChunk.map(elder => `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase()), // Array of names
-                debug_info: `${day}_${shiftKey}_multi_cg_split_elderly`
+                house_id: [house.house_id], // Array for consistency with nurses
+                assignment_type: "multiple_caregivers_split_house_elderly_per_day"
               };
 
               // Add overnight shift fields for 3rd shift only
@@ -874,28 +977,34 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
 
             // Assign these elderly to this caregiver for their working days
             for (const day of caregiver.days_assigned) {
-              for (const elder of elderBatch) {
-                const elderRef = doc(collection(db, "elderly_caregiver_assign"));
-                batch.set(elderRef, {
-                  caregiver_id: caregiver.id,
-                  elderly_id: elder.id,
-                  assigned_at: Timestamp.now(),
-                  assign_version: nextVersion,
-                  assign_id: caregiver.assignRefId,
-                  status: "active",
-                  day,
-                  assignment_type: "cross_shift_coverage",
-                  caregiver_name: caregiver.name.toLowerCase(),
-                  elderly_name: `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase(),
-                  cross_shift_reason: "complete_coverage_guarantee"
-                });
-                writeCount++;
+              // Group all elderly for this day into one assignment document
+              const elderRef = doc(collection(db, "elderly_assignments"));
+              
+              // Get caregiver details
+              const caregiverDetails = caregivers.find(cg => cg.id === caregiver.id);
+              
+              batch.set(elderRef, {
+                assign_id: elderRef.id, // Use auto-generated doc ID
+                user_id: caregiver.id,
+                user_type: "caregiver",
+                user_fname: caregiverDetails?.user_fname || "",
+                user_lname: caregiverDetails?.user_lname || "",
+                elderly_ids: elderBatch.map(elder => elder.id), // Array of elderly IDs
+                assigned_at: Timestamp.now(),
+                assign_version: nextVersion,
+                status: "active",
+                is_current: true,
+                day,
+                shift: caregiver.shift,
+                house_id: [house.house_id], // Array for consistency
+                assignment_type: "cross_shift_coverage"
+              });
+              writeCount++;
 
-                if (writeCount >= BATCH_SIZE) {
-                  await batch.commit();
-                  batch = writeBatch(db);
-                  writeCount = 0;
-                }
+              if (writeCount >= BATCH_SIZE) {
+                await batch.commit();
+                batch = writeBatch(db);
+                writeCount = 0;
               }
             }
           }
@@ -963,16 +1072,19 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
 
 export const clearSchedule = async () => {
   try {
-    const deleteCollection = async (collectionName) => {
-      const snap = await getDocs(collection(db, collectionName));
+    const deleteCaregiverDocuments = async (collectionName) => {
+      // Query only caregiver documents
+      const snap = await getDocs(
+        query(collection(db, collectionName), where("user_type", "==", "caregiver"))
+      );
       
       // Skip if no documents to delete
       if (snap.empty) {
-        console.log(`Collection ${collectionName} is already empty`);
+        console.log(`No caregiver documents in ${collectionName}`);
         return;
       }
 
-      console.log(`Deleting ${snap.docs.length} documents from ${collectionName}`);
+      console.log(`Deleting ${snap.docs.length} caregiver documents from ${collectionName}`);
       
       // Process deletions in chunks to avoid "Transaction too big" error
       const docs = snap.docs;
@@ -989,7 +1101,7 @@ export const clearSchedule = async () => {
 
         await batch.commit();
         totalDeleted += chunk.length;
-        console.log(`Deleted ${chunk.length} documents from ${collectionName} (${totalDeleted}/${docs.length})`);
+        console.log(`Deleted ${chunk.length} caregiver documents from ${collectionName} (${totalDeleted}/${docs.length})`);
         
         // Small delay to prevent overwhelming Firestore
         if (i + chunkSize < docs.length) {
@@ -997,23 +1109,121 @@ export const clearSchedule = async () => {
         }
       }
 
-      console.log(`Successfully deleted all ${totalDeleted} documents from ${collectionName}`);
+      console.log(`Successfully deleted ${totalDeleted} caregiver documents from ${collectionName}`);
     };
 
-    // Clear all schedule-related collections sequentially to be safe
-    console.log("Starting schedule cleanup...");
-    
-    await deleteCollection("cg_house_assign");
-    await deleteCollection("elderly_caregiver_assign");
-    await deleteCollection("temp_reassignments");
-    await deleteCollection("nurse_cg_absence"); 
+    const deleteCaregiverAbsences = async () => {
+      // Query only caregiver absences - DELETE ALL INCLUDING leave records
+      const snap = await getDocs(
+        query(collection(db, "nurse_cg_absence"), where("user_type", "==", "caregiver"))
+      );
+      
+      if (snap.empty) {
+        console.log(`No caregiver absences in nurse_cg_absence`);
+        return;
+      }
 
-    console.log("All schedule collections cleared successfully");
-    return { success: true, message: "Schedule cleared successfully" };
+      console.log(`Deleting ALL ${snap.docs.length} caregiver absence records (including on_leave records)`);
+      
+      const docs = snap.docs;
+      const chunkSize = 400;
+      let totalDeleted = 0;
+
+      for (let i = 0; i < docs.length; i += chunkSize) {
+        const chunk = docs.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+
+        chunk.forEach((docSnap) => {
+          const data = docSnap.data();
+          console.log(`🗑️ Deleting absence: user=${data.user_id}, date=${data.absence_date}, type=${data.absence_type}`);
+          batch.delete(doc(db, "nurse_cg_absence", docSnap.id));
+        });
+
+        await batch.commit();
+        totalDeleted += chunk.length;
+        console.log(`Deleted ${chunk.length} caregiver absences (${totalDeleted}/${docs.length})`);
+        
+        if (i + chunkSize < docs.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      console.log(`✅ Successfully deleted ${totalDeleted} caregiver absence records (including all leave records)`);
+    };
+
+    const deleteCaregiverTempAssignments = async () => {
+      // For temporary_assignments, we need to check both from_user_id and to_user_id
+      // to ensure we only delete caregiver-related temp assignments
+      const snap = await getDocs(collection(db, "temporary_assignments"));
+      
+      if (snap.empty) {
+        console.log(`No temporary assignments to check`);
+        return;
+      }
+
+      console.log(`Checking ${snap.docs.length} temporary assignments for caregiver-related ones`);
+      
+      const caregiverTempDocs = [];
+      
+      // Get all caregiver IDs
+      const caregiversSnap = await getDocs(
+        query(collection(db, "users"), where("user_type", "==", "caregiver"))
+      );
+      const caregiverIds = new Set(caregiversSnap.docs.map(doc => doc.id));
+      
+      // Filter temporary assignments that involve caregivers
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data();
+        // Delete if either from_user_id or to_user_id is a caregiver
+        if (caregiverIds.has(data.from_user_id) || caregiverIds.has(data.to_user_id)) {
+          caregiverTempDocs.push(docSnap);
+        }
+      }
+      
+      if (caregiverTempDocs.length === 0) {
+        console.log(`No caregiver temporary assignments found`);
+        return;
+      }
+
+      console.log(`Deleting ${caregiverTempDocs.length} caregiver temporary assignments`);
+      
+      const chunkSize = 400;
+      let totalDeleted = 0;
+
+      for (let i = 0; i < caregiverTempDocs.length; i += chunkSize) {
+        const chunk = caregiverTempDocs.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+
+        chunk.forEach((docSnap) => {
+          batch.delete(doc(db, "temporary_assignments", docSnap.id));
+        });
+
+        await batch.commit();
+        totalDeleted += chunk.length;
+        console.log(`Deleted ${chunk.length} caregiver temp assignments (${totalDeleted}/${caregiverTempDocs.length})`);
+        
+        if (i + chunkSize < caregiverTempDocs.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      console.log(`Successfully deleted ${totalDeleted} caregiver temporary assignments`);
+    };
+
+    // Clear only caregiver schedule-related documents sequentially
+    console.log("Starting CAREGIVER schedule cleanup (nurse schedules will be preserved)...");
+    
+    await deleteCaregiverDocuments("house_shift_assignments");
+    await deleteCaregiverDocuments("elderly_assignments");
+    await deleteCaregiverTempAssignments();
+    await deleteCaregiverAbsences();
+
+    console.log("All CAREGIVER schedule collections cleared successfully (nurse schedules preserved)");
+    return { success: true, message: "Caregiver schedule cleared successfully (nurse schedules preserved)" };
 
   } catch (error) {
-    console.error("Error clearing schedule:", error);
-    return { success: false, message: `Failed to clear schedule: ${error.message}` };
+    console.error("Error clearing caregiver schedule:", error);
+    return { success: false, message: `Failed to clear caregiver schedule: ${error.message}` };
   }
 };
 
@@ -1031,7 +1241,7 @@ export const findOrphanedAssignments = async (shouldDelete = false) => {
     
     // Find orphaned assignments
     const orphanedAssignments = assignments.filter(assignment => 
-      !caregiverIds.has(assignment.caregiver_id)
+      !caregiverIds.has(assignment.user_id)
     );
     
     console.log(`Found ${orphanedAssignments.length} orphaned caregiver assignments`);
@@ -1040,7 +1250,7 @@ export const findOrphanedAssignments = async (shouldDelete = false) => {
       const batch = writeBatch(db);
       
       orphanedAssignments.forEach(assignment => {
-        const assignmentRef = doc(db, "cg_house_assign", assignment.id);
+        const assignmentRef = doc(db, "house_shift_assignments", assignment.id);
         batch.delete(assignmentRef);
       });
       
@@ -1075,10 +1285,18 @@ export const findOrphanedElderlyAssignments = async (shouldDelete = false) => {
     const caregiverIds = new Set(caregivers.docs.map(doc => doc.id));
     const elderlyIds = new Set(elderly.docs.map(doc => doc.id));
     
-    // Find orphaned elderly assignments
-    const orphanedElderlyAssignments = elderlyAssignments.filter(assignment => 
-      !caregiverIds.has(assignment.caregiver_id) || !elderlyIds.has(assignment.elderly_id)
-    );
+    // Find orphaned elderly assignments (user_id not found or any elderly_id in array not found)
+    const orphanedElderlyAssignments = elderlyAssignments.filter(assignment => {
+      // Check if caregiver exists
+      if (!caregiverIds.has(assignment.user_id)) return true;
+      
+      // Check if any elderly in the array doesn't exist
+      if (assignment.elderly_ids && Array.isArray(assignment.elderly_ids)) {
+        return assignment.elderly_ids.some(elderlyId => !elderlyIds.has(elderlyId));
+      }
+      
+      return false;
+    });
     
     console.log(`Found ${orphanedElderlyAssignments.length} orphaned elderly assignments`);
     
@@ -1086,7 +1304,7 @@ export const findOrphanedElderlyAssignments = async (shouldDelete = false) => {
       const batch = writeBatch(db);
       
       orphanedElderlyAssignments.forEach(assignment => {
-        const assignmentRef = doc(db, "elderly_caregiver_assign", assignment.id);
+        const assignmentRef = doc(db, "elderly_assignments", assignment.id);
         batch.delete(assignmentRef);
       });
       
@@ -1121,7 +1339,7 @@ const getNextDay = (currentDay) => {
 /**
  * Utility function for mobile app: Check if a caregiver is working on a specific date
  * Handles 3rd shift overnight logic where shifts span across two calendar days
- * @param {Object} elderlyAssignment - Assignment object from elderly_caregiver_assign
+ * @param {Object} elderlyAssignment - Assignment object from elderly_assignments
  * @param {string} checkDate - Day name to check (e.g., "Monday", "Tuesday")
  * @returns {boolean} True if the caregiver is working on the specified date
  */
@@ -1187,21 +1405,21 @@ export const distributeElderlyForDayShift = (elderlyList, workingCaregivers, day
     const caregiver = workingCaregivers[0];
     console.log(`👤 Single caregiver gets ALL ${sortedElderly.length} elderly on ${day}`);
     
+    // Will be used as assign_id when creating the document
     const assignment = {
-      caregiver_id: caregiver.caregiver_id,
+      user_id: caregiver.caregiver_id,
+      user_type: "caregiver",
+      user_fname: caregiver.user_fname || "",
+      user_lname: caregiver.user_lname || "",
       elderly_ids: sortedElderly.map(elder => elder.id), // Array of elderly IDs
       assigned_at: Timestamp.now(),
       assign_version: assignmentMetadata.version,
-      assign_id: assignmentMetadata.assign_id,
       status: "active",
+      is_current: true,
       day: day,
       shift: shift,
-      house_id: assignmentMetadata.house_id,
-      house_name: assignmentMetadata.house_name,
-      assignment_type: "single_caregiver_gets_all_house_elderly_per_day",
-      caregiver_name: caregiver.caregiver_name || `${caregiver.user_fname || ''} ${caregiver.user_lname || ''}`.toLowerCase(),
-      elderly_names: sortedElderly.map(elder => `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase()), // Array of names
-      debug_info: `${day}_${shift}_single_cg_all_elderly`
+      house_id: Array.isArray(assignmentMetadata.house_id) ? assignmentMetadata.house_id : [assignmentMetadata.house_id], // Ensure array
+      assignment_type: "single_caregiver_gets_all_house_elderly_per_day"
     };
 
     // Add overnight shift fields for 3rd shift only
@@ -1236,28 +1454,28 @@ export const distributeElderlyForDayShift = (elderlyList, workingCaregivers, day
       
       console.log(`👤 ${caregiver.caregiver_name || `${caregiver.user_fname} ${caregiver.user_lname}`}: gets ${elderlyChunk.length} elderly on ${day}`);
       
+      // Will be used as assign_id when creating the document
       const assignment = {
-        caregiver_id: caregiver.caregiver_id,
+        user_id: caregiver.caregiver_id,
+        user_type: "caregiver",
+        user_fname: caregiver.user_fname || "",
+        user_lname: caregiver.user_lname || "",
         elderly_ids: elderlyChunk.map(elder => elder.id), // Array of elderly IDs
         assigned_at: Timestamp.now(),
         assign_version: assignmentMetadata.version,
-        assign_id: assignmentMetadata.assign_id,
         status: "active",
+        is_current: true,
         day: day,
         shift: shift,
-        house_id: assignmentMetadata.house_id,
-        house_name: assignmentMetadata.house_name,
-        assignment_type: "multiple_caregivers_split_house_elderly_per_day",
-        caregiver_name: caregiver.caregiver_name || `${caregiver.user_fname || ''} ${caregiver.user_lname || ''}`.toLowerCase(),
-        elderly_names: elderlyChunk.map(elder => `${elder.elderly_fname} ${elder.elderly_lname}`.toLowerCase()), // Array of names
-        debug_info: `${day}_${shift}_multi_cg_split_elderly`
+        house_id: Array.isArray(assignmentMetadata.house_id) ? assignmentMetadata.house_id : [assignmentMetadata.house_id], // Ensure array
+        assignment_type: "multiple_caregivers_split_house_elderly_per_day"
       };
 
       // Add overnight shift fields for 3rd shift only
       if (shift === "3rd") {
         assignment.start_day = day;
         assignment.end_day = getNextDay(day);
-        console.log(`🌙 3rd shift overnight: ${caregiver.caregiver_name} works ${assignment.start_day} → ${assignment.end_day}`);
+        console.log(`🌙 3rd shift overnight: ${caregiver.caregiver_name || `${caregiver.user_fname} ${caregiver.user_lname}`} works ${assignment.start_day} → ${assignment.end_day}`);
       }
 
       assignments.push(assignment);
@@ -1283,8 +1501,15 @@ export const createElderlyAssignmentsBatch = async (elderlyAssignments, batch, w
   console.log(`📝 Creating ${elderlyAssignments.length} elderly assignments in batch`);
   
   for (const assignment of elderlyAssignments) {
-    const elderRef = doc(collection(db, "elderly_caregiver_assign"));
-    currentBatch.set(elderRef, assignment);
+    const elderRef = doc(collection(db, "elderly_assignments"));
+    
+    // Add assign_id as the auto-generated doc ID
+    const assignmentData = {
+      ...assignment,
+      assign_id: elderRef.id
+    };
+    
+    currentBatch.set(elderRef, assignmentData);
     currentWriteCount++;
     
     // Commit batch if it reaches size limit (same as main generator)

@@ -28,12 +28,16 @@ export const detectUnassignedCaregivers = async () => {
     
     // Get current assignments
     const currentAssignments = await getDocs(
-      query(collection(db, "cg_house_assign"), where("is_current", "==", true))
+      query(
+        collection(db, "house_shift_assignments"), 
+        where("is_current", "==", true),
+        where("user_type", "==", "caregiver")
+      )
     );
     
     const assignedCaregiverIds = new Set();
     currentAssignments.docs.forEach(doc => {
-      assignedCaregiverIds.add(doc.data().caregiver_id);
+      assignedCaregiverIds.add(doc.data().user_id);
     });
     
     // Find unassigned caregivers
@@ -326,8 +330,15 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     }
     
     const version = currentAssignment.version;
-    const startDate = currentAssignment.start_date;
-    const endDate = currentAssignment.end_date;
+    
+    // Dates are nested inside schedule_period object
+    const startDate = currentAssignment.schedule_period?.start_date || currentAssignment.start_date;
+    const endDate = currentAssignment.schedule_period?.end_date || currentAssignment.end_date;
+    
+    if (!startDate || !endDate) {
+      console.error("Current assignment structure:", currentAssignment);
+      throw new Error("Could not find start_date or end_date in current assignment. Please check the assignment structure.");
+    }
     
     const batch = writeBatch(db);
     let writeCount = 0;
@@ -342,22 +353,39 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     const shiftDef = shiftDefs.find(s => s.key === assignmentData.shift);
     const time_range = shiftDef ? shiftDef.time_range : { start: "06:00", end: "14:00" }; // fallback to 1st shift
     
-    // Create new assignment document
-    const newAssignmentRef = doc(collection(db, "cg_house_assign"));
+    // Calculate duration in days from start_date to end_date
+    // Handle both Firebase Timestamp and regular Date objects
+    const startDateMs = startDate.toDate ? startDate.toDate().getTime() : (startDate.getTime ? startDate.getTime() : new Date(startDate).getTime());
+    const endDateMs = endDate.toDate ? endDate.toDate().getTime() : (endDate.getTime ? endDate.getTime() : new Date(endDate).getTime());
+    const durationDays = Math.ceil((endDateMs - startDateMs) / (1000 * 60 * 60 * 24));
+    
+    // Create new assignment document with unified schema
+    const newAssignmentRef = doc(collection(db, "house_shift_assignments"));
     const assignmentDoc = {
-      caregiver_id: caregiverId,
+      user_id: caregiverId,
+      user_type: "caregiver",
+      assignment_type: "manual_integration",
       house_id: assignmentData.house,
       shift: assignmentData.shift,
+      shift_name: shiftDef.name,
+      start_time: time_range.start,
+      end_time: time_range.end,
       days_assigned: assignmentData.workDays,
+      schedule_period: {
+        auto_generated: false,
+        duration_days: durationDays,
+        start_date: startDate,
+        end_date: endDate
+      },
       is_current: true,
+      status: "active",
       version: version,
-      start_date: startDate,
-      end_date: endDate,
-      time_range: time_range, // 🔧 Added missing time_range field
       created_at: Timestamp.now(),
-      daily_absent: {}, // Initialize empty absent tracking
-      integration_type: "manual_addition", // Mark as manually added
-      integration_date: Timestamp.now()
+      integration_metadata: {
+        integration_type: "manual_addition",
+        integration_date: Timestamp.now(),
+        integrated_by: "admin"
+      }
     };
     
     batch.set(newAssignmentRef, assignmentDoc);
@@ -414,23 +442,41 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     for (const workDay of assignmentData.workDays) {
       console.log(`📅 Processing ${workDay} for complete elderly redistribution...`);
       
-      // STEP 1: Find ALL existing elderly assignments for this day/shift/house
-      // Must filter by current version to avoid deactivating old assignments
-      const existingDayAssignments = elderlyAssignments.filter(ea => 
-        ea.house_id === assignmentData.house &&
-        ea.shift === assignmentData.shift &&
-        ea.day === workDay &&
-        ea.status === "active" &&
-        ea.assign_version === version  // Only get current version assignments
+      // STEP 1: Query database DIRECTLY to find ALL existing elderly assignments for this day/shift/house
+      // This ensures we find ALL assignments including orphaned ones (deleted caregivers)
+      // DO NOT filter by version - we want to deactivate ALL active assignments regardless of version
+      // NOTE: house_id in elderly_assignments is stored as an ARRAY, so we can't use where() directly
+      const elderlyAssignmentsQuery = query(
+        collection(db, "elderly_assignments"),
+        where("shift", "==", assignmentData.shift),
+        where("day", "==", workDay),
+        where("status", "==", "active"),
+        where("is_current", "==", true)
       );
       
-      console.log(`📋 Found ${existingDayAssignments.length} existing elderly assignments for ${workDay} ${assignmentData.shift} shift (version ${version})`);
+      const elderlyAssignmentsSnapshot = await getDocs(elderlyAssignmentsQuery);
+      
+      // Filter by house_id (since it's an array, we need to filter in memory)
+      const existingDayAssignments = elderlyAssignmentsSnapshot.docs
+        .map(doc => ({ id: doc.id, ref: doc.ref, ...doc.data() }))
+        .filter(ea => {
+          const houseIdMatch = Array.isArray(ea.house_id) 
+            ? ea.house_id.includes(assignmentData.house)
+            : ea.house_id === assignmentData.house;
+          return houseIdMatch;
+        });
+      
+      console.log(`📋 Found ${existingDayAssignments.length} existing elderly assignments for ${workDay} ${assignmentData.shift} shift in ${assignmentData.house}`);
       
       // Debug: Log which assignments we found
       if (existingDayAssignments.length > 0) {
         console.log(`🔍 Existing assignments to deactivate:`);
         existingDayAssignments.forEach((assignment, idx) => {
-          console.log(`  ${idx + 1}. ID: ${assignment.id}, Caregiver: ${assignment.caregiver_id}, Elderly: ${assignment.elderly_ids ? assignment.elderly_ids.length : 0} elderly`);
+          // Check if caregiver still exists in users collection
+          const caregiverStillExists = allCaregivers.docs.find(doc => doc.id === assignment.user_id);
+          const isOrphaned = !caregiverStillExists;
+          
+          console.log(`  ${idx + 1}. ID: ${assignment.id}, Caregiver: ${assignment.user_id || assignment.caregiver_id} (${assignment.user_fname || 'Unknown'} ${assignment.user_lname || 'User'})${isOrphaned ? ' ⚠️ ORPHANED - Caregiver deleted' : ''}, Elderly: ${assignment.elderly_ids ? assignment.elderly_ids.length : 0} elderly`);
         });
       }
       
@@ -463,13 +509,20 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
         });
       }
       
-      // CRITICAL FIX: If no existing assignments found, we still need to assign ALL house elderly to the new caregiver
+      // CRITICAL FIX: If no existing assignments found, we still need to assign ALL house elderly
+      // But we need to deduplicate - don't add elderly that are already in the redistribution list
       if (existingDayAssignments.length === 0 && elderlyList.length > 0) {
-        console.log(`📝 No existing assignments for ${workDay} - new caregiver will get all ${elderlyList.length} house elderly`);
-        elderlyToRedistribute.push(...elderlyList);
+        console.log(`📝 No existing assignments for ${workDay} - will distribute all ${elderlyList.length} house elderly`);
+        // Only add elderly that aren't already in the redistribution list
+        for (const elderly of elderlyList) {
+          if (!existingElderlyIds.has(elderly.id)) {
+            elderlyToRedistribute.push(elderly);
+            existingElderlyIds.add(elderly.id);
+          }
+        }
       }
       
-      console.log(`👥 Will redistribute ${elderlyToRedistribute.length} elderly among caregivers`);
+      console.log(`👥 Will redistribute ${elderlyToRedistribute.length} unique elderly among caregivers`);
       
       // STEP 3: Identify ALL caregivers working this day/shift (including new one)
       const workingCaregivers = [];
@@ -492,11 +545,11 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
             cg.days_assigned.includes(workDay)) {
           
           // Get caregiver details from users collection for proper redistribution
-          const existingCaregiverDoc = allCaregivers.docs.find(doc => doc.id === cg.caregiver_id);
+          const existingCaregiverDoc = allCaregivers.docs.find(doc => doc.id === cg.user_id);
           if (existingCaregiverDoc) {
             const cgData = existingCaregiverDoc.data();
             workingCaregivers.push({
-              caregiver_id: cg.caregiver_id,
+              caregiver_id: cg.user_id, // Keep as caregiver_id for elderly assignment compatibility
               caregiver_name: `${cgData.user_fname} ${cgData.user_lname}`.toLowerCase(),
               user_fname: cgData.user_fname,
               user_lname: cgData.user_lname
@@ -509,6 +562,23 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
       console.log(`👥 ${workDay}: ${workingCaregivers.length} total caregivers will handle ${elderlyToRedistribute.length} elderly`);
       console.log(`🔍 Working caregivers: ${workingCaregivers.map(wc => `${wc.user_fname} ${wc.user_lname} (${wc.caregiver_id})`).join(', ')}`);
       console.log(`🔍 Elderly to redistribute: ${elderlyToRedistribute.map(e => `${e.elderly_fname} ${e.elderly_lname} (${e.id})`).join(', ')}`);
+      
+      // Safety check: Ensure no duplicate elderly in redistribution list
+      const uniqueElderlyIds = new Set(elderlyToRedistribute.map(e => e.id));
+      if (uniqueElderlyIds.size !== elderlyToRedistribute.length) {
+        console.warn(`⚠️ Found ${elderlyToRedistribute.length - uniqueElderlyIds.size} duplicate elderly in redistribution list - deduplicating...`);
+        const uniqueElderly = [];
+        const seenIds = new Set();
+        for (const elderly of elderlyToRedistribute) {
+          if (!seenIds.has(elderly.id)) {
+            uniqueElderly.push(elderly);
+            seenIds.add(elderly.id);
+          }
+        }
+        elderlyToRedistribute.length = 0;
+        elderlyToRedistribute.push(...uniqueElderly);
+        console.log(`✅ Deduplicated to ${elderlyToRedistribute.length} unique elderly`);
+      }
       
       // STEP 4: Use shared distribution function to redistribute ALL elderly among ALL caregivers
       if (elderlyToRedistribute.length > 0 && workingCaregivers.length > 0) {
@@ -539,7 +609,7 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
           } else {
             // Existing caregivers use their existing assignment IDs
             const existingAssignment = currentAssignments.find(assign => 
-              assign.caregiver_id === assignment.caregiver_id &&
+              assign.user_id === assignment.caregiver_id &&
               assign.house_id === assignmentData.house &&
               assign.shift === assignmentData.shift &&
               assign.is_current
@@ -557,9 +627,9 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
         
         console.log(`✅ Created ${redistributedAssignments.length} redistributed assignments for ${workDay}`);
         
-        // Debug: Log assignment IDs
+        // Debug: Log assignment details
         redistributedAssignments.forEach((assignment, idx) => {
-          console.log(`  ${idx + 1}. Caregiver ${assignment.caregiver_id}: assign_id=${assignment.assign_id}, elderly_count=${assignment.elderly_ids?.length || 0}`);
+          console.log(`  ${idx + 1}. Caregiver ${assignment.user_fname} ${assignment.user_lname} (${assignment.user_id}): elderly_count=${assignment.elderly_ids?.length || 0}`);
         });
         
       } else if (elderlyToRedistribute.length === 0) {
@@ -590,10 +660,11 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     // Debug: Log assignments per caregiver to verify distribution
     const assignmentsByCaregiver = {};
     elderlyAssignmentsToCreate.forEach(assignment => {
-      if (!assignmentsByCaregiver[assignment.caregiver_id]) {
-        assignmentsByCaregiver[assignment.caregiver_id] = 0;
+      const userId = assignment.user_id || assignment.caregiver_id;
+      if (!assignmentsByCaregiver[userId]) {
+        assignmentsByCaregiver[userId] = 0;
       }
-      assignmentsByCaregiver[assignment.caregiver_id]++;
+      assignmentsByCaregiver[userId]++;
     });
     
     console.log(`🔍 DEBUG: Elderly assignments per caregiver:`);
@@ -617,8 +688,9 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     // Deactivate conflicting assignments
     for (const deactivation of assignmentsToDeactivate) {
       console.log(`🗑️ Deactivating assignment ${deactivation.id}`);
-      batch.update(doc(db, "elderly_caregiver_assign", deactivation.id), {
+      batch.update(doc(db, "elderly_assignments", deactivation.id), {
         status: "redistributed",
+        is_current: false,
         deactivated_at: Timestamp.now(),
         deactivation_reason: deactivation.reason,
         redistributed_by: "new_caregiver_integration"
@@ -628,14 +700,15 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     
     // Create elderly assignments using shared batch function (same as main generator)
     const validElderlyAssignments = elderlyAssignmentsToCreate.filter(elderlyAssign => {
-      // Validate assignment structure
-      if (!elderlyAssign.caregiver_id) {
-        console.warn(`⚠️ Skipping assignment with missing caregiver_id:`, elderlyAssign);
+      // Validate assignment structure - check both user_id and caregiver_id for compatibility
+      const userId = elderlyAssign.user_id || elderlyAssign.caregiver_id;
+      if (!userId) {
+        console.warn(`⚠️ Skipping assignment with missing user_id/caregiver_id:`, elderlyAssign);
         return false;
       }
       
       if (!elderlyAssign.elderly_ids || !Array.isArray(elderlyAssign.elderly_ids) || elderlyAssign.elderly_ids.length === 0) {
-        console.warn(`⚠️ Skipping assignment with invalid elderly_ids for caregiver ${elderlyAssign.caregiver_id}:`, elderlyAssign.elderly_ids);
+        console.warn(`⚠️ Skipping assignment with invalid elderly_ids for caregiver ${userId}:`, elderlyAssign.elderly_ids);
         return false;
       }
       
@@ -651,10 +724,12 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
       return true;
     });
     
-    // Additional validation: Check for duplicate assignments (same elderly + caregiver + day + shift)
+    // Additional validation: Check for duplicate assignments (same caregiver + day + shift)
+    // Note: elderly_ids is now an array, so we check for duplicate caregiver assignments, not individual elderly
     const assignmentKeys = new Set();
     const deduplicatedAssignments = validElderlyAssignments.filter(assignment => {
-      const key = `${assignment.elderly_id}_${assignment.caregiver_id}_${assignment.day}_${assignment.shift}`;
+      const userId = assignment.user_id || assignment.caregiver_id;
+      const key = `${userId}_${assignment.day}_${assignment.shift}`;
       if (assignmentKeys.has(key)) {
         console.warn(`⚠️ Skipping duplicate assignment: ${key}`);
         return false;
@@ -691,8 +766,8 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     console.log(`📋 Integration Summary:`);
     console.log(`  - Deactivated old assignments: ${assignmentsToDeactivate.length}`);
     console.log(`  - Created new assignments: ${elderlyAssignmentsToCreate.length}`);
-    console.log(`  - New caregiver assignments: ${elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id === caregiverId).length}`);
-    console.log(`  - Existing caregiver assignments updated: ${elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id !== caregiverId).length}`);
+    console.log(`  - New caregiver assignments: ${elderlyAssignmentsToCreate.filter(ea => (ea.user_id || ea.caregiver_id) === caregiverId).length}`);
+    console.log(`  - Existing caregiver assignments updated: ${elderlyAssignmentsToCreate.filter(ea => (ea.user_id || ea.caregiver_id) !== caregiverId).length}`);
     
     // Log the integration activity with detailed distribution info
     await addDoc(collection(db, "activity_logs"), {
@@ -704,15 +779,15 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
         total_caregivers_in_house: allHouseCaregivers.length,
         assignments_deactivated: assignmentsToDeactivate.length,
         assignments_created: elderlyAssignmentsToCreate.length,
-        new_caregiver_elderly_count: elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id === caregiverId).length,
-        existing_caregivers_updated: elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id !== caregiverId).length,
+        new_caregiver_elderly_count: elderlyAssignmentsToCreate.filter(ea => (ea.user_id || ea.caregiver_id) === caregiverId).length,
+        existing_caregivers_updated: elderlyAssignmentsToCreate.filter(ea => (ea.user_id || ea.caregiver_id) !== caregiverId).length,
         distribution_type: allHouseCaregivers.length === 1 ? "single_gets_all" : "complete_redistribution"
       },
       time: Timestamp.now(),
       created_by: "admin"
     });
     
-    const newCaregiverElderlyCount = elderlyAssignmentsToCreate.filter(ea => ea.caregiver_id === caregiverId).length;
+    const newCaregiverElderlyCount = elderlyAssignmentsToCreate.filter(ea => (ea.user_id || ea.caregiver_id) === caregiverId).length;
     
     console.log(`✅ Successfully integrated caregiver ${caregiverId} with ${newCaregiverElderlyCount} elderly assignments`);
     console.log(`📊 Total elderly assignments created/updated: ${elderlyAssignmentsToCreate.length}`);

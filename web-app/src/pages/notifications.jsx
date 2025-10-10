@@ -294,9 +294,9 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
 
       // Load current assignments, elderly assignments, and temp reassignments for processing
       const [assignmentsSnap, elderlyAssignmentsSnap, tempReassignmentsSnap] = await Promise.all([
-        getDocs(collection(db, "cg_house_assign")),
-        getDocs(collection(db, "elderly_caregiver_assign")),
-        getDocs(collection(db, "temp_reassignments"))
+        getDocs(collection(db, "house_shift_assignments")),
+        getDocs(collection(db, "elderly_assignments")),
+        getDocs(collection(db, "temporary_assignments"))
       ]);
 
       const assignments = assignmentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
