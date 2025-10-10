@@ -8,6 +8,7 @@ import {
   writeBatch,
   updateDoc 
 } from "firebase/firestore";
+import { checkUserAbsence } from './absenceService.js';
 
 /**
  * Nurse Schedule Service
@@ -63,8 +64,9 @@ export class NurseScheduleService {
 
   subscribeToNurseShiftAssignments(callback) {
     const q = query(
-      collection(this.db, "nurse_shift_assign"),
-      where("is_current", "==", true)
+      collection(this.db, "house_shift_assignments"),
+      where("is_current", "==", true),
+      where("user_type", "==", "nurse")
     );
     return onSnapshot(q, (snap) => {
       const assignments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -73,7 +75,7 @@ export class NurseScheduleService {
   }
 
   subscribeToNurseElderlyAssignments(callback) {
-    const q = query(collection(this.db, "nurse_elderly_assign"));
+    const q = query(collection(this.db, "elderly_assignments"));
     return onSnapshot(q, (snap) => {
       const assignments = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       callback(assignments);
@@ -99,7 +101,7 @@ export class NurseScheduleService {
   // Get elderly assigned to nurse for a specific day
   getElderlyForNurseDay(nurseId, day, nurseElderlyAssignments) {
     const assignment = nurseElderlyAssignments.find(
-      (a) => a.nurse_id === nurseId && a.day === day
+      (a) => a.user_id === nurseId && a.day === day
     );
     return assignment?.elderly_ids || [];
   }
@@ -119,7 +121,7 @@ export class NurseScheduleService {
 
   getLastShiftForNurse(nurseId, assignments, lastShiftRotation) {
     // Check current assignments first
-    const currentAssignments = assignments.filter(a => a.nurse_id === nurseId);
+    const currentAssignments = assignments.filter(a => a.user_id === nurseId);
     if (currentAssignments.length > 0) {
       // Return the most recent shift (could be from any of their current assignments)
       return currentAssignments[0].shift;
@@ -420,12 +422,8 @@ export class NurseScheduleService {
     const today = new Date().toISOString().slice(0, 10);
     
     for (const nurseId of nursesOnShift) {
-      // Check if this nurse is absent for today and this specific day
-      const nurseAssignment = currentAssignments.find(a => a.nurse_id === nurseId && a.shift === shift);
-      const isAbsentToday = nurseAssignment && 
-        nurseAssignment.is_absent && 
-        nurseAssignment.absent_for_date === today && 
-        nurseAssignment.absent_for_day === day;
+      // Check if this nurse is absent using centralized nurse_cg_absence collection
+      const isAbsentToday = await checkUserAbsence(this.db, nurseId, today);
       
       if (!isAbsentToday) {
         effectiveNurses.push(nurseId);
@@ -444,8 +442,8 @@ export class NurseScheduleService {
     existingElderlyAssignments
       .filter(ea => ea.day === day && ea.shift === shift)
       .forEach(ea => {
-        if (!elderlyByNurse[ea.nurse_id]) {
-          elderlyByNurse[ea.nurse_id] = new Set();
+        if (!elderlyByNurse[ea.user_id]) {
+          elderlyByNurse[ea.user_id] = new Set();
         }
         if (ea.elderly_ids) {
           // Filter out deceased elderly from existing assignments
@@ -454,7 +452,7 @@ export class NurseScheduleService {
               const elderly = elderlyList.find(e => e.id === elderlyId);
               return elderly && elderly.elderly_status !== "Deceased";
             })
-            .forEach(elderlyId => elderlyByNurse[ea.nurse_id].add(elderlyId));
+            .forEach(elderlyId => elderlyByNurse[ea.user_id].add(elderlyId));
         }
       });
     
@@ -463,15 +461,15 @@ export class NurseScheduleService {
       .filter(tr => tr.date === today && tr.day === day && tr.shift === shift)
       .forEach(tr => {
         // Remove from original nurse
-        if (elderlyByNurse[tr.from_nurse_id]) {
-          tr.elderly_ids.forEach(elderlyId => elderlyByNurse[tr.from_nurse_id].delete(elderlyId));
+        if (elderlyByNurse[tr.from_user_id]) {
+          tr.elderly_ids.forEach(elderlyId => elderlyByNurse[tr.from_user_id].delete(elderlyId));
         }
         
         // Add to receiving nurse  
-        if (!elderlyByNurse[tr.to_nurse_id]) {
-          elderlyByNurse[tr.to_nurse_id] = new Set();
+        if (!elderlyByNurse[tr.to_user_id]) {
+          elderlyByNurse[tr.to_user_id] = new Set();
         }
-        tr.elderly_ids.forEach(elderlyId => elderlyByNurse[tr.to_nurse_id].add(elderlyId));
+        tr.elderly_ids.forEach(elderlyId => elderlyByNurse[tr.to_user_id].add(elderlyId));
       });
     
     // Convert Sets back to arrays
@@ -667,7 +665,7 @@ export class NurseScheduleService {
   initializePendingAssignments(nurses, assignments) {
     const initShifts = {};
     nurses.forEach((n) => {
-      const current = assignments.filter((a) => a.nurse_id === n.id);
+      const current = assignments.filter((a) => a.user_id === n.id);
       const dayToShift = {};
       current.forEach((a) => {
         a.days_assigned.forEach((day) => {
@@ -723,7 +721,7 @@ export class NurseScheduleService {
 
   // Copy schedule from an existing nurse to a new nurse
   copyScheduleFromNurse(fromNurseId, toNurseId, assignments) {
-    const sourceAssignment = assignments.find(a => a.nurse_id === fromNurseId);
+    const sourceAssignment = assignments.find(a => a.user_id === fromNurseId);
     if (!sourceAssignment || !sourceAssignment.days_assigned) {
       return {};
     }
@@ -760,91 +758,91 @@ export class NurseScheduleService {
     return schedule;
   }
 
-  // Clear all nurse schedules from Firestore
+  // Clear all nurse schedules from Firestore (preserves caregiver schedules)
   async clearAllSchedules(assignments, nurseElderlyAssignments, nurses) {
-    console.log("🚀 Starting clearAllSchedules operation...");
+    console.log("🚀 Starting clearAllSchedules operation (NURSE ONLY - caregiver data will be preserved)...");
     
     try {
       const batch = writeBatch(this.db);
       const nurseIds = nurses.map(n => n.id);
       
-      console.log(`📋 Target nurses for clearing: ${nurseIds.length} nurses`, nurseIds);
+      console.log(`📋 Target nurses for clearing: ${nurseIds.length} nurses (caregivers will NOT be affected)`, nurseIds);
       
-      // Query and delete ALL shift assignments from nurse_shift_assign (including duplicates)
-      console.log("🔍 Querying nurse_shift_assign collection...");
-      const shiftQuery = query(collection(this.db, "nurse_shift_assign"));
+      // Query and delete ONLY nurse shift assignments from house_shift_assignments (unified collection)
+      console.log("🔍 Querying house_shift_assignments collection for nurses...");
+      const shiftQuery = query(
+        collection(this.db, "house_shift_assignments"),
+        where("user_type", "==", "nurse")
+      );
       const shiftSnapshot = await getDocs(shiftQuery);
       
-      console.log(`📊 Found ${shiftSnapshot.docs.length} total documents in nurse_shift_assign`);
+      console.log(`📊 Found ${shiftSnapshot.docs.length} nurse documents in house_shift_assignments`);
       
       let shiftDeleteCount = 0;
       shiftSnapshot.docs.forEach(docRef => {
-        const data = docRef.data();
-        if (nurseIds.includes(data.nurse_id)) {
-          batch.delete(docRef.ref);
-          shiftDeleteCount++;
-          console.log(`📝 Marking for deletion: ${docRef.id} (nurse: ${data.nurse_id})`);
-        }
+        batch.delete(docRef.ref);
+        shiftDeleteCount++;
+        console.log(`�️  Deleting nurse shift assignment: ${docRef.id}`);
       });
 
-      // Query and delete ALL elderly assignments from nurse_elderly_assign
-      console.log("🔍 Querying nurse_elderly_assign collection...");
-      const elderlyQuery = query(collection(this.db, "nurse_elderly_assign"));
+      // Query and delete ONLY nurse elderly assignments from elderly_assignments
+      console.log("🔍 Querying elderly_assignments collection for nurses...");
+      const elderlyQuery = query(
+        collection(this.db, "elderly_assignments"),
+        where("user_type", "==", "nurse")
+      );
       const elderlySnapshot = await getDocs(elderlyQuery);
       
-      console.log(`📊 Found ${elderlySnapshot.docs.length} total documents in nurse_elderly_assign`);
+      console.log(`📊 Found ${elderlySnapshot.docs.length} nurse documents in elderly_assignments`);
       
       let elderlyDeleteCount = 0;
       elderlySnapshot.docs.forEach(docRef => {
-        const data = docRef.data();
-        if (nurseIds.includes(data.nurse_id)) {
-          batch.delete(docRef.ref);
-          elderlyDeleteCount++;
-          console.log(`📝 Marking for deletion: ${docRef.id} (nurse: ${data.nurse_id})`);
-        }
+        batch.delete(docRef.ref);
+        elderlyDeleteCount++;
+        console.log(`�️  Deleting nurse elderly assignment: ${docRef.id}`);
       });
 
-      // Query and delete ALL temporary reassignments from nurse_temp_reassignments
-      console.log("🔍 Querying nurse_temp_reassignments collection...");
-      const tempReassignQuery = query(collection(this.db, "nurse_temp_reassignments"));
+      // Query and delete ALL temporary reassignments from temporary_assignments
+      console.log("🔍 Querying temporary_assignments collection...");
+      const tempReassignQuery = query(collection(this.db, "temporary_assignments"));
       const tempReassignSnapshot = await getDocs(tempReassignQuery);
       
-      console.log(`� Found ${tempReassignSnapshot.docs.length} total documents in nurse_temp_reassignments`);
+      console.log(`� Found ${tempReassignSnapshot.docs.length} total documents in temporary_assignments`);
       
       let tempReassignDeleteCount = 0;
+      const nurseIdsSet = new Set(nurses.map(n => n.id));
       tempReassignSnapshot.docs.forEach(docRef => {
         const data = docRef.data();
         // Delete temp reassignments involving any of our nurses (either from or to)
-        if (nurseIds.includes(data.from_nurse_id) || nurseIds.includes(data.to_nurse_id)) {
+        if (nurseIdsSet.has(data.from_user_id) || nurseIdsSet.has(data.to_user_id)) {
           batch.delete(docRef.ref);
           tempReassignDeleteCount++;
-          console.log(`📝 Marking temp reassignment for deletion: ${docRef.id} (from: ${data.from_nurse_id}, to: ${data.to_nurse_id})`);
+          console.log(`�️  Deleting nurse temp reassignment: ${docRef.id} (from: ${data.from_user_id}, to: ${data.to_user_id})`);
         }
       });
 
-      // Query and delete ALL nurse absence records from nurse_cg_absence
-      console.log("🔍 Querying nurse_cg_absence collection...");
-      const absenceQuery = query(collection(this.db, "nurse_cg_absence"));
+      // Query and delete ONLY nurse absence records from nurse_cg_absence
+      console.log("🔍 Querying nurse_cg_absence collection for nurses...");
+      const absenceQuery = query(
+        collection(this.db, "nurse_cg_absence"),
+        where("user_type", "==", "nurse")
+      );
       const absenceSnapshot = await getDocs(absenceQuery);
       
-      console.log(`📊 Found ${absenceSnapshot.docs.length} total documents in nurse_cg_absence`);
+      console.log(`📊 Found ${absenceSnapshot.docs.length} nurse documents in nurse_cg_absence`);
       
       let absenceDeleteCount = 0;
       absenceSnapshot.docs.forEach(docRef => {
-        const data = docRef.data();
-        // Delete absence records for any of our nurses
-        if (nurseIds.includes(data.staff_id)) {
-          batch.delete(docRef.ref);
-          absenceDeleteCount++;
-          console.log(`📝 Marking absence record for deletion: ${docRef.id} (staff_id: ${data.staff_id}, date: ${data.absent_for_date})`);
-        }
+        batch.delete(docRef.ref);
+        absenceDeleteCount++;
+        console.log(`�️  Deleting nurse absence: ${docRef.id}`);
       });
 
-      console.log(`🗑️ About to delete ${shiftDeleteCount} shift assignments, ${elderlyDeleteCount} elderly assignments, ${tempReassignDeleteCount} temporary reassignments, and ${absenceDeleteCount} absence records`);
+      console.log(`🗑️ About to delete ${shiftDeleteCount} NURSE shift assignments, ${elderlyDeleteCount} NURSE elderly assignments, ${tempReassignDeleteCount} NURSE temporary reassignments, and ${absenceDeleteCount} NURSE absence records (caregiver data preserved)`);
       
       await batch.commit();
       
-      console.log(`✅ Successfully cleared ${shiftDeleteCount} shift assignments, ${elderlyDeleteCount} elderly assignments, ${tempReassignDeleteCount} temporary reassignments, and ${absenceDeleteCount} absence records for ${nurseIds.length} nurses`);
+      console.log(`✅ Successfully cleared ${shiftDeleteCount} shift assignments, ${elderlyDeleteCount} elderly assignments, ${tempReassignDeleteCount} temporary reassignments, and ${absenceDeleteCount} absence records for ${nurseIds.length} nurses (CAREGIVER DATA PRESERVED)`);
       
       return {
         success: true,
@@ -886,7 +884,7 @@ export class NurseScheduleService {
     // This prevents old temp assignments from persisting after redistribution
     console.log("🧹 Clearing existing temporary reassignments for redistribution...");
     const tempReassignQuery = query(
-      collection(this.db, "nurse_temp_reassignments"),
+      collection(this.db, "temporary_assignments"),
       where("date", "==", today)
     );
     const tempReassignSnapshot = await getDocs(tempReassignQuery);
@@ -932,25 +930,27 @@ export class NurseScheduleService {
       // Create/update docs
       for (const [shift, days] of Object.entries(byShift)) {
         const docId = `${nurseId}_${shift}`;
-        const ref = doc(this.db, "nurse_shift_assign", docId);
+        const ref = doc(this.db, "house_shift_assignments", docId);
         const shiftDef = NurseScheduleService.SHIFT_DEFS.find((s) => s.key === shift);
         const payload = {
-          nurse_id: nurseId,
+          user_id: nurseId,
+          user_type: "nurse",
+          assignment_type: "manual_schedule",
+          created_at: new Date(),
+          days_assigned: days,
+          schedule_period: {
+            auto_generated: false,
+            duration_days: periodDuration,
+            start_date: new Date(),
+            end_date: new Date(Date.now() + (periodDuration * 24 * 60 * 60 * 1000))
+          },
           shift,
           shift_name: shiftDef?.name || "",
           start_time: shiftDef?.startTime || "",
           end_time: shiftDef?.endTime || "",
-          days_assigned: days,
           is_current: true,
-          created_at: new Date(),
-          // Enhanced fields for mobile app integration
-          assignment_type: "manual_schedule",
           status: "active",
-          source: "web_admin",
-          priority: "normal",
-          last_modified_at: new Date(),
-          last_modified_by: "admin",
-          sync_status: "pending_sync"
+          version: await this.getNextVersion()
         };
         batch.set(ref, payload, { merge: true });
       }
@@ -966,16 +966,26 @@ export class NurseScheduleService {
           const nurseShift = pendingAssignments[nurseId]?.[day];
           if (nurseShift === "1st" || nurseShift === "2nd") {
             const docId = `${nurseId}_${day}`;
-            const ref = doc(this.db, "nurse_elderly_assign", docId);
+            const ref = doc(this.db, "elderly_assignments", docId);
+            
+            // Get nurse details for the new schema
+            const nurse = nurses.find(n => n.id === nurseId);
+            const housesForElderly = [...new Set(elderlyIds.map(elderlyId => this.getHouseForElderly(elderlyId, elderlyList)).filter(Boolean))];
+            
             const payload = {
-              nurse_id: nurseId,
+              assignment_type: "automated_house_based_assignment",
+              user_id: nurseId,
+              user_type: "nurse",
+              user_fname: nurse?.user_fname || "",
+              user_lname: nurse?.user_lname || "", 
+              assign_version: 1,
+              assigned_at: new Date(),
               day,
-              shift: nurseShift,
               elderly_ids: elderlyIds,
-              house_ids: [...new Set(elderlyIds.map(elderlyId => this.getHouseForElderly(elderlyId, elderlyList)).filter(Boolean))],
-              created_at: new Date(),
+              house_id: housesForElderly,
+              shift: nurseShift,
               is_current: true,
-              assignment_type: "automated_house_based_assignment"
+              status: "active"
             };
             batch.set(ref, payload, { merge: true });
           }
@@ -1003,14 +1013,14 @@ export class NurseScheduleService {
     
     // Clear existing assignments first
     assignments.forEach((a) => {
-      if (nurses.some((n) => n.id === a.nurse_id)) {
-        batch.delete(doc(this.db, "nurse_shift_assign", a.id));
+      if (nurses.some((n) => n.id === a.user_id)) {
+        batch.delete(doc(this.db, "house_shift_assignments", a.id));
       }
     });
     
     nurseElderlyAssignments.forEach((a) => {
-      if (nurses.some((n) => n.id === a.nurse_id)) {
-        batch.delete(doc(this.db, "nurse_elderly_assign", a.id));
+      if (nurses.some((n) => n.id === a.user_id)) {
+        batch.delete(doc(this.db, "elderly_assignments", a.id));
       }
     });
     
@@ -1037,31 +1047,27 @@ export class NurseScheduleService {
       // Create shift assignment documents
       for (const [shift, days] of Object.entries(byShift)) {
         const docId = `${nurseId}_${shift}`;
-        const ref = doc(this.db, "nurse_shift_assign", docId);
+        const ref = doc(this.db, "house_shift_assignments", docId);
         const shiftDef = NurseScheduleService.SHIFT_DEFS.find((s) => s.key === shift);
         const payload = {
-          nurse_id: nurseId,
+          user_id: nurseId,
+          user_type: "nurse",
+          assignment_type: "auto_generated_schedule",
+          created_at: new Date(),
+          days_assigned: days,
+          schedule_period: {
+            auto_generated: true,
+            duration_days: periodDuration,
+            start_date: new Date(),
+            end_date: new Date(Date.now() + (periodDuration * 24 * 60 * 60 * 1000))
+          },
           shift,
           shift_name: shiftDef?.name || "",
           start_time: shiftDef?.startTime || "",
           end_time: shiftDef?.endTime || "",
-          days_assigned: days,
           is_current: true,
-          created_at: new Date(),
-          schedule_period: {
-            start_date: new Date(),
-            end_date: new Date(Date.now() + (periodDuration * 24 * 60 * 60 * 1000)),
-            duration_days: periodDuration,
-            auto_generated: true
-          },
-          // Enhanced fields for mobile app integration
-          assignment_type: "auto_generated_schedule",
           status: "active",
-          source: "web_admin_auto",
-          priority: "normal",
-          last_modified_at: new Date(),
-          last_modified_by: "system_auto_generator",
-          sync_status: "pending_sync"
+          version: await this.getNextVersion()
         };
         batch.set(ref, payload, { merge: true });
       }
@@ -1091,21 +1097,26 @@ export class NurseScheduleService {
           const nurseShift = monthlyAssignments[nurseId]?.[day];
           if (nurseShift === "1st" || nurseShift === "2nd") {
             const docId = `${nurseId}_${day}`;
-            const ref = doc(this.db, "nurse_elderly_assign", docId);
+            const ref = doc(this.db, "elderly_assignments", docId);
+            
+            // Get nurse details for the new schema
+            const nurse = nurses.find(n => n.id === nurseId);
+            const housesForElderly = [...new Set(elderlyIds.map(elderlyId => this.getHouseForElderly(elderlyId, elderlyList)).filter(Boolean))];
+            
             const payload = {
-              nurse_id: nurseId,
-              day,
-              shift: nurseShift,
-              elderly_ids: elderlyIds,
-              house_ids: [...new Set(elderlyIds.map(elderlyId => this.getHouseForElderly(elderlyId, elderlyList)).filter(Boolean))],
-              created_at: new Date(),
-              is_current: true,
               assignment_type: "automated_house_based_assignment",
-              schedule_period: {
-                start_date: new Date(),
-                end_date: new Date(Date.now() + (periodDuration * 24 * 60 * 60 * 1000)),
-                auto_generated: true
-              }
+              user_id: nurseId,
+              user_type: "nurse",
+              user_fname: nurse?.user_fname || "",
+              user_lname: nurse?.user_lname || "",
+              assign_version: 1,
+              assigned_at: new Date(),
+              day,
+              elderly_ids: elderlyIds,
+              house_id: housesForElderly,
+              shift: nurseShift,
+              is_current: true,
+              status: "active"
             };
             elderlyBatch.set(ref, payload, { merge: true });
           }
@@ -1197,10 +1208,11 @@ export class NurseScheduleService {
   }
 
   // Get assignments pending sync for mobile app
-  async getAssignmentsPendingSync(collectionName = "nurse_shift_assign") {
+  async getAssignmentsPendingSync(collectionName = "house_shift_assignments") {
     try {
       const q = query(
         collection(this.db, collectionName),
+        where("user_type", "==", "nurse"),
         where("sync_status", "==", "pending_sync")
       );
       const snapshot = await getDocs(q);
@@ -1243,7 +1255,9 @@ export class NurseScheduleService {
   getMobileAppFormat(assignment) {
     return {
       id: assignment.id,
-      nurse_id: assignment.nurse_id,
+      user_id: assignment.user_id,
+      user_type: assignment.user_type,
+      nurse_id: assignment.user_id, // Keep backward compatibility
       shift: assignment.shift,
       shift_name: assignment.shift_name,
       start_time: assignment.start_time,
@@ -1251,19 +1265,39 @@ export class NurseScheduleService {
       days_assigned: assignment.days_assigned,
       assignment_type: assignment.assignment_type || "regular_schedule",
       status: assignment.status || "active",
-      priority: assignment.priority || "normal",
-      source: assignment.source || "web_admin",
       created_at: assignment.created_at,
-      last_modified_at: assignment.last_modified_at,
-      sync_status: assignment.sync_status || "pending_sync"
+      schedule_period: assignment.schedule_period,
+      version: assignment.version,
+      is_current: assignment.is_current
     };
+  }
+
+  // Helper method to get next version number
+  async getNextVersion() {
+    try {
+      const snapshot = await getDocs(query(
+        collection(this.db, "house_shift_assignments"),
+        where("user_type", "==", "nurse")
+      ));
+      
+      if (snapshot.empty) return 1;
+      
+      const versions = snapshot.docs
+        .map(doc => doc.data().version || 0)
+        .filter(version => typeof version === 'number');
+      
+      return Math.max(...versions, 0) + 1;
+    } catch (error) {
+      console.error("Error getting next version:", error);
+      return 1;
+    }
   }
 
   // Helper methods for getting current assignments and temporary reassignments
   async getCurrentTempReassignments(dateStr) {
     try {
       const q = query(
-        collection(this.db, "nurse_temp_reassignments"),
+        collection(this.db, "temporary_assignments"),
         where("date", "==", dateStr)
       );
       const snapshot = await getDocs(q);
@@ -1277,8 +1311,9 @@ export class NurseScheduleService {
   async getCurrentNurseAssignments() {
     try {
       const q = query(
-        collection(this.db, "nurse_shift_assign"),
-        where("is_current", "==", true)
+        collection(this.db, "house_shift_assignments"),
+        where("is_current", "==", true),
+        where("user_type", "==", "nurse")
       );
       const snapshot = await getDocs(q);
       return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -1290,7 +1325,7 @@ export class NurseScheduleService {
 
   async getCurrentElderlyAssignments() {
     try {
-      const snapshot = await getDocs(collection(this.db, "nurse_elderly_assign"));
+      const snapshot = await getDocs(collection(this.db, "elderly_assignments"));
       return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     } catch (error) {
       console.error("Error getting current elderly assignments:", error);

@@ -118,10 +118,18 @@ export const markCaregiverAbsent = async (
     const derivedDayName = daysOfWeek[dayIndexFromDate === 0 ? 6 : dayIndexFromDate - 1];
     const dayName = dayNameParam || derivedDayName;
 
+    // Get the user ID from the assignment (it's stored as user_id, not caregiver_id)
+    const userId = assign.user_id || assign.caregiver_id;
+    if (!userId) {
+      throw new Error("Assignment has no user_id or caregiver_id");
+    }
+
     console.log(`=== ABSENCE DEBUGGING ===`);
-    console.log(`Marking absent for caregiver: ${assign.caregiver_id}`);
+    console.log(`Marking absent for caregiver: ${userId}`);
     console.log(`Assignment details:`, {
       id: assign.id,
+      user_id: assign.user_id,
+      caregiver_id: assign.caregiver_id,
       house_id: assign.house_id,
       shift: assign.shift,
       days_assigned: assign.days_assigned,
@@ -131,7 +139,7 @@ export const markCaregiverAbsent = async (
 
     // 1. Create absence record in centralized collection
     const absenceRecord = {
-      user_id: assign.caregiver_id,
+      user_id: userId,
       user_type: "caregiver",
       absence_date: useDateStr,
       created_at: Timestamp.now(),
@@ -144,16 +152,16 @@ export const markCaregiverAbsent = async (
     };
     
     await addDoc(collection(db, "nurse_cg_absence"), absenceRecord);
-    console.log(`✅ Created absence record for caregiver ${assign.caregiver_id} on ${useDateStr}`);
+    console.log(`✅ Created absence record for caregiver ${userId} on ${useDateStr}`);
 
     // 2. Get the caregiver's assigned elderly for the TARGET DAY only
     console.log(`Total elderly assignments in system: ${elderlyAssigns.length}`);
-    console.log(`Looking for elderly with caregiver_id: ${assign.caregiver_id}, version: ${assign.version}, day: ${dayName}`);
+    console.log(`Looking for elderly with user_id: ${userId}, version: ${assign.version}, day: ${dayName}`);
 
     // First, get the original assignments from the database
     const originalAssignedEAs = elderlyAssigns.filter(
       (ea) =>
-        ea.caregiver_id === assign.caregiver_id &&
+        ea.user_id === userId &&
         ea.assign_version === assign.version &&
         (ea.day || "").toLowerCase() === dayName.toLowerCase()
     );
@@ -162,20 +170,20 @@ export const markCaregiverAbsent = async (
     // (from other absent caregivers) that also need to be reassigned
     const tempAssignmentsToThisCaregiver = tempReassigns.filter(
       (t) =>
-        t.to_caregiver_id === assign.caregiver_id &&
+        t.to_user_id === userId &&
         t.date === useDateStr &&
         t.assign_version === assign.version
     );
 
-    console.log(`Original elderly assignments for ${assign.caregiver_id} on ${dayName}: ${originalAssignedEAs.length}`, originalAssignedEAs.flatMap(ea => ea.elderly_ids || []));
-    console.log(`Temp assignments TO ${assign.caregiver_id} for ${useDateStr}: ${tempAssignmentsToThisCaregiver.length}`, tempAssignmentsToThisCaregiver.flatMap(t => t.elderly_ids || []));
+    console.log(`Original elderly assignments for ${userId} on ${dayName}: ${originalAssignedEAs.length}`, originalAssignedEAs.flatMap(ea => ea.elderly_ids || []));
+    console.log(`Temp assignments TO ${userId} for ${useDateStr}: ${tempAssignmentsToThisCaregiver.length}`, tempAssignmentsToThisCaregiver.flatMap(t => t.elderly_ids || []));
 
     // Combine both original and temporarily assigned elderly that need to be reassigned
     const originalElderIds = originalAssignedEAs.flatMap((ea) => ea.elderly_ids || []); // Handle array structure
     const tempElderIds = tempAssignmentsToThisCaregiver.flatMap((t) => t.elderly_ids || []); // Handle array structure
     
-    console.log(`Original elderly from ${assign.caregiver_id}: ${originalElderIds.length}`, originalElderIds);
-    console.log(`Temp elderly TO ${assign.caregiver_id}: ${tempElderIds.length}`, tempElderIds);
+    console.log(`Original elderly from ${userId}: ${originalElderIds.length}`, originalElderIds);
+    console.log(`Temp elderly TO ${userId}: ${tempElderIds.length}`, tempElderIds);
 
     // 3. COMPREHENSIVE CLEANUP: Remove ALL temporary assignments for this date/shift/house combination
     // This ensures we have a clean slate before redistributing everything
@@ -190,11 +198,11 @@ export const markCaregiverAbsent = async (
         t.date === useDateStr &&
         t.assign_version === assign.version &&
         // Either FROM this caregiver OR TO this caregiver OR involving the same house/shift
-        (t.from_caregiver_id === assign.caregiver_id || 
-         t.to_caregiver_id === assign.caregiver_id ||
+        (t.from_user_id === userId || 
+         t.to_user_id === userId ||
          // Check if the temp assignment involves caregivers in the same house/shift
          assignments.some(a => 
-           (a.caregiver_id === t.from_caregiver_id || a.caregiver_id === t.to_caregiver_id) &&
+           (a.user_id === t.from_user_id || a.user_id === t.to_user_id) &&
            a.house_id === assign.house_id && 
            a.shift === assign.shift
          ))
@@ -202,7 +210,7 @@ export const markCaregiverAbsent = async (
 
     console.log(`Found ${allRelevantTempAssignments.length} temp assignments to clean up for comprehensive redistribution`);
     allRelevantTempAssignments.forEach((t, idx) => {
-      console.log(`  Temp assignment ${idx + 1}: FROM ${t.from_caregiver_id} TO ${t.to_caregiver_id}, elderly: ${t.elderly_ids?.length || 0}`);
+      console.log(`  Temp assignment ${idx + 1}: FROM ${t.from_user_id} TO ${t.to_user_id}, elderly: ${t.elderly_ids?.length || 0}`);
     });
     
     // Collect ALL elderly from the temp assignments that will be removed
@@ -218,7 +226,7 @@ export const markCaregiverAbsent = async (
     if (allRelevantTempAssignments.length > 0) {
       console.log(`Removing ${allRelevantTempAssignments.length} temp assignments for comprehensive cleanup`);
       const removeAllPromises = allRelevantTempAssignments.map(t => 
-        deleteDoc(doc(db, "temp_reassignments", t.id))
+        deleteDoc(doc(db, "temporary_assignments", t.id))
       );
       await Promise.all(removeAllPromises);
       console.log(`✅ Removed all relevant temp assignments for clean redistribution`);
@@ -244,15 +252,15 @@ export const markCaregiverAbsent = async (
     );
 
     // Check absence status for all potential caregivers
-    const caregiverIds = potentialCaregivers.map(a => a.caregiver_id);
+    const caregiverIds = potentialCaregivers.map(a => a.user_id || a.caregiver_id);
     const absenceMap = await checkMultipleUserAbsences(caregiverIds, useDateStr);
     
     // Filter out absent caregivers
-    const otherAssigns = potentialCaregivers.filter(a => !absenceMap[a.caregiver_id]);
+    const otherAssigns = potentialCaregivers.filter(a => !absenceMap[a.user_id || a.caregiver_id]);
 
     console.log(`Found ${otherAssigns.length} other caregivers available to cover (out of ${potentialCaregivers.length} potential):`);
     otherAssigns.forEach(a => {
-      console.log(`- Caregiver: ${a.caregiver_id}, Days: ${a.days_assigned?.join(', ')}, absent: NO`);
+      console.log(`- Caregiver: ${a.user_id || a.caregiver_id}, Days: ${a.days_assigned?.join(', ')}, absent: NO`);
     });
 
     if (otherAssigns.length === 0) {
@@ -277,20 +285,26 @@ export const markCaregiverAbsent = async (
       // Skip if no elderly to assign to this caregiver
       if (chunk.length === 0) continue;
       
-      console.log(`Assigning ${chunk.length} elderly to caregiver ${target.caregiver_id}`);
+      const targetUserId = target.user_id || target.caregiver_id;
+      console.log(`Assigning ${chunk.length} elderly to caregiver ${targetUserId}`);
 
       // Create single document with elderly_ids array instead of individual documents
       const reassignmentData = {
         elderly_ids: chunk, // Array of elderly IDs instead of single elderly_id
-        from_caregiver_id: assign.caregiver_id,
-        to_caregiver_id: target.caregiver_id,
+        from_user_id: userId,
+        to_user_id: targetUserId,
+        assignment_type: "absence_coverage",
+        day: dayName,
+        shift: assign.shift,
+        status: "active",
+        expires_at: null,
         date: useDateStr,           // use the target date
         assign_version: assign.version,
         created_at: Timestamp.now(),
       };
       console.log(`Creating temp reassignment:`, reassignmentData);
 
-      promises.push(addDoc(collection(db, "temp_reassignments"), reassignmentData));
+      promises.push(addDoc(collection(db, "temporary_assignments"), reassignmentData));
     }
 
     await Promise.all(promises);
@@ -305,52 +319,52 @@ export const markCaregiverAbsent = async (
 };
 
 // Reset daily absences (only clears outdated absences from previous days, preserves today's absences)
-export const resetDailyAbsences = async () => {
-  try {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    console.log(`🧹 Resetting outdated absences. Today is: ${todayStr}`);
+// export const resetDailyAbsences = async () => {
+//   try {
+//     const todayStr = new Date().toISOString().slice(0, 10);
+//     console.log(`🧹 Resetting outdated absences. Today is: ${todayStr}`);
 
-    // Get all active absence records
-    const absenceQuery = query(
-      collection(db, "nurse_cg_absence"),
-      where("status", "==", "active")
-    );
+//     // Get all active absence records
+//     const absenceQuery = query(
+//       collection(db, "nurse_cg_absence"),
+//       where("status", "==", "active")
+//     );
     
-    const absenceSnap = await getDocs(absenceQuery);
-    console.log(`Found ${absenceSnap.docs.length} active absence records to check`);
+//     const absenceSnap = await getDocs(absenceQuery);
+//     console.log(`Found ${absenceSnap.docs.length} active absence records to check`);
     
-    // Filter to only outdated records (NOT today's records)
-    const outdatedRecords = absenceSnap.docs.filter(d => {
-      const absenceDate = d.data().absence_date;
-      const isToday = absenceDate === todayStr;
-      console.log(`Absence record: ${d.data().user_id} on ${absenceDate} - isToday: ${isToday}`);
-      return !isToday; // Keep today's records, remove older ones
-    });
+//     // Filter to only outdated records (NOT today's records)
+//     const outdatedRecords = absenceSnap.docs.filter(d => {
+//       const absenceDate = d.data().absence_date;
+//       const isToday = absenceDate === todayStr;
+//       console.log(`Absence record: ${d.data().user_id} on ${absenceDate} - isToday: ${isToday}`);
+//       return !isToday; // Keep today's records, remove older ones
+//     });
     
-    console.log(`Found ${outdatedRecords.length} outdated absence records to clear (preserving ${absenceSnap.docs.length - outdatedRecords.length} today's records)`);
+//     console.log(`Found ${outdatedRecords.length} outdated absence records to clear (preserving ${absenceSnap.docs.length - outdatedRecords.length} today's records)`);
     
-    if (outdatedRecords.length === 0) {
-      console.log(`✅ No outdated absence records to clear`);
-      return { success: true, message: "No outdated absences to reset" };
-    }
+//     if (outdatedRecords.length === 0) {
+//       console.log(`✅ No outdated absence records to clear`);
+//       return { success: true, message: "No outdated absences to reset" };
+//     }
 
-    // Update outdated records to "cleared" status
-    const resetPromises = outdatedRecords.map((d) =>
-      updateDoc(doc(db, "nurse_cg_absence", d.id), {
-        status: "cleared",
-        cleared_at: Timestamp.now()
-      })
-    );
+//     // Update outdated records to "cleared" status
+//     const resetPromises = outdatedRecords.map((d) =>
+//       updateDoc(doc(db, "nurse_cg_absence", d.id), {
+//         status: "cleared",
+//         cleared_at: Timestamp.now()
+//       })
+//     );
 
-    await Promise.all(resetPromises);
-    console.log(`✅ Cleared ${resetPromises.length} outdated absence records (preserved today's absences)`);
-    return { success: true, message: `Cleared ${resetPromises.length} outdated absences` };
+//     await Promise.all(resetPromises);
+//     console.log(`✅ Cleared ${resetPromises.length} outdated absence records (preserved today's absences)`);
+//     return { success: true, message: `Cleared ${resetPromises.length} outdated absences` };
 
-  } catch (error) {
-    console.error("Error resetting daily absences:", error);
-    throw new Error("Failed to reset daily absences");
-  }
-};
+//   } catch (error) {
+//     console.error("Error resetting daily absences:", error);
+//     throw new Error("Failed to reset daily absences");
+//   }
+// };
 
 // Enhanced absence marking with emergency coverage check (returns emergency info, doesn't auto-execute)
 export const markCaregiverAbsentWithEmergencyCheck = async (
@@ -418,10 +432,12 @@ export const processApprovedLeave = async (
     console.log(`✅ Parsed dates - Start: ${startDate.toISOString().slice(0, 10)}, End: ${endDate.toISOString().slice(0, 10)}`);
     console.log(`📊 Available assignments: ${assignments.length}, elderly assignments: ${elderlyAssigns.length}, temp reassignments: ${tempReassigns.length}`);
     
-    // Debug: Show user's current assignments
-    const userAssignments = assignments.filter(a => a.caregiver_id === userId && a.is_current);
-    console.log(`👤 User's current assignments:`, userAssignments.map(a => ({
+    // Debug: Show user's current assignments (check both user_id and caregiver_id for compatibility)
+    const userAssignments = assignments.filter(a => (a.user_id === userId || a.caregiver_id === userId) && a.is_current);
+    console.log(`👤 User's current assignments (${userAssignments.length}):`, userAssignments.map(a => ({
       id: a.id,
+      user_id: a.user_id,
+      caregiver_id: a.caregiver_id,
       house_id: a.house_id,
       shift: a.shift,
       days_assigned: a.days_assigned
@@ -433,23 +449,28 @@ export const processApprovedLeave = async (
     let skippedDays = 0;
     const results = [];
 
+    // Calculate total days in leave period for logging
+    const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    console.log(`📅 Leave period spans ${totalDays} days from ${startDate.toISOString().slice(0, 10)} to ${endDate.toISOString().slice(0, 10)}`);
+
     // Loop through each day in the leave period
     for (let currentDate = new Date(startDate); currentDate <= endDate; currentDate.setDate(currentDate.getDate() + 1)) {
       const dateStr = currentDate.toISOString().slice(0, 10);
       const dayIndex = currentDate.getDay(); // 0=Sunday,1=Monday...
       const dayName = daysOfWeek[dayIndex === 0 ? 6 : dayIndex - 1]; // Convert to our format
 
-      console.log(`📅 Processing leave for date: ${dateStr} (${dayName}), dayIndex: ${dayIndex}`);
+      console.log(`\n📅 ========== Processing Day ${processedDays + skippedDays + 1}/${totalDays} ==========`);
+      console.log(`Date: ${dateStr} (${dayName}), Day index: ${dayIndex}`);
 
       // Find the user's assignment for this day
       const userAssignment = assignments.find((a) =>
-        a.caregiver_id === userId &&
+        (a.user_id === userId || a.caregiver_id === userId) &&
         a.is_current &&
         Array.isArray(a.days_assigned) &&
         a.days_assigned.map(d => d.toLowerCase()).includes(dayName.toLowerCase())
       );
 
-      console.log(`🔍 Looking for assignment: caregiver_id=${userId}, is_current=true, days_assigned includes "${dayName}"`);
+      console.log(`🔍 Looking for assignment: user_id/caregiver_id=${userId}, is_current=true, days_assigned includes "${dayName}"`);
       if (userAssignment) {
         console.log(`✅ Found assignment:`, {
           id: userAssignment.id,
@@ -459,7 +480,7 @@ export const processApprovedLeave = async (
         });
       } else {
         console.log(`❌ No assignment found. Available assignments for user:`, 
-          assignments.filter(a => a.caregiver_id === userId).map(a => ({
+          assignments.filter(a => a.user_id === userId || a.caregiver_id === userId).map(a => ({
             id: a.id,
             is_current: a.is_current,
             days_assigned: a.days_assigned,
@@ -497,43 +518,57 @@ export const processApprovedLeave = async (
           leave_reason: leaveRequestData.reason,
           house_id: userAssignment.house_id,
           shift: userAssignment.shift,
-          assignment_version: userAssignment.version
+          assignment_version: userAssignment.version,
+          is_leave: true, // Flag to prevent auto-clearing
+          do_not_clear: true // Extra protection flag
         };
         
-        await addDoc(collection(db, "nurse_cg_absence"), absenceRecord);
-        console.log(`✅ Created leave record for ${userId} on ${dateStr}`);
+        const absenceDocRef = await addDoc(collection(db, "nurse_cg_absence"), absenceRecord);
+        console.log(`✅ Created leave record for ${userId} on ${dateStr} (ID: ${absenceDocRef.id})`);
 
         // If this is a caregiver, handle elderly redistribution
         if (leaveRequestData.user_type === "caregiver" || !leaveRequestData.user_type) {
+          console.log(`👴 Checking elderly assignments for redistribution...`);
+          console.log(`Looking for elderly_assignments with: user_id=${userId}, version=${userAssignment.version}, day=${dayName}`);
+          
           // Get the caregiver's assigned elderly for this day
           const originalAssignedEAs = elderlyAssigns.filter(
             (ea) =>
-              ea.caregiver_id === userId &&
+              ea.user_id === userId &&
               ea.assign_version === userAssignment.version &&
               (ea.day || "").toLowerCase() === dayName.toLowerCase()
           );
 
+          console.log(`📋 Found ${originalAssignedEAs.length} original elderly assignments for ${dayName}`);
+
           // Get temp assignments TO this caregiver for this date
           const tempAssignmentsToThisCaregiver = tempReassigns.filter(
             (t) =>
-              t.to_caregiver_id === userId &&
+              t.to_user_id === userId &&
               t.date === dateStr &&
               t.assign_version === userAssignment.version
           );
+
+          console.log(`📋 Found ${tempAssignmentsToThisCaregiver.length} temp assignments TO this caregiver for ${dateStr}`);
 
           // Combine all elderly that need redistribution
           const originalElderIds = originalAssignedEAs.flatMap((ea) => ea.elderly_ids || []);
           const tempElderIds = tempAssignmentsToThisCaregiver.flatMap((t) => t.elderly_ids || []);
           
+          console.log(`👴 Original elderly IDs (${originalElderIds.length}):`, originalElderIds);
+          console.log(`👴 Temp elderly IDs (${tempElderIds.length}):`, tempElderIds);
+          
           // Remove temp assignments TO this caregiver for this date
           if (tempAssignmentsToThisCaregiver.length > 0) {
             const removePromises = tempAssignmentsToThisCaregiver.map(t => 
-              deleteDoc(doc(db, "temp_reassignments", t.id))
+              deleteDoc(doc(db, "temporary_assignments", t.id))
             );
             await Promise.all(removePromises);
           }
 
           // Find available caregivers for coverage
+          console.log(`🔍 Looking for coverage caregivers in house ${userAssignment.house_id}, shift ${userAssignment.shift}, day ${dayName}`);
+          
           const availableCaregivers = assignments.filter((a) =>
             a.house_id === userAssignment.house_id &&
             a.shift === userAssignment.shift &&
@@ -543,35 +578,63 @@ export const processApprovedLeave = async (
             a.days_assigned.map(d => d.toLowerCase()).includes(dayName.toLowerCase())
           );
 
+          console.log(`📊 Found ${availableCaregivers.length} potential coverage caregivers`);
+
           // Check which caregivers are not absent
-          const caregiverIds = availableCaregivers.map(a => a.caregiver_id);
+          const caregiverIds = availableCaregivers.map(a => a.user_id || a.caregiver_id);
           const absenceMap = await checkMultipleUserAbsences(caregiverIds, dateStr);
-          const coverageCaregivers = availableCaregivers.filter(a => !absenceMap[a.caregiver_id]);
+          const coverageCaregivers = availableCaregivers.filter(a => !absenceMap[a.user_id || a.caregiver_id]);
+
+          console.log(`✅ ${coverageCaregivers.length} caregivers available (not absent) for coverage`);
+          coverageCaregivers.forEach((cg, idx) => {
+            console.log(`  ${idx + 1}. ${cg.user_id || cg.caregiver_id} in ${cg.house_id} ${cg.shift}`);
+          });
 
           if (coverageCaregivers.length > 0 && (originalElderIds.length > 0 || tempElderIds.length > 0)) {
             // Redistribute elderly to available caregivers
             const allElderIds = [...new Set([...originalElderIds, ...tempElderIds])];
+            console.log(`🔄 Redistributing ${allElderIds.length} unique elderly among ${coverageCaregivers.length} caregivers`);
+            
             const chunks = splitIntoChunks(allElderIds, coverageCaregivers.length);
+            
+            console.log(`📦 Distribution chunks:`);
+            chunks.forEach((chunk, idx) => {
+              console.log(`  Caregiver ${idx + 1} (${coverageCaregivers[idx]?.user_id || coverageCaregivers[idx]?.caregiver_id}): ${chunk.length} elderly`);
+            });
             
             const redistributionPromises = [];
             for (let i = 0; i < coverageCaregivers.length; i++) {
               if (chunks[i] && chunks[i].length > 0) {
+                const tempAssignment = {
+                  from_user_id: userId,
+                  to_user_id: coverageCaregivers[i].user_id || coverageCaregivers[i].caregiver_id,
+                  elderly_ids: chunks[i],
+                  assignment_type: "absence_coverage",
+                  day: dayName,
+                  shift: userAssignment.shift,
+                  status: "active",
+                  expires_at: null,
+                  date: dateStr,
+                  assign_version: userAssignment.version,
+                  reason: `Leave coverage - ${leaveRequestData.leave_type}`,
+                  created_at: Timestamp.now()
+                };
+                
+                console.log(`📝 Creating temp assignment: ${chunks[i].length} elderly from ${userId} to ${tempAssignment.to_user_id} for ${dateStr}`);
+                
                 redistributionPromises.push(
-                  addDoc(collection(db, "temp_reassignments"), {
-                    from_caregiver_id: userId,
-                    to_caregiver_id: coverageCaregivers[i].caregiver_id,
-                    elderly_ids: chunks[i],
-                    date: dateStr,
-                    assign_version: userAssignment.version,
-                    reason: `Leave coverage - ${leaveRequestData.leave_type}`,
-                    created_at: Timestamp.now()
-                  })
+                  addDoc(collection(db, "temporary_assignments"), tempAssignment)
                 );
               }
             }
 
             await Promise.all(redistributionPromises);
+            console.log(`✅ Successfully created ${redistributionPromises.length} temporary assignments for ${dateStr}`);
             console.log(`✅ Redistributed ${allElderIds.length} elderly to ${coverageCaregivers.length} caregivers for ${dateStr}`);
+          } else if (originalElderIds.length > 0 || tempElderIds.length > 0) {
+            console.warn(`⚠️ No coverage caregivers available! ${originalElderIds.length + tempElderIds.length} elderly cannot be redistributed for ${dateStr}`);
+          } else {
+            console.log(`ℹ️ No elderly to redistribute for ${dateStr}`);
           }
         }
 
@@ -595,9 +658,15 @@ export const processApprovedLeave = async (
       }
     }
 
-    console.log(`🏖️ Leave processing completed:`);
+    console.log(`\n🏖️ ========== LEAVE PROCESSING SUMMARY ==========`);
+    console.log(`User: ${userId}`);
+    console.log(`Leave Type: ${leaveRequestData.leave_type}`);
+    console.log(`Period: ${startDate.toISOString().slice(0, 10)} to ${endDate.toISOString().slice(0, 10)}`);
+    console.log(`Total Days: ${totalDays}`);
     console.log(`✅ Successfully processed: ${processedDays} days`);
-    console.log(`⏭️ Skipped: ${skippedDays} days`);
+    console.log(`⏭️ Skipped: ${skippedDays} days (not scheduled to work)`);
+    console.log(`❌ Errors: ${results.filter(r => r.status === 'error').length} days`);
+    console.log(`===============================================\n`);
 
     return {
       success: true,
