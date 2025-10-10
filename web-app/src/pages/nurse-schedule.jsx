@@ -170,8 +170,8 @@ export default function NurseSchedule() {
     const currentAssign = assignments.find(a => a.is_current);
     if (!currentAssign) return;
 
-    const start = currentAssign.start_date?.toDate();
-    const end = currentAssign.end_date?.toDate();
+    const start = currentAssign.schedule_period?.start_date?.toDate();
+    const end = currentAssign.schedule_period?.end_date?.toDate();
 
     // Only set schedule info if both dates exist
     if (start && end) {
@@ -259,9 +259,9 @@ export default function NurseSchedule() {
   // Get house assignments for display purposes
   const getNurseHouseAssignments = (nurseId, day, shift) => {
     const assignment = nurseElderlyAssignments.find(
-      (a) => a.nurse_id === nurseId && a.day === day && a.shift === shift
+      (a) => a.user_id === nurseId && a.day === day && a.shift === shift
     );
-    return assignment?.house_ids || [];
+    return assignment?.house_id || [];
   };
 
   // Group elderly by house for better display
@@ -303,7 +303,7 @@ export default function NurseSchedule() {
     
     // Don't show temp assignments if the nurse is absent
     const tempAssignmentsToNurse = !isThisNurseAbsent ? tempReassignments.filter(t => 
-      t.to_nurse_id === nurseId && 
+      t.to_user_id === nurseId && 
       t.date === dateStr && 
       t.shift === activeShift &&
       (activeDay === SHOW_ALL_DAYS || t.day.toLowerCase() === activeDay.toLowerCase())
@@ -432,8 +432,8 @@ export default function NurseSchedule() {
         const matchesDay = a.days_assigned.includes(activeDay);
         
         // Check if selected date falls within assignment date range (if date fields exist)
-        const startDate = a.start_date?.toDate();
-        const endDate = a.end_date?.toDate();
+        const startDate = a.schedule_period?.start_date?.toDate();
+        const endDate = a.schedule_period?.end_date?.toDate();
         
         // If no date range is specified, just match shift and day
         if (!startDate || !endDate) {
@@ -840,7 +840,7 @@ export default function NurseSchedule() {
                                 >
                                   <option value="">Quick Assign...</option>
                                   <optgroup label="Copy Schedule">
-                                    {nurses.filter(n => !newNurses.some(nn => nn.id === n.id) && assignments.some(a => a.nurse_id === n.id)).map(existingNurse => (
+                                    {nurses.filter(n => !newNurses.some(nn => nn.id === n.id) && assignments.some(a => a.user_id === n.id)).map(existingNurse => (
                                       <option key={`copy-${existingNurse.id}`} value={`copy-${existingNurse.id}`}>
                                         Copy from {nurseName(existingNurse.id)}
                                       </option>
@@ -1112,13 +1112,13 @@ export default function NurseSchedule() {
                       indexToDayName[selectedDate.getDay()] : 
                       activeDay;
                     
-                    const isNurseAbsentToday = isNurseAbsentForDay(a.nurse_id, selectedDate, activeShift);
+                    const isNurseAbsentToday = isNurseAbsentForDay(a.user_id, selectedDate, activeShift);
 
                     if (activeDay === SHOW_ALL_DAYS) {
                       // Show all days' assignments, but filter out days when nurse is absent
                       const allDaysAssignments = nurseElderlyAssignments
                         .filter(ea => {
-                          const assignmentMatches = ea.nurse_id === a.nurse_id && ea.shift === activeShift;
+                          const assignmentMatches = ea.user_id === a.user_id && ea.shift === activeShift;
                           // Check if nurse is absent for this specific day
                           const isAbsentForThisDay = a.is_absent && 
                             a.absent_for_date === currentDateStr && 
@@ -1130,7 +1130,7 @@ export default function NurseSchedule() {
                       // Show specific day assignments only if nurse is not absent for that day
                       if (!isNurseAbsentToday) {
                         const dayAssignment = nurseElderlyAssignments
-                          .find(ea => ea.nurse_id === a.nurse_id && ea.day === activeDay && ea.shift === activeShift);
+                          .find(ea => ea.user_id === a.user_id && ea.day === activeDay && ea.shift === activeShift);
                         if (dayAssignment) {
                           elderlyAssignments = [dayAssignment];
                         }
@@ -1144,13 +1144,13 @@ export default function NurseSchedule() {
                           color: isNurseAbsentToday ? '#999' : 'inherit',
                           textDecoration: isNurseAbsentToday ? 'line-through' : 'none'
                         }}>
-                          {nurseName(a.nurse_id)}
+                          {nurseName(a.user_id)}
                           {isNurseAbsentToday && <span style={{ color: '#dc3545', fontSize: '0.8em', marginLeft: '8px' }}>(ABSENT)</span>}
                         </td>
                         <td>
                           {isNurseAbsentToday ? 
                             <em style={{ color: "#888" }}>Nurse is absent - assignments redistributed</em> :
-                            createAccordionContent(elderlyAssignments, activeShift, activeDay, a.nurse_id)
+                            createAccordionContent(elderlyAssignments, activeShift, activeDay, a.user_id)
                           }
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -1162,7 +1162,7 @@ export default function NurseSchedule() {
                             const contextDay = activeDay === SHOW_ALL_DAYS ? 
                               indexToDayName[selectedDate.getDay()] : activeDay;
                             
-                            const isAbsentForContext = isNurseAbsentForDay(a.nurse_id, selectedDate, activeShift);
+                            const isAbsentForContext = isNurseAbsentForDay(a.user_id, selectedDate, activeShift);
 
                             if (isAbsentForContext) {
                               return (
@@ -1186,7 +1186,7 @@ export default function NurseSchedule() {
                               return (
                                 <button
                                   className="absent-btn"
-                                  onClick={() => handleMarkAbsent(a.id, a.nurse_id)}
+                                  onClick={() => handleMarkAbsent(a.id, a.user_id)}
                                   disabled={saving}
                                   style={{
                                     backgroundColor: '#dc3545',

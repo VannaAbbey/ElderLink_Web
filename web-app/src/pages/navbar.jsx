@@ -213,9 +213,9 @@ export default function Navbar() {
       // Load current assignments, elderly assignments, and temp reassignments for processing
       // We'll need to fetch these from the database for the absence service
       const [assignmentsSnap, elderlyAssignmentsSnap, tempReassignmentsSnap] = await Promise.all([
-        getDocs(collection(db, "cg_house_assign")),
-        getDocs(collection(db, "elderly_caregiver_assign")),
-        getDocs(collection(db, "temp_reassignments"))
+        getDocs(collection(db, "house_shift_assignments")),
+        getDocs(collection(db, "elderly_assignments")),
+        getDocs(collection(db, "temporary_assignments"))
       ]);
 
       const assignments = assignmentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));

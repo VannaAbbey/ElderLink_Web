@@ -99,11 +99,42 @@ export default function Schedule() {
 
   // Helper function to get caregiver absence details (type and status)
   const getCaregiverAbsenceDetails = (caregiverId, dateStr) => {
+    // Debug: Log what we're searching for
+    console.log(`🔍 Checking absence for caregiver ${caregiverId} on ${dateStr}`);
+    console.log(`📊 Total absences loaded: ${absences.length}`);
+    
+    // Show all absences for debugging (limit to first 5)
+    if (absences.length > 0) {
+      console.log(`Sample absences (first 5):`, absences.slice(0, 5).map(a => ({
+        user_id: a.user_id,
+        absence_date: a.absence_date,
+        status: a.status,
+        absence_type: a.absence_type
+      })));
+    }
+    
     const absence = absences.find(absence => 
       absence.user_id === caregiverId && 
       absence.absence_date === dateStr && 
       absence.status === "active"
     );
+    
+    if (absence) {
+      console.log(`✅ Found absence for ${caregiverId}:`, {
+        type: absence.absence_type,
+        date: absence.absence_date,
+        reason: absence.leave_reason
+      });
+    } else {
+      console.log(`❌ No absence found for ${caregiverId} on ${dateStr}`);
+      // Check if there are any absences for this caregiver on other dates
+      const caregiverAbsences = absences.filter(a => a.user_id === caregiverId);
+      if (caregiverAbsences.length > 0) {
+        console.log(`ℹ️ Caregiver ${caregiverId} has ${caregiverAbsences.length} absence(s) on other dates:`, 
+          caregiverAbsences.map(a => a.absence_date));
+      }
+    }
+    
     return absence ? {
       type: absence.absence_type || "absent",
       reason: absence.leave_reason || null,
@@ -178,7 +209,7 @@ export default function Schedule() {
     assignments.forEach(assignment => {
       if (!assignment.is_current) return;
 
-      const caregiver = caregivers.find(cg => cg.id === assignment.caregiver_id);
+      const caregiver = caregivers.find(cg => cg.id === assignment.user_id);
       if (!caregiver) return;
 
       const caregiverName = `${caregiver.user_fname} ${caregiver.user_lname}`.toLowerCase();
@@ -189,13 +220,13 @@ export default function Schedule() {
         const houseName = house?.house_name || assignment.house_id;
         
         // Get absence status
-        const absenceDetails = getCaregiverAbsenceDetails(assignment.caregiver_id, selectedDateStr);
+        const absenceDetails = getCaregiverAbsenceDetails(assignment.user_id, selectedDateStr);
         
         // Get assigned elderly for this caregiver
-        const assignedElderly = getDisplayedEldersFor(assignment.caregiver_id);
+        const assignedElderly = getDisplayedEldersFor(assignment.user_id);
         
         // Check if providing emergency coverage
-        const isEmergency = isProvidingEmergencyCoverage(assignment.caregiver_id, selectedDateStr);
+        const isEmergency = isProvidingEmergencyCoverage(assignment.user_id, selectedDateStr);
         
         results.push({
           caregiver: caregiver,
@@ -275,8 +306,9 @@ export default function Schedule() {
   useEffect(() => {
     // build the query to only get current schedules
     const q = query(
-      collection(db, "cg_house_assign"),
-      where("is_current", "==", true)
+      collection(db, "house_shift_assignments"),
+      where("is_current", "==", true),
+      where("user_type", "==", "caregiver")
     );
 
     // attach real-time listener
@@ -296,8 +328,9 @@ export default function Schedule() {
   useEffect(() => {
   if (viewMode === "history") {
     const q = query(
-      collection(db, "cg_house_assign"),
-      where("is_current", "==", false)
+      collection(db, "house_shift_assignments"),
+      where("is_current", "==", false),
+      where("user_type", "==", "caregiver")
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -314,18 +347,19 @@ export default function Schedule() {
 }, [viewMode]);
 
   useEffect(() => {
-    const unsubscribe = onSnapshot(
-      collection(db, "elderly_caregiver_assign"),
-      (snapshot) => {
-        setElderlyAssigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-      }
+    const q = query(
+      collection(db, "elderly_assignments"),
+      where("user_type", "==", "caregiver")
     );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setElderlyAssigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
-      collection(db, "temp_reassignments"),
+      collection(db, "temporary_assignments"),
       (snapshot) => {
         setTempReassigns(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
       }
@@ -334,42 +368,162 @@ export default function Schedule() {
   }, []);
 
   useEffect(() => {
+    console.log(`🔄 Setting up real-time listener for nurse_cg_absence collection...`);
+    
+    // Debug: Query ALL absences to see what's in the database
+    const debugQuery = async () => {
+      const allAbsencesSnapshot = await getDocs(collection(db, "nurse_cg_absence"));
+      console.log(`🔍 DEBUG: Total records in nurse_cg_absence collection: ${allAbsencesSnapshot.docs.length}`);
+      if (allAbsencesSnapshot.docs.length > 0) {
+        console.log(`🔍 DEBUG: All absence records:`, allAbsencesSnapshot.docs.map(d => ({
+          id: d.id,
+          user_id: d.data().user_id,
+          absence_date: d.data().absence_date,
+          absence_type: d.data().absence_type,
+          status: d.data().status,
+          is_leave: d.data().is_leave,
+          do_not_clear: d.data().do_not_clear,
+          created_at: d.data().created_at?.toDate?.()
+        })));
+      }
+    };
+    debugQuery();
+    
+    // SUPER DEBUG: Listen to ALL documents in the collection to catch status changes
+    const debugUnsubscribe = onSnapshot(
+      collection(db, "nurse_cg_absence"),
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          const data = change.doc.data();
+          if (change.type === "added") {
+            console.log(`🆕 NEW absence record created:`, {
+              id: change.doc.id,
+              user_id: data.user_id,
+              absence_date: data.absence_date,
+              status: data.status,
+              absence_type: data.absence_type
+            });
+          }
+          if (change.type === "modified") {
+            console.log(`✏️ MODIFIED absence record:`, {
+              id: change.doc.id,
+              user_id: data.user_id,
+              absence_date: data.absence_date,
+              OLD_status: '???', // We can't see old value, but if you see this log, something is modifying records
+              NEW_status: data.status,
+              absence_type: data.absence_type
+            });
+            console.warn(`🚨 ALERT: Something just modified an absence record! Check what triggered this.`);
+          }
+          if (change.type === "removed") {
+            console.log(`🗑️ DELETED absence record:`, {
+              id: change.doc.id,
+              user_id: data.user_id,
+              absence_date: data.absence_date
+            });
+          }
+        });
+      }
+    );
+    
     const unsubscribe = onSnapshot(
       query(
         collection(db, "nurse_cg_absence"),
         where("status", "==", "active")
       ),
       (snapshot) => {
-        setAbsences(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const absencesData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        console.log(`✅ Loaded ${absencesData.length} active absences from database`);
+        if (absencesData.length > 0) {
+          console.log(`Sample absences:`, absencesData.slice(0, 3).map(a => ({
+            user_id: a.user_id,
+            absence_date: a.absence_date,
+            absence_type: a.absence_type,
+            status: a.status
+          })));
+        } else {
+          console.warn(`⚠️ No active absences found. This might mean:`);
+          console.warn(`  1. No absence records exist at all`);
+          console.warn(`  2. All records have status != "active"`);
+          console.warn(`  3. There's a database query issue`);
+        }
+        setAbsences(absencesData);
+      },
+      (error) => {
+        console.error(`❌ Error loading absences:`, error);
       }
     );
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      debugUnsubscribe();
+    };
   }, []);
 
+  // Fetch and display schedule info from current assignments (regardless of view mode)
   useEffect(() => {
-  if (!assignments || assignments.length === 0) {
-    setScheduleInfo(null);
-    setDaysLeft(null);
-    return;
-  }
+    const fetchScheduleInfo = async () => {
+      try {
+        // Always fetch current assignments to show schedule info
+        const currentAssignments = await ScheduleService.fetchAssignments(true);
+        
+        if (!currentAssignments || currentAssignments.length === 0) {
+          console.log("📅 No current assignments found - schedule info will be blank");
+          setScheduleInfo(null);
+          setDaysLeft(null);
+          return;
+        }
 
-  // Get the first current assignment (they share same start/end dates)
-  const currentAssign = assignments.find(a => a.is_current);
-  if (!currentAssign) return;
+        // Get the first current assignment (they all share same start/end dates)
+        const firstAssignment = currentAssignments[0];
+        
+        // Handle both old format (start_date/end_date at root) and new format (inside schedule_period)
+        let start, end;
+        
+        if (firstAssignment.schedule_period) {
+          // New format - dates are inside schedule_period object
+          console.log("📅 Reading schedule info from schedule_period:", firstAssignment.schedule_period);
+          start = firstAssignment.schedule_period.start_date?.toDate ? 
+                  firstAssignment.schedule_period.start_date.toDate() : 
+                  new Date(firstAssignment.schedule_period.start_date);
+          end = firstAssignment.schedule_period.end_date?.toDate ? 
+                firstAssignment.schedule_period.end_date.toDate() : 
+                new Date(firstAssignment.schedule_period.end_date);
+        } else {
+          // Old format - dates at root level (fallback for older schedules)
+          console.log("📅 Reading schedule info from root level (old format)");
+          start = firstAssignment.start_date?.toDate ? 
+                  firstAssignment.start_date.toDate() : 
+                  (firstAssignment.start_date ? new Date(firstAssignment.start_date) : null);
+          end = firstAssignment.end_date?.toDate ? 
+                firstAssignment.end_date.toDate() : 
+                (firstAssignment.end_date ? new Date(firstAssignment.end_date) : null);
+        }
 
-  const start = currentAssign.start_date?.toDate();
-  const end = currentAssign.end_date?.toDate();
+        if (start && end) {
+          console.log(`📅 Schedule info loaded: ${start.toLocaleDateString()} → ${end.toLocaleDateString()}`);
+          setScheduleInfo({ start, end });
 
-  setScheduleInfo({ start, end });
+          // Compute countdown days
+          const today = new Date();
+          const diffMs = end.getTime() - today.getTime();
+          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+          const daysLeftCount = diffDays > 0 ? diffDays : 0;
+          console.log(`📅 Days left: ${daysLeftCount}`);
+          setDaysLeft(daysLeftCount);
+        } else {
+          console.warn("⚠️ Schedule dates are missing or invalid");
+          setScheduleInfo(null);
+          setDaysLeft(null);
+        }
+      } catch (error) {
+        console.error("❌ Error fetching schedule info:", error);
+        setScheduleInfo(null);
+        setDaysLeft(null);
+      }
+    };
 
-  // Compute countdown days
-  if (end) {
-    const today = new Date();
-    const diffMs = end.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    setDaysLeft(diffDays > 0 ? diffDays : 0);
-  }
-}, [assignments]);
+    fetchScheduleInfo();
+  }, [viewMode]); // Re-fetch when view mode changes to ensure info is always up to date
 
   // Separate effect to handle date validation when schedule info changes
   useEffect(() => {
@@ -797,18 +951,18 @@ export default function Schedule() {
   // Check if caregiver is providing emergency coverage
   const isProvidingEmergencyCoverage = (caregiverId, selectedDateStr) => {
     return tempReassigns.some(tr => 
-      tr.to_caregiver_id === caregiverId && 
+      tr.to_user_id === caregiverId && 
       tr.date === selectedDateStr && 
-      tr.from_caregiver_id === "EMERGENCY_ABSENT"
+      tr.from_user_id === "EMERGENCY_ABSENT"
     );
   };
 
   // Get emergency coverage details for a caregiver
   const getEmergencyCoverageDetails = (caregiverId, selectedDateStr) => {
     const emergencyAssignments = tempReassigns.filter(tr => 
-      tr.to_caregiver_id === caregiverId && 
+      tr.to_user_id === caregiverId && 
       tr.date === selectedDateStr && 
-      tr.from_caregiver_id === "EMERGENCY_ABSENT"
+      tr.from_user_id === "EMERGENCY_ABSENT"
     );
     
     if (emergencyAssignments.length > 0) {
@@ -845,7 +999,7 @@ export default function Schedule() {
   const base = elderlyAssigns
     .filter(
       (ea) =>
-        ea.caregiver_id === caregiverId &&
+        ea.user_id === caregiverId &&
         ea.assign_version === currentVersion &&
         ea.day?.toLowerCase() === dayName.toLowerCase()
     )
@@ -856,7 +1010,7 @@ export default function Schedule() {
   const toTemp = tempReassigns
     .filter(
       (t) =>
-        t.to_caregiver_id === caregiverId &&
+        t.to_user_id === caregiverId &&
         t.date === selectedDateStr &&
         t.assign_version === currentVersion
     )
@@ -867,7 +1021,7 @@ export default function Schedule() {
   const fromTemp = tempReassigns
     .filter(
       (t) =>
-        t.from_caregiver_id === caregiverId &&
+        t.from_user_id === caregiverId &&
         t.date === selectedDateStr &&
         t.assign_version === currentVersion
     )
@@ -920,7 +1074,7 @@ export default function Schedule() {
     // Find emergency coverage temp assignments
     const emergencyTempAssigns = tempReassigns.filter(tr => 
       tr.date === selectedDateStr && 
-      tr.from_caregiver_id === "EMERGENCY_ABSENT"
+      tr.from_user_id === "EMERGENCY_ABSENT"
     );
     
     // Group by caregiver to create virtual assignments
@@ -928,13 +1082,13 @@ export default function Schedule() {
     const emergencyCaregivers = new Set();
     
     emergencyTempAssigns.forEach(ta => {
-      emergencyCaregivers.add(ta.to_caregiver_id);
+      emergencyCaregivers.add(ta.to_user_id);
     });
     
     // For each emergency caregiver, find which house/shift they're covering
     emergencyCaregivers.forEach(caregiverId => {
       // Get the first emergency temp assignment to parse the reason
-      const firstEmergencyAssign = emergencyTempAssigns.find(ta => ta.to_caregiver_id === caregiverId);
+      const firstEmergencyAssign = emergencyTempAssigns.find(ta => ta.to_user_id === caregiverId);
       
       if (firstEmergencyAssign) {
         let emergencyHouseId, emergencyShift;
@@ -974,19 +1128,22 @@ export default function Schedule() {
           
           console.log(`🚨 Emergency caregiver ${caregiverId} should appear in ${emergencyHouseId} ${emergencyShift} shift`);
           
-          // Find the time range for this shift by looking at any assignment with this shift
-          const shiftTimeRange = assignments.find(a => a.shift === emergencyShift && a.is_current)?.time_range;
+          // Find the shift times by looking at any assignment with this shift
+          const referenceAssignment = assignments.find(a => a.shift === emergencyShift && a.is_current);
+          const startTime = referenceAssignment?.start_time || "06:00";
+          const endTime = referenceAssignment?.end_time || "14:00";
           
           // Create a virtual assignment for the emergency caregiver in the emergency house/shift
           emergencyAssignments.push({
             id: `emergency_${caregiverId}_${emergencyHouseId}_${emergencyShift}`,
-            caregiver_id: caregiverId,
+            user_id: caregiverId,
             house_id: emergencyHouseId,
             shift: emergencyShift,
             days_assigned: [dayName],
             is_current: true,
             is_emergency_coverage: true,
-            time_range: shiftTimeRange || { start: "06:00", end: "14:00" },
+            start_time: startTime,
+            end_time: endTime,
             version: currentVersion
           });
         } else {
@@ -1005,8 +1162,8 @@ export default function Schedule() {
     
     // Get emergency coverage caregivers for this date
     const emergencyCaregivers = tempReassigns
-      .filter(tr => tr.date === selectedDateStr && tr.from_caregiver_id === "EMERGENCY_ABSENT")
-      .map(tr => tr.to_caregiver_id);
+      .filter(tr => tr.date === selectedDateStr && tr.from_user_id === "EMERGENCY_ABSENT")
+      .map(tr => tr.to_user_id);
     
     console.log(`🚨 Emergency caregivers for ${selectedDateStr}:`, emergencyCaregivers);
     
@@ -1020,8 +1177,8 @@ export default function Schedule() {
       if (!(a.days_assigned || []).map(d => d.toLowerCase()).includes(dayName.toLowerCase())) return false;
       
       // EXCLUDE caregivers who are providing emergency coverage (they'll appear in the emergency house)
-      if (emergencyCaregivers.includes(a.caregiver_id)) {
-        console.log(`❌ EXCLUDING emergency caregiver ${a.caregiver_id} from their original house ${a.house_id} ${a.shift}`);
+      if (emergencyCaregivers.includes(a.user_id)) {
+        console.log(`❌ EXCLUDING emergency caregiver ${a.user_id} from their original house ${a.house_id} ${a.shift}`);
         return false;
       }
       
@@ -1379,18 +1536,18 @@ export default function Schedule() {
               const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
               
               // Check absence status using centralized collection with detailed info
-              const absenceDetails = getCaregiverAbsenceDetails(a.caregiver_id, selectedDateStr);
+              const absenceDetails = getCaregiverAbsenceDetails(a.user_id, selectedDateStr);
               const isAbsent = absenceDetails.isAbsent;
               const isOnLeave = absenceDetails.type === "on_leave";
               
               // Check if providing emergency coverage
-              const isEmergency = isProvidingEmergencyCoverage(a.caregiver_id, selectedDateStr);
-              const emergencyDetails = isEmergency ? getEmergencyCoverageDetails(a.caregiver_id, selectedDateStr) : null;
+              const isEmergency = isProvidingEmergencyCoverage(a.user_id, selectedDateStr);
+              const emergencyDetails = isEmergency ? getEmergencyCoverageDetails(a.user_id, selectedDateStr) : null;
               
               // Debug logging for absent status
               if (isAbsent) {
-                console.log(`ABSENT CHECK - ${caregiverName(a.caregiver_id)}:`, {
-                  caregiverId: a.caregiver_id,
+                console.log(`ABSENT CHECK - ${caregiverName(a.user_id)}:`, {
+                  caregiverId: a.user_id,
                   selectedDateStr: selectedDateStr,
                   isAbsent: isAbsent,
                   assignmentId: a.id,
@@ -1398,7 +1555,7 @@ export default function Schedule() {
                 });
               }
               
-              let elders = getDisplayedEldersFor(a.caregiver_id);
+              let elders = getDisplayedEldersFor(a.user_id);
               elders = elders.slice().sort((e1, e2) => {
                 const n1 = `${e1.elderly_fname} ${e1.elderly_lname}`.toLowerCase();
                 const n2 = `${e2.elderly_fname} ${e2.elderly_lname}`.toLowerCase();
@@ -1415,13 +1572,13 @@ export default function Schedule() {
                 rowClassName = "emergency-row";
               }
               
-              console.log(`ROW RENDER - ${caregiverName(a.caregiver_id)} (${a.id}): className="${rowClassName}", isAbsent=${isAbsent}, isEmergency=${isEmergency}`);
+              console.log(`ROW RENDER - ${caregiverName(a.user_id)} (${a.id}): className="${rowClassName}", isAbsent=${isAbsent}, isEmergency=${isEmergency}`);
               
               return (
                 <tr key={a.id} className={rowClassName}>
                   <td>
                     {isEmergency && <span className="emergency-badge">🚨</span>}
-                    {caregiverName(a.caregiver_id)}
+                    {caregiverName(a.user_id)}
                   </td>
                   <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
                   <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
@@ -1467,7 +1624,7 @@ export default function Schedule() {
         <div className="popup-overlay">
           <div className="popup-content">
             <div className="popup-title">
-              Are you really sure you want to mark <span className="caregiver-name">{caregiverName(pendingAbsentAssignment.assignment.caregiver_id)}</span> as absent? You can't undo this action.
+              Are you really sure you want to mark <span className="caregiver-name">{caregiverName(pendingAbsentAssignment.assignment.user_id)}</span> as absent? You can't undo this action.
             </div>
             <div className="popup-buttons">
               <button className="popup-btn yes" onClick={confirmMarkAbsent}>
