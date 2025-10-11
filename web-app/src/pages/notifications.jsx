@@ -15,8 +15,8 @@ import { processApprovedLeave } from "../services/absenceService";
 import "./elderlyManagement.css";
 import "../css/notifications.css";
 
-export default function Notifications({ isOpen, onClose, isModal = false }) {
-  const [notifications, setNotifications] = useState([]);
+export default function Notifications({ isOpen, onClose, isModal = false, focusedNotification = null }) {
+  const [elderlyRecordRequests, setElderlyRecordRequests] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [userRegistrations, setUserRegistrations] = useState([]);
   const [singleNotif, setSingleNotif] = useState(null);
@@ -45,9 +45,9 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
     if (isModal && !isOpen) return; // Don't fetch data if modal is closed
     
     if (notifId) {
-      // ✅ Fetch specific notification
+      // ✅ Fetch specific elderly record request
       const fetchNotification = async () => {
-        const notifRef = doc(db, "notifications", notifId);
+        const notifRef = doc(db, "elderly_record_requests", notifId);
         const notifSnap = await getDoc(notifRef);
         if (notifSnap.exists()) {
           setSingleNotif({ id: notifSnap.id, ...notifSnap.data() });
@@ -55,17 +55,17 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
       };
       fetchNotification();
     } else {
-      // ✅ Fetch notifications (filter for pending if modal, all if page)
-      const notificationsQuery = isModal 
-        ? query(collection(db, "notifications"), where("action_status", "==", "pending"))
-        : collection(db, "notifications");
+      // ✅ Fetch elderly record requests (filter for pending if modal, all if page)
+      const elderlyRecordRequestsQuery = isModal 
+        ? query(collection(db, "elderly_record_requests"), where("action_status", "==", "pending"))
+        : collection(db, "elderly_record_requests");
         
-      const unsubscribeNotifications = onSnapshot(notificationsQuery, (snapshot) => {
+      const unsubscribeElderlyRecordRequests = onSnapshot(elderlyRecordRequestsQuery, (snapshot) => {
         const data = snapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
-        setNotifications(data);
+        setElderlyRecordRequests(data);
       });
 
       // ✅ Fetch leave requests (filter for pending if modal, all if page)
@@ -108,7 +108,7 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
       });
 
       return () => {
-        unsubscribeNotifications();
+        unsubscribeElderlyRecordRequests();
         unsubscribeLeaveRequests();
         unsubscribeUserRegistrations();
       };
@@ -147,17 +147,31 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
     return mostRecent;
   };
 
+  // ✅ Handle focused notification from dropdown click
+  useEffect(() => {
+    if (focusedNotification && isModal && isOpen) {
+      // Set active tab based on notification type
+      if (focusedNotification.type === 'elderly') {
+        setActiveTab('elderly');
+      } else if (focusedNotification.type === 'leave') {
+        setActiveTab('leave');
+      } else if (focusedNotification.type === 'user') {
+        setActiveTab('users');
+      }
+    }
+  }, [focusedNotification, isModal, isOpen]);
+
   // ✅ Determine tab order based on most recent notifications
   useEffect(() => {
     if (isModal) {
       // Get most recent timestamp from each category
-      const elderlyRecent = getMostRecentTimestamp(notifications, 'updated_at'); // Elderly notifications use updated_at
+      const elderlyRecent = getMostRecentTimestamp(elderlyRecordRequests, 'updated_at'); // Elderly record requests use updated_at
       const leaveRecent = getMostRecentTimestamp(leaveRequests, 'submitted_at'); // Leave requests use submitted_at  
       const usersRecent = getMostRecentTimestamp(userRegistrations, 'createdAt'); // User registrations use createdAt
 
       // Create array of categories with their most recent timestamps
       const categoriesWithTimestamps = [
-        { type: 'elderly', timestamp: elderlyRecent, count: notifications.length },
+        { type: 'elderly', timestamp: elderlyRecent, count: elderlyRecordRequests.length },
         { type: 'leave', timestamp: leaveRecent, count: leaveRequests.filter(req => req.status === "pending").length },
         { type: 'users', timestamp: usersRecent, count: userRegistrations.length }
       ];
@@ -185,49 +199,70 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
         }
       }
     }
-  }, [notifications, leaveRequests, userRegistrations, isModal, activeTab, tabOrder]);
+  }, [elderlyRecordRequests, leaveRequests, userRegistrations, isModal, activeTab, tabOrder]);
 
-  // ✅ Approve Notification
+  // ✅ Approve Elderly Record Request
   const handleApprove = async (id) => {
     try {
-      const notifRef = doc(db, "notifications", id);
+      const notifRef = doc(db, "elderly_record_requests", id);
       const notifSnap = await getDoc(notifRef);
 
       if (notifSnap.exists()) {
         const notifData = notifSnap.data();
 
+        // Build update object dynamically based on what fields exist in the request
+        const updateFields = {};
+        
+        // Status-related fields
+        if (notifData.elderly_status !== undefined) {
+          updateFields.elderly_status = notifData.elderly_status;
+        }
+        if (notifData.elderly_deathDate !== undefined) {
+          updateFields.elderly_deathDate = notifData.elderly_status === "Deceased" && notifData.elderly_deathDate
+            ? notifData.elderly_deathDate
+            : null;
+        }
+        if (notifData.elderly_causeOfDeath !== undefined) {
+          updateFields.elderly_causeOfDeath = notifData.elderly_causeOfDeath || "";
+        }
+        
+        // Diet and medical condition fields
+        if (notifData.elderly_dietNotes !== undefined) {
+          updateFields.elderly_dietNotes = notifData.elderly_dietNotes;
+        }
+        if (notifData.elderly_condition !== undefined) {
+          updateFields.elderly_condition = notifData.elderly_condition;
+        }
+        if (notifData.elderly_mobilityStatus !== undefined) {
+          updateFields.elderly_mobilityStatus = notifData.elderly_mobilityStatus;
+        }
+
+        // Update elderly profile with the changed fields
         const elderlyRef = doc(db, "elderly", notifData.elderly_id);
-        await updateDoc(elderlyRef, {
-          elderly_status: notifData.elderly_status,
-          elderly_deathDate:
-            notifData.elderly_status === "Deceased" && notifData.elderly_deathDate
-              ? notifData.elderly_deathDate
-              : null,
-          elderly_cause: notifData.elderly_causeDeath || "",
-        });
+        await updateDoc(elderlyRef, updateFields);
 
         await updateDoc(notifRef, { action_status: "approved" });
         showCustomAlert("Elderly profile updated successfully!", "success");
       }
     } catch (error) {
-      console.error("Error approving notification:", error);
+      console.error("Error approving elderly record request:", error);
     }
   };
 
-  // ✅ Reject Notification
+  // ✅ Reject Elderly Record Request
   const handleReject = async (id) => {
     try {
       const reason = prompt("Enter reason for rejection:");
       if (reason === null) return; // User cancelled, don't proceed
       
-      await updateDoc(doc(db, "notifications", id), {
+      await updateDoc(doc(db, "elderly_record_requests", id), {
         action_status: "rejected",
         reason_for_rejection: reason || "No reason provided",
       });
-      showCustomAlert("Elderly notification rejected.", "info");
+      showCustomAlert("Elderly record request rejected.", "info");
     } catch (error) {
-      console.error("Error rejecting notification:", error);
-      showCustomAlert("Failed to reject notification.", "error");
+      console.error("Error rejecting elderly record request:", error);
+      showCustomAlert("Failed to reject elderly record request.", "error");
     }
   };
 
@@ -241,13 +276,23 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
         return;
       }
 
+      // Helper function to convert Firestore timestamp to local date string (YYYY-MM-DD)
+      const toLocalDateString = (timestamp) => {
+        if (!timestamp) return null;
+        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
       // Set pending leave request and show confirmation modal
       setPendingLeaveRequest({
         ...leaveRequest,
         user_id: leaveRequest.caregiver_id || leaveRequest.user_id,
         user_type: "caregiver", // Default to caregiver, can be enhanced later
-        start_date: leaveRequest.start_date?.toDate ? leaveRequest.start_date.toDate().toISOString().slice(0, 10) : leaveRequest.start_date,
-        end_date: leaveRequest.end_date?.toDate ? leaveRequest.end_date.toDate().toISOString().slice(0, 10) : leaveRequest.end_date
+        start_date: toLocalDateString(leaveRequest.start_date),
+        end_date: toLocalDateString(leaveRequest.end_date)
       });
       setShowLeaveConfirmModal(true);
     } catch (error) {
@@ -450,37 +495,56 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
       case 'elderly':
         return { 
           label: 'Elderly Status', 
-          count: notifications.length,
-          data: notifications,
-          renderCard: (notif) => (
-            <div className="notif-modal-card elderly-notification" key={`elderly-${notif.id}`}>
-              <img
-                src={notif.elderly_profilePic || "https://via.placeholder.com/60"}
-                alt={notif.elderly_name}
-                className="notif-modal-img"
-              />
-              <div className="notif-modal-details">
-                <div className="notification-type-badge elderly-badge">Elderly Status</div>
-                <h4>{notif.elderly_name}</h4>
-                <p><strong>Status:</strong> {notif.elderly_status}</p>
-                {notif.elderly_status === "Deceased" && (
-                  <>
-                    <p>
-                      <strong>Date of Death:</strong>{" "}
-                      {notif.elderly_deathDate && notif.elderly_deathDate.toDate
-                        ? notif.elderly_deathDate.toDate().toLocaleDateString()
-                        : "Not provided"}
-                    </p>
-                    <p>
-                      <strong>Cause of Death:</strong>{" "}
-                      {notif.elderly_causeDeath || "Not provided"}
-                    </p>
-                  </>
-                )}
-                <p><strong>Updated By:</strong> {notif.updated_by}</p>
-                <p><strong>House:</strong> {notif.house_name}</p>
-                <p><strong>Status:</strong> <span className={`status-${notif.action_status}`}>{notif.action_status}</span></p>
-              </div>
+          count: elderlyRecordRequests.length,
+          data: elderlyRecordRequests,
+          renderCard: (notif) => {
+            // Determine which fields are being updated
+            const updatedFields = [];
+            if (notif.elderly_status !== undefined) updatedFields.push({ label: 'Status', value: notif.elderly_status });
+            if (notif.elderly_dietNotes !== undefined) updatedFields.push({ label: 'Diet Notes', value: notif.elderly_dietNotes });
+            if (notif.elderly_condition !== undefined) updatedFields.push({ label: 'Medical Condition', value: notif.elderly_condition });
+            if (notif.elderly_mobilityStatus !== undefined) updatedFields.push({ label: 'Mobility Status', value: notif.elderly_mobilityStatus });
+            
+            return (
+              <div className="notif-modal-card elderly-notification" key={`elderly-${notif.id}`}>
+                <img
+                  src={notif.elderly_profilePic || "https://via.placeholder.com/60"}
+                  alt={notif.elderly_name}
+                  className="notif-modal-img"
+                />
+                <div className="notif-modal-details">
+                  <div className="notification-type-badge elderly-badge">Elderly Update</div>
+                  <h4>{notif.elderly_name}</h4>
+                  
+                  {/* Show which fields are being updated */}
+                  <div style={{ marginTop: '10px', marginBottom: '10px' }}>
+                    <strong>Fields to Update:</strong>
+                    {updatedFields.map((field, index) => (
+                      <p key={index} style={{ marginLeft: '10px', marginTop: '5px' }}>
+                        • <strong>{field.label}:</strong> {field.value}
+                      </p>
+                    ))}
+                  </div>
+                  
+                  {/* Show death-related details if status is Deceased */}
+                  {notif.elderly_status === "Deceased" && (
+                    <>
+                      <p>
+                        <strong>Date of Death:</strong>{" "}
+                        {notif.elderly_deathDate && notif.elderly_deathDate.toDate
+                          ? notif.elderly_deathDate.toDate().toLocaleDateString()
+                          : "Not provided"}
+                      </p>
+                      <p>
+                        <strong>Cause of Death:</strong>{" "}
+                        {notif.elderly_causeOfDeath || "Not provided"}
+                      </p>
+                    </>
+                  )}
+                  <p><strong>Updated By:</strong> {notif.updated_by}</p>
+                  <p><strong>House:</strong> {notif.house_name}</p>
+                  <p><strong>Status:</strong> <span className={`status-${notif.action_status}`}>{notif.action_status}</span></p>
+                </div>
               <div className="notif-modal-actions">
                 {notif.action_status === "pending" && (
                   <>
@@ -506,7 +570,8 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
                 )}
               </div>
             </div>
-          )
+            );
+          }
         };
       case 'leave':
         return {
@@ -599,7 +664,7 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
       <div className="notif-modal-overlay" onClick={onClose}>
         <div className="notif-modal-content" onClick={(e) => e.stopPropagation()}>
           <div className="notif-modal-header">
-            <h2>All Notifications ({notifications.length + leaveRequests.length + userRegistrations.length})</h2>
+            <h2>All Notifications ({elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length})</h2>
             <button 
               className="notif-modal-close" 
               onClick={onClose}
@@ -626,7 +691,7 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
 
           {/* Modal Content - Tabbed View */}
           <div className="notif-modal-body">
-            {(notifications.length === 0 && leaveRequests.length === 0 && userRegistrations.length === 0) ? (
+            {(elderlyRecordRequests.length === 0 && leaveRequests.length === 0 && userRegistrations.length === 0) ? (
               <p className="no-notifications">No notifications available</p>
             ) : (
               <div className="notif-modal-list">
@@ -683,7 +748,7 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
               className={`tab-btn ${activeTab === "elderly" ? "active" : ""}`}
               onClick={() => setActiveTab("elderly")}
             >
-              Elderly Status ({notifications.length})
+              Elderly Status ({elderlyRecordRequests.length})
             </button>
             <button
               className={`tab-btn ${activeTab === "leave" ? "active" : ""}`}
@@ -702,10 +767,10 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
           {/* Content based on active tab */}
           <div className="notification-content">
             {activeTab === "elderly" ? (
-              notifications.length === 0 ? (
+              elderlyRecordRequests.length === 0 ? (
                 <p>No elderly status notifications available</p>
               ) : (
-                notifications.map(renderNotificationCard)
+                elderlyRecordRequests.map(renderNotificationCard)
               )
             ) : activeTab === "leave" ? (
               leaveRequests.length === 0 ? (
@@ -791,8 +856,32 @@ export default function Notifications({ isOpen, onClose, isModal = false }) {
                 <div className="leave-detail-item">
                   <span className="leave-detail-label">Period:</span>
                   <span className="leave-detail-value">
-                    {new Date(pendingLeaveRequest.start_date).toLocaleDateString()} - 
-                    {new Date(pendingLeaveRequest.end_date).toLocaleDateString()}
+                    {(() => {
+                      const startDate = pendingLeaveRequest.start_date;
+                      const endDate = pendingLeaveRequest.end_date;
+                      
+                      // Handle ISO string format (YYYY-MM-DD) to avoid timezone issues
+                      const formatDate = (dateStr) => {
+                        if (!dateStr) return 'N/A';
+                        // If it's an ISO string (YYYY-MM-DD), parse it as local date
+                        if (typeof dateStr === 'string' && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                          const [year, month, day] = dateStr.split('-');
+                          return new Date(year, month - 1, day).toLocaleDateString();
+                        }
+                        // Otherwise, treat as regular date
+                        return new Date(dateStr).toLocaleDateString();
+                      };
+                      
+                      const formattedStart = formatDate(startDate);
+                      const formattedEnd = formatDate(endDate);
+                      
+                      // If start and end dates are the same, show only once
+                      if (startDate === endDate || formattedStart === formattedEnd) {
+                        return formattedStart;
+                      }
+                      
+                      return `${formattedStart} - ${formattedEnd}`;
+                    })()}
                   </span>
                 </div>
 
