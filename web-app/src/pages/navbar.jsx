@@ -14,7 +14,7 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  const [notifications, setNotifications] = useState([]);
+  const [elderlyRecordRequests, setElderlyRecordRequests] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [userRegistrations, setUserRegistrations] = useState([]);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768); // ✅ track screen size
@@ -22,6 +22,7 @@ export default function Navbar() {
   const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false);
   const [pendingLeaveRequest, setPendingLeaveRequest] = useState(null);
   const [isProcessingLeave, setIsProcessingLeave] = useState(false);
+  const [focusedNotification, setFocusedNotification] = useState(null); // Track clicked notification
   const dropdownRef = useRef(null);
   const notifRef = useRef(null);
 
@@ -60,13 +61,23 @@ export default function Navbar() {
         return;
       }
 
+      // Helper function to convert Firestore timestamp to local date string (YYYY-MM-DD)
+      const toLocalDateString = (timestamp) => {
+        if (!timestamp) return null;
+        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
       // Set pending leave request and show confirmation modal
       setPendingLeaveRequest({
         ...leaveRequest,
         user_id: leaveRequest.caregiver_id || leaveRequest.user_id,
         user_type: "caregiver", // Default to caregiver, can be enhanced later
-        start_date: leaveRequest.start_date?.toDate ? leaveRequest.start_date.toDate().toISOString().slice(0, 10) : leaveRequest.start_date,
-        end_date: leaveRequest.end_date?.toDate ? leaveRequest.end_date.toDate().toISOString().slice(0, 10) : leaveRequest.end_date
+        start_date: toLocalDateString(leaveRequest.start_date),
+        end_date: toLocalDateString(leaveRequest.end_date)
       });
       setShowLeaveConfirmModal(true);
       setNotifOpen(false); // Close notification dropdown
@@ -101,28 +112,49 @@ export default function Navbar() {
   const handleApproveElderly = async (notifId, event) => {
     event.stopPropagation(); // Prevent dropdown from closing
     try {
-      const notifRef = doc(db, "notifications", notifId);
+      const notifRef = doc(db, "elderly_record_requests", notifId);
       const notifSnap = await getDoc(notifRef);
 
       if (notifSnap.exists()) {
         const notifData = notifSnap.data();
 
+        // Build update object dynamically based on what fields exist in the request
+        const updateFields = {};
+        
+        // Status-related fields
+        if (notifData.elderly_status !== undefined) {
+          updateFields.elderly_status = notifData.elderly_status;
+        }
+        if (notifData.elderly_deathDate !== undefined) {
+          updateFields.elderly_deathDate = notifData.elderly_status === "Deceased" && notifData.elderly_deathDate
+            ? notifData.elderly_deathDate
+            : null;
+        }
+        if (notifData.elderly_causeOfDeath !== undefined) {
+          updateFields.elderly_causeOfDeath = notifData.elderly_causeOfDeath || "";
+        }
+        
+        // Diet and medical condition fields
+        if (notifData.elderly_dietNotes !== undefined) {
+          updateFields.elderly_dietNotes = notifData.elderly_dietNotes;
+        }
+        if (notifData.elderly_condition !== undefined) {
+          updateFields.elderly_condition = notifData.elderly_condition;
+        }
+        if (notifData.elderly_mobilityStatus !== undefined) {
+          updateFields.elderly_mobilityStatus = notifData.elderly_mobilityStatus;
+        }
+
+        // Update elderly profile with the changed fields
         const elderlyRef = doc(db, "elderly", notifData.elderly_id);
-        await updateDoc(elderlyRef, {
-          elderly_status: notifData.elderly_status,
-          elderly_deathDate:
-            notifData.elderly_status === "Deceased" && notifData.elderly_deathDate
-              ? notifData.elderly_deathDate
-              : null,
-          elderly_cause: notifData.elderly_causeDeath || "",
-        });
+        await updateDoc(elderlyRef, updateFields);
 
         await updateDoc(notifRef, { action_status: "approved" });
         alert("Elderly profile updated successfully!");
       }
     } catch (error) {
-      console.error("Error approving notification:", error);
-      alert("Failed to approve elderly notification.");
+      console.error("Error approving elderly record request:", error);
+      alert("Failed to approve elderly record request.");
     }
   };
 
@@ -133,25 +165,25 @@ export default function Navbar() {
     if (reason === null) return; // User cancelled
     
     try {
-      await updateDoc(doc(db, "notifications", notifId), {
+      await updateDoc(doc(db, "elderly_record_requests", notifId), {
         action_status: "rejected",
         reason_for_rejection: reason || "No reason provided",
       });
-      alert("Elderly notification rejected.");
+      alert("Elderly record request rejected.");
     } catch (error) {
-      console.error("Error rejecting elderly notification:", error);
-      alert("Failed to reject elderly notification.");
+      console.error("Error rejecting elderly record request:", error);
+      alert("Failed to reject elderly record request.");
     }
   };
 
-  // Real-time notifications for elderly status
+  // Real-time elderly record requests
   useEffect(() => {
     const q = query(
-      collection(db, "notifications"),
+      collection(db, "elderly_record_requests"),
       where("action_status", "==", "pending")
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setNotifications(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      setElderlyRecordRequests(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
   }, []);
@@ -252,30 +284,40 @@ export default function Navbar() {
     setIsProcessingLeave(false);
   };
 
+  // Handle notification click to open modal with specific notification
+  const handleNotificationClick = (notification) => {
+    setFocusedNotification(notification);
+    setShowNotifModal(true);
+    setNotifOpen(false); // Close dropdown
+    setMenuOpen(false); // Close mobile menu if open
+  };
+
   // ✅ Function to get unified and sorted notifications
   const getUnifiedNotifications = () => {
     const allNotifications = [];
 
-    // Add elderly notifications with timestamp
-    notifications.forEach(notif => {
+    // Add elderly record requests with timestamp
+    elderlyRecordRequests.forEach(notif => {
       let sortTimestamp;
       
-      // Try different timestamp fields for elderly notifications
+      // Try different timestamp fields for elderly record requests
       if (notif.updated_at) {
         sortTimestamp = notif.updated_at.toDate ? notif.updated_at.toDate() : new Date(notif.updated_at);
       } else if (notif.created_at) {
         sortTimestamp = notif.created_at.toDate ? notif.created_at.toDate() : new Date(notif.created_at);
+      } else if (notif.createdAt) {
+        sortTimestamp = notif.createdAt.toDate ? notif.createdAt.toDate() : new Date(notif.createdAt);
       } else if (notif.timestamp) {
         sortTimestamp = notif.timestamp.toDate ? notif.timestamp.toDate() : new Date(notif.timestamp);
       } else {
-        // Fallback to a very old date so it doesn't appear as recent
-        sortTimestamp = new Date('2020-01-01');
+        // Fallback to current time if no timestamp fields exist
+        sortTimestamp = new Date();
       }
       
       allNotifications.push({
         id: `elderly-${notif.id}`,
         type: 'elderly',
-        timestamp: notif.updated_at || notif.created_at || notif.timestamp || new Date('2020-01-01'),
+        timestamp: notif.updated_at || notif.created_at || notif.createdAt || notif.timestamp || new Date(),
         data: notif,
         sortTimestamp: sortTimestamp
       });
@@ -290,13 +332,14 @@ export default function Navbar() {
       } else if (leave.created_at) {
         sortTimestamp = leave.created_at.toDate ? leave.created_at.toDate() : new Date(leave.created_at);
       } else {
-        sortTimestamp = new Date('2020-01-01');
+        // Fallback to current time if no timestamp fields exist
+        sortTimestamp = new Date();
       }
       
       allNotifications.push({
         id: `leave-${leave.id}`,
         type: 'leave',
-        timestamp: leave.submitted_at || leave.created_at || new Date('2020-01-01'),
+        timestamp: leave.submitted_at || leave.created_at || new Date(),
         data: leave,
         sortTimestamp: sortTimestamp
       });
@@ -311,13 +354,14 @@ export default function Navbar() {
       } else if (user.created_at) {
         sortTimestamp = user.created_at.toDate ? user.created_at.toDate() : new Date(user.created_at);
       } else {
-        sortTimestamp = new Date('2020-01-01');
+        // Fallback to current time if no timestamp fields exist
+        sortTimestamp = new Date();
       }
       
       allNotifications.push({
         id: `user-${user.id}`,
         type: 'user',
-        timestamp: user.createdAt || user.created_at || new Date('2020-01-01'),
+        timestamp: user.createdAt || user.created_at || new Date(),
         data: user,
         sortTimestamp: sortTimestamp
       });
@@ -333,16 +377,29 @@ export default function Navbar() {
     
     switch (type) {
       case 'elderly':
+        // Determine which fields are being updated (show only field names, not values)
+        const updatedFields = [];
+        if (data.elderly_status !== undefined) updatedFields.push('Status');
+        if (data.elderly_dietNotes !== undefined) updatedFields.push('Diet');
+        if (data.elderly_condition !== undefined) updatedFields.push('Condition');
+        if (data.elderly_mobilityStatus !== undefined) updatedFields.push('Mobility');
+        
+        // Show all fields separated by commas
+        const fieldsText = updatedFields.length > 0 ? updatedFields.join(', ') : 'Profile Update';
+        
         return (
           <li key={notification.id} className="notif-item unified-notif elderly-type">
-            <div className="notif-type-indicator elderly-indicator">👴 Elderly Status</div>
-            <div className="notif-content-unified">
+            <div className="notif-type-indicator elderly-indicator">👴 Elderly Update</div>
+            <div 
+              className="notif-content-unified clickable-notif" 
+              onClick={() => handleNotificationClick(notification)}
+            >
               <div className="notif-main-info">
                 <strong>{data.elderly_name}</strong>
-                <span className="notif-status">{data.elderly_status}</span>
+                <span className="notif-status">{fieldsText}</span>
                 <span className="notif-meta">{data.house_name}</span>
               </div>
-              <div className="notif-actions">
+              <div className="notif-actions" onClick={(e) => e.stopPropagation()}>
                 <button
                   className="approve-btn-small"
                   onClick={(e) => handleApproveElderly(data.id, e)}
@@ -366,7 +423,10 @@ export default function Navbar() {
         return (
           <li key={notification.id} className="notif-item unified-notif leave-type">
             <div className="notif-type-indicator leave-indicator">🏖️ Leave Request</div>
-            <div className="notif-content-unified">
+            <div 
+              className="notif-content-unified clickable-notif" 
+              onClick={() => handleNotificationClick(notification)}
+            >
               <div className="notif-main-info">
                 <strong>{data.full_name}</strong>
                 <span className="notif-status">{data.leave_type}</span>
@@ -375,7 +435,7 @@ export default function Navbar() {
                   {data.end_date?.toDate()?.toLocaleDateString()}
                 </span>
               </div>
-              <div className="notif-actions">
+              <div className="notif-actions" onClick={(e) => e.stopPropagation()}>
                 <button
                   className="approve-btn-small"
                   onClick={(e) => handleApproveLeave(data.id, e)}
@@ -399,7 +459,10 @@ export default function Navbar() {
         return (
           <li key={notification.id} className="notif-item unified-notif user-type">
             <div className="notif-type-indicator user-indicator">👤 New Registration</div>
-            <div className="notif-content-unified">
+            <div 
+              className="notif-content-unified clickable-notif" 
+              onClick={() => handleNotificationClick(notification)}
+            >
               <div className="notif-main-info">
                 <strong>{data.user_fname} {data.user_lname}</strong>
                 <span className="notif-status">{data.user_type}</span>
@@ -468,6 +531,12 @@ export default function Navbar() {
           Nurse Schedule
         </li>
         <li
+          className={location.pathname.startsWith("/incident-reports") ? "active" : ""}
+          onClick={() => { navigate("/incident-reports"); setMenuOpen(false); }}
+        >
+          Incident Reports
+        </li>
+        <li
           className={location.pathname.startsWith("/accounts") ? "active" : ""}
           onClick={() => { navigate("/accounts"); setMenuOpen(false); }}
         >
@@ -508,8 +577,8 @@ export default function Navbar() {
                   onClick={() => setNotifOpen((prev) => !prev)}
                 >
                   <FaBell size={20} />
-                  {(notifications.length + leaveRequests.length + userRegistrations.length) > 0 && (
-                    <span className="notif-badge">{notifications.length + leaveRequests.length + userRegistrations.length}</span>
+                  {(elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length) > 0 && (
+                    <span className="notif-badge">{elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length}</span>
                   )}
                 </button>
                 {notifOpen && (
@@ -564,8 +633,8 @@ export default function Navbar() {
           <div className="notif-dropdown" ref={notifRef}>
             <button className="notif-btn" onClick={() => setNotifOpen((prev) => !prev)}>
               <FaBell size={20} />
-              {(notifications.length + leaveRequests.length + userRegistrations.length) > 0 && (
-                <span className="notif-badge">{notifications.length + leaveRequests.length + userRegistrations.length}</span>
+              {(elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length) > 0 && (
+                <span className="notif-badge">{elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length}</span>
               )}
             </button>
             {notifOpen && (
@@ -602,8 +671,12 @@ export default function Navbar() {
       {/* ✅ Notifications Modal */}
       <Notifications 
         isOpen={showNotifModal} 
-        onClose={() => setShowNotifModal(false)}
+        onClose={() => {
+          setShowNotifModal(false);
+          setFocusedNotification(null); // Reset focused notification when modal closes
+        }}
         isModal={true}
+        focusedNotification={focusedNotification}
       />
 
       {/* ✅ Leave Confirmation Modal */}
@@ -638,8 +711,32 @@ export default function Navbar() {
                 <div className="leave-detail-item">
                   <span className="leave-detail-label">Period:</span>
                   <span className="leave-detail-value">
-                    {new Date(pendingLeaveRequest.start_date).toLocaleDateString()} - 
-                    {new Date(pendingLeaveRequest.end_date).toLocaleDateString()}
+                    {(() => {
+                      const startDate = pendingLeaveRequest.start_date;
+                      const endDate = pendingLeaveRequest.end_date;
+                      
+                      // Handle ISO string format (YYYY-MM-DD) to avoid timezone issues
+                      const formatDate = (dateStr) => {
+                        if (!dateStr) return 'N/A';
+                        // If it's an ISO string (YYYY-MM-DD), parse it as local date
+                        if (typeof dateStr === 'string' && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                          const [year, month, day] = dateStr.split('-');
+                          return new Date(year, month - 1, day).toLocaleDateString();
+                        }
+                        // Otherwise, treat as regular date
+                        return new Date(dateStr).toLocaleDateString();
+                      };
+                      
+                      const formattedStart = formatDate(startDate);
+                      const formattedEnd = formatDate(endDate);
+                      
+                      // If start and end dates are the same, show only once
+                      if (startDate === endDate || formattedStart === formattedEnd) {
+                        return formattedStart;
+                      }
+                      
+                      return `${formattedStart} - ${formattedEnd}`;
+                    })()}
                   </span>
                 </div>
 
