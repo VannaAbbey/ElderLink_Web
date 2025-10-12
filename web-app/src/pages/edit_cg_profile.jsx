@@ -5,7 +5,7 @@ import { FaUserCircle, FaHeartbeat } from "react-icons/fa";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import "./edit_cg_overlay.jsx"; // ✅ import overlay
-import "./edit_cg_profile.css";
+import "../css/edit_cg_profile.css";
 import EditCaregiverOverlay from "./edit_cg_overlay.jsx";
 
 

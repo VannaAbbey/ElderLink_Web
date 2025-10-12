@@ -6,7 +6,7 @@ import { FaUser, FaPhone, FaEnvelope } from "react-icons/fa";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import "./edit_admin_profile.css";
+import "../css/edit_admin_profile.css";
 
 export default function EditAdminProfile() {
   const navigate = useNavigate();

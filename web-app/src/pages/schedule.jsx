@@ -9,12 +9,26 @@ import {
   writeBatch,
   doc
 } from "firebase/firestore";
-import "./schedule.css";
+import "../css/schedule.css";
 import Navbar from "./navbar";
 import * as ScheduleService from "../services/scheduleService";
 import * as NewCaregiverService from "../services/newCaregiverService";
 import * as EmergencyService from "../services/emergencyService";
 import * as AbsenceService from "../services/absenceService";
+import {
+  formatDateString,
+  isCaregiverAbsent,
+  getCaregiverAbsenceDetails,
+  areWorkDaysConsecutive,
+  isProvidingEmergencyCoverage,
+  getEmergencyCoverageDetails,
+  caregiverName
+} from "../services/scheduleHelpers";
+import CustomAlertModal from "./customAlertModal";
+import ConfirmationModal from "./confirmationModal";
+import EmergencyCoverageModal from "./emergencyCoverageModal";
+import NewCaregiverModal from "./newCaregiverModal";
+import SearchResultsDropdown from "./searchResultsDropdown";
 
 
 export default function Schedule() {
@@ -88,88 +102,6 @@ export default function Schedule() {
 
   const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-  // Helper function to check if a caregiver is absent on a specific date
-  const isCaregiverAbsent = (caregiverId, dateStr) => {
-    return absences.some(absence => 
-      absence.user_id === caregiverId && 
-      absence.absence_date === dateStr && 
-      absence.status === "active"
-    );
-  };
-
-  // Helper function to get caregiver absence details (type and status)
-  const getCaregiverAbsenceDetails = (caregiverId, dateStr) => {
-    // Debug: Log what we're searching for
-    console.log(`🔍 Checking absence for caregiver ${caregiverId} on ${dateStr}`);
-    console.log(`📊 Total absences loaded: ${absences.length}`);
-    
-    // Show all absences for debugging (limit to first 5)
-    if (absences.length > 0) {
-      console.log(`Sample absences (first 5):`, absences.slice(0, 5).map(a => ({
-        user_id: a.user_id,
-        absence_date: a.absence_date,
-        status: a.status,
-        absence_type: a.absence_type
-      })));
-    }
-    
-    const absence = absences.find(absence => 
-      absence.user_id === caregiverId && 
-      absence.absence_date === dateStr && 
-      absence.status === "active"
-    );
-    
-    if (absence) {
-      console.log(`✅ Found absence for ${caregiverId}:`, {
-        type: absence.absence_type,
-        date: absence.absence_date,
-        reason: absence.leave_reason
-      });
-    } else {
-      console.log(`❌ No absence found for ${caregiverId} on ${dateStr}`);
-      // Check if there are any absences for this caregiver on other dates
-      const caregiverAbsences = absences.filter(a => a.user_id === caregiverId);
-      if (caregiverAbsences.length > 0) {
-        console.log(`ℹ️ Caregiver ${caregiverId} has ${caregiverAbsences.length} absence(s) on other dates:`, 
-          caregiverAbsences.map(a => a.absence_date));
-      }
-    }
-    
-    return absence ? {
-      type: absence.absence_type || "absent",
-      reason: absence.leave_reason || null,
-      isAbsent: true
-    } : {
-      type: null,
-      reason: null,
-      isAbsent: false
-    };
-  };
-
-  // Validation function to check if rest days are consecutive
-  const areWorkDaysConsecutive = (workDays) => {
-    if (workDays.length !== 5) return false;
-    
-    // Get rest days (days not in workDays)
-    const restDays = daysOfWeek.filter(day => !workDays.includes(day));
-    
-    if (restDays.length !== 2) return false; // Should have exactly 2 rest days
-    
-    // Convert rest day names to indices
-    const restDayIndices = restDays.map(day => daysOfWeek.indexOf(day)).sort((a, b) => a - b);
-    
-    // Check if the 2 rest days are consecutive
-    const [firstRest, secondRest] = restDayIndices;
-    
-    // Two cases for consecutive rest days:
-    // 1. Normal consecutive (e.g., Saturday=5, Sunday=6)
-    // 2. Wrap-around consecutive (e.g., Sunday=6, Monday=0)
-    const isNormalConsecutive = (secondRest - firstRest === 1);
-    const isWrapAroundConsecutive = (firstRest === 0 && secondRest === 6); // Sunday and Saturday
-    
-    return isNormalConsecutive || isWrapAroundConsecutive;
-  };
-
   // Custom alert function to replace native alert()
   const showAlert = (message, title = "Notification") => {
     setCustomAlertMessage(message);
@@ -181,14 +113,6 @@ export default function Schedule() {
     setShowCustomAlert(false);
     setCustomAlertMessage("");
     setCustomAlertTitle("Notification");
-  };
-
-  const formatDateString = (date) => {
-    // Format date in local timezone to avoid UTC conversion issues
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
   };
 
   // Search functionality
@@ -220,13 +144,13 @@ export default function Schedule() {
         const houseName = house?.house_name || assignment.house_id;
         
         // Get absence status
-        const absenceDetails = getCaregiverAbsenceDetails(assignment.user_id, selectedDateStr);
+        const absenceDetails = getCaregiverAbsenceDetails(assignment.user_id, selectedDateStr, absences);
         
         // Get assigned elderly for this caregiver
         const assignedElderly = getDisplayedEldersFor(assignment.user_id);
         
         // Check if providing emergency coverage
-        const isEmergency = isProvidingEmergencyCoverage(assignment.user_id, selectedDateStr);
+        const isEmergency = isProvidingEmergencyCoverage(assignment.user_id, selectedDateStr, tempReassigns);
         
         results.push({
           caregiver: caregiver,
@@ -948,37 +872,6 @@ export default function Schedule() {
     resetOutdatedAbsences();
   }, []);
 
-  // Check if caregiver is providing emergency coverage
-  const isProvidingEmergencyCoverage = (caregiverId, selectedDateStr) => {
-    return tempReassigns.some(tr => 
-      tr.to_user_id === caregiverId && 
-      tr.date === selectedDateStr && 
-      tr.from_user_id === "EMERGENCY_ABSENT"
-    );
-  };
-
-  // Get emergency coverage details for a caregiver
-  const getEmergencyCoverageDetails = (caregiverId, selectedDateStr) => {
-    const emergencyAssignments = tempReassigns.filter(tr => 
-      tr.to_user_id === caregiverId && 
-      tr.date === selectedDateStr && 
-      tr.from_user_id === "EMERGENCY_ABSENT"
-    );
-    
-    if (emergencyAssignments.length > 0) {
-      const firstAssignment = emergencyAssignments[0];
-      return {
-        count: emergencyAssignments.length,
-        reason: firstAssignment?.reason || "Emergency coverage",
-        originalHouse: firstAssignment?.original_house,
-        emergencyHouse: firstAssignment?.emergency_house,
-        emergencyShift: firstAssignment?.emergency_shift
-      };
-    }
-    
-    return null;
-  };
-
   const getDisplayedEldersFor = (caregiverId) => {
   const selectedDateStr = formatDateString(selectedDate);
   
@@ -989,7 +882,7 @@ export default function Schedule() {
   console.log(`Selected date: ${selectedDateStr} (${dayName}), Current version: ${currentVersion}`);
   
   // First, check if this caregiver is marked as absent for this specific date
-  const isAbsentForThisDate = isCaregiverAbsent(caregiverId, selectedDateStr);
+  const isAbsentForThisDate = isCaregiverAbsent(caregiverId, selectedDateStr, absences);
   
   if (isAbsentForThisDate) {
     console.log(`Caregiver ${caregiverId} is marked ABSENT for ${selectedDateStr} - showing no elderly assignments`);
@@ -1050,21 +943,6 @@ export default function Schedule() {
   
   return elders;
 };
-
-
-  const caregiverName = (id) => {
-    const c = caregivers.find((cg) => cg.id === id);
-    if (c) {
-      return `${c.user_fname} ${c.user_lname}`;
-    } else {
-      // Enhanced debugging for missing caregivers
-      console.warn(`⚠️ Caregiver not found: ${id}`);
-      console.log(`Available caregivers (${caregivers.length}):`, 
-        caregivers.slice(0, 3).map(cg => ({ id: cg.id, name: `${cg.user_fname} ${cg.user_lname}` }))
-      );
-      return `Unknown (${id.substring(0, 8)}...)`;
-    }
-  };
 
   // Get emergency coverage assignments for display
   const getEmergencyCoverageAssignments = () => {
@@ -1361,65 +1239,12 @@ export default function Schedule() {
           )}
         </div>
         
-        {showSearchResults && (
-          <div className="search-results-dropdown">
-            {searchResults.length === 0 ? (
-              <div className="no-results">
-                No caregivers found matching "{searchQuery}"
-              </div>
-            ) : (
-              <>
-                <div className="search-results-header">
-                  Found {searchResults.length} caregiver{searchResults.length !== 1 ? 's' : ''}
-                </div>
-                {searchResults.map((result, index) => (
-                  <div key={index} className="search-result-item">
-                    <div className="search-result-header">
-                      <span className="caregiver-name">
-                        {result.caregiver.user_fname} {result.caregiver.user_lname}
-                      </span>
-                      <span className="search-result-badges">
-                        {result.absenceDetails.isAbsent && (
-                          <span className={`absence-badge ${result.absenceDetails.type === 'on_leave' ? 'on-leave' : 'absent'}`}>
-                            {result.absenceDetails.type === 'on_leave' ? '🏖️ On Leave' : '❌ Absent'}
-                          </span>
-                        )}
-                        {result.isEmergency && (
-                          <span className="emergency-badge">🚨 Emergency</span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="search-result-details">
-                      <div className="assignment-info">
-                        <strong>Assignment:</strong> {result.houseName} - {result.assignment.shift} Shift
-                      </div>
-                      <div className="work-days">
-                        <strong>Work Days:</strong> {result.assignment.days_assigned?.join(', ') || 'Not assigned'}
-                      </div>
-                      <div className="elderly-count">
-                        <strong>Elderly Assigned:</strong> {result.assignedElderly.length} elder{result.assignedElderly.length !== 1 ? 's' : ''}
-                      </div>
-                      {result.assignedElderly.length > 0 && (
-                        <div className="elderly-names">
-                          {result.assignedElderly.slice(0, 3).map(elder => 
-                            `${elder.elderly_fname} ${elder.elderly_lname}`
-                          ).join(', ')}
-                          {result.assignedElderly.length > 3 && ` +${result.assignedElderly.length - 3} more`}
-                        </div>
-                      )}
-                    </div>
-                    <button 
-                      onClick={() => navigateToCaregiver(result.assignment.house_id, result.assignment.shift)}
-                      className="navigate-btn"
-                    >
-                      View in Schedule →
-                    </button>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
+        <SearchResultsDropdown
+          isOpen={showSearchResults}
+          searchQuery={searchQuery}
+          searchResults={searchResults}
+          onNavigate={navigateToCaregiver}
+        />
       </div>
 
       {showOverlay && (
@@ -1536,17 +1361,17 @@ export default function Schedule() {
               const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
               
               // Check absence status using centralized collection with detailed info
-              const absenceDetails = getCaregiverAbsenceDetails(a.user_id, selectedDateStr);
+              const absenceDetails = getCaregiverAbsenceDetails(a.user_id, selectedDateStr, absences);
               const isAbsent = absenceDetails.isAbsent;
               const isOnLeave = absenceDetails.type === "on_leave";
               
               // Check if providing emergency coverage
-              const isEmergency = isProvidingEmergencyCoverage(a.user_id, selectedDateStr);
-              const emergencyDetails = isEmergency ? getEmergencyCoverageDetails(a.user_id, selectedDateStr) : null;
+              const isEmergency = isProvidingEmergencyCoverage(a.user_id, selectedDateStr, tempReassigns);
+              const emergencyDetails = isEmergency ? getEmergencyCoverageDetails(a.user_id, selectedDateStr, tempReassigns) : null;
               
               // Debug logging for absent status
               if (isAbsent) {
-                console.log(`ABSENT CHECK - ${caregiverName(a.user_id)}:`, {
+                console.log(`ABSENT CHECK - ${caregiverName(a.user_id, caregivers)}:`, {
                   caregiverId: a.user_id,
                   selectedDateStr: selectedDateStr,
                   isAbsent: isAbsent,
@@ -1572,13 +1397,13 @@ export default function Schedule() {
                 rowClassName = "emergency-row";
               }
               
-              console.log(`ROW RENDER - ${caregiverName(a.user_id)} (${a.id}): className="${rowClassName}", isAbsent=${isAbsent}, isEmergency=${isEmergency}`);
+              console.log(`ROW RENDER - ${caregiverName(a.user_id, caregivers)} (${a.id}): className="${rowClassName}", isAbsent=${isAbsent}, isEmergency=${isEmergency}`);
               
               return (
                 <tr key={a.id} className={rowClassName}>
                   <td>
                     {isEmergency && <span className="emergency-badge">🚨</span>}
-                    {caregiverName(a.user_id)}
+                    {caregiverName(a.user_id, caregivers)}
                   </td>
                   <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
                   <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
@@ -1620,324 +1445,52 @@ export default function Schedule() {
       </main>
 
       {/* Confirmation Popup */}
-      {showAbsentConfirm && pendingAbsentAssignment && (
-        <div className="popup-overlay">
-          <div className="popup-content">
-            <div className="popup-title">
-              Are you really sure you want to mark <span className="caregiver-name">{caregiverName(pendingAbsentAssignment.assignment.user_id)}</span> as absent? You can't undo this action.
-            </div>
-            <div className="popup-buttons">
-              <button className="popup-btn yes" onClick={confirmMarkAbsent}>
-                Yes
-              </button>
-              <button className="popup-btn no" onClick={cancelMarkAbsent}>
-                No
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmationModal
+        isOpen={showAbsentConfirm && !!pendingAbsentAssignment}
+        caregiverName={pendingAbsentAssignment ? caregiverName(pendingAbsentAssignment.assignment.user_id, caregivers) : ''}
+        onConfirm={confirmMarkAbsent}
+        onCancel={cancelMarkAbsent}
+      />
 
       {/* Emergency Coverage Modal */}
-      {showEmergencyModal && (
-        <div className="popup-overlay">
-          <div className="emergency-modal">
-            <div className="modal-header">
-              <h3>🚨 Emergency Coverage Required</h3>
-              <p>The following houses have no caregivers present on {emergencyOptions[0]?.dayName} ({emergencyOptions[0]?.targetDateStr})</p>
-            </div>
-            
-            <div className="modal-body">
-              {emergencyOptions.map((option, index) => (
-                <div key={`${option.emergencyHouse}_${option.emergencyShift}`} className="emergency-option">
-                  <div className="emergency-info">
-                    <strong>{option.emergencyHouse} - {option.emergencyShift} Shift</strong>
-                    <span className="absent-count">({option.totalAbsent} caregiver{option.totalAbsent > 1 ? 's' : ''} absent)</span>
-                  </div>
-                  
-                  {option.availableDonorHouses.length > 0 ? (
-                    <div className="donor-selection">
-                      <label>Select donor house and caregiver:</label>
-                      <select 
-                        value={`${selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`]?.donorHouse}_${selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`]?.caregiverId}` || ''}
-                        onChange={(e) => {
-                          const [donorHouse, caregiverId] = e.target.value.split('_');
-                          if (donorHouse && caregiverId) {
-                            setSelectedDonorChoices(prev => ({
-                              ...prev,
-                              [`${option.emergencyHouse}_${option.emergencyShift}`]: {
-                                donorHouse,
-                                caregiverId
-                              }
-                            }));
-                          }
-                        }}
-                        className="donor-select"
-                      >
-                        <option value="">Select caregiver...</option>
-                        {option.availableDonorHouses.map(donor => 
-                          donor.presentCaregivers.map(caregiver => (
-                            <option 
-                              key={`${donor.house}_${caregiver.caregiverId}`}
-                              value={`${donor.house}_${caregiver.caregiverId}`}
-                            >
-                              {donor.house} - {caregiverName(caregiver.caregiverId)} ({donor.availableCount} available)
-                            </option>
-                          ))
-                        )}
-                      </select>
-                      
-                      {selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`] && (
-                        <div className="selected-choice">
-                          ✓ Will move <strong>{caregiverName(selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`].caregiverId)}</strong> from <strong>{selectedDonorChoices[`${option.emergencyHouse}_${option.emergencyShift}`].donorHouse}</strong> to cover <strong>{option.emergencyHouse}</strong>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="no-donors">
-                      ❌ No available donors found for this shift
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            
-            <div className="modal-footer">
-              <button 
-                className="execute-emergency-btn" 
-                onClick={executeEmergencyCoverage}
-                disabled={Object.keys(selectedDonorChoices).length === 0}
-              >
-                Execute Emergency Coverage
-              </button>
-              <button className="cancel-emergency-btn" onClick={cancelEmergencyCoverage}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <EmergencyCoverageModal
+        isOpen={showEmergencyModal}
+        emergencyOptions={emergencyOptions}
+        selectedDonorChoices={selectedDonorChoices}
+        setSelectedDonorChoices={setSelectedDonorChoices}
+        caregiverName={(id) => caregiverName(id, caregivers)}
+        onExecute={executeEmergencyCoverage}
+        onCancel={cancelEmergencyCoverage}
+      />
 
       {/* New Caregiver Integration Modal */}
-      {showNewCaregiverModal && (
-        <div className="popup-overlay">
-          <div className="integration-modal">
-            <div className="modal-header">
-              <h3>👥 New Caregiver Integration</h3>
-              <p>Integrate new caregivers into the existing schedule</p>
-            </div>
-            
-            <div className="modal-body">
-              {/* Caregiver Selection */}
-              <div className="caregiver-selection">
-                <h4>Select New Caregiver:</h4>
-                <div className="caregiver-list">
-                  {unassignedCaregivers.map(caregiver => (
-                    <div 
-                      key={caregiver.id} 
-                      className={`caregiver-item ${selectedNewCaregiver === caregiver.id ? 'selected' : ''}`}
-                      onClick={() => handleCaregiverSelection(caregiver.id)}
-                    >
-                      <span className="caregiver-name">{caregiver.user_fname} {caregiver.user_lname}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {selectedNewCaregiver && (
-                <>
-                  {/* Integration Mode Selection */}
-                  <div className="integration-mode">
-                    <h4>Assignment Method:</h4>
-                    <div className="mode-options">
-                      <label className="mode-option">
-                        <input 
-                          type="radio" 
-                          value="auto" 
-                          checked={integrationMode === 'auto'}
-                          onChange={(e) => {
-                            setIntegrationMode(e.target.value);
-                            setSelectedRecommendation(null);
-                          }}
-                        />
-                        <div className="mode-option-content">
-                          <span>🤖 Automatic (System Recommendation)</span>
-                          <small>System analyzes current schedule and recommends optimal placement</small>
-                        </div>
-                      </label>
-                      <label className="mode-option">
-                        <input 
-                          type="radio" 
-                          value="manual" 
-                          checked={integrationMode === 'manual'}
-                          onChange={(e) => {
-                            setIntegrationMode(e.target.value);
-                            setSelectedRecommendation(null);
-                          }}
-                        />
-                        <div className="mode-option-content">
-                          <span>✋ Manual Assignment</span>
-                          <small>Manually choose house, shift, and work days</small>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Automatic Recommendations */}
-                  {integrationMode === 'auto' && systemRecommendations.length > 0 && (
-                    <div className="recommendations">
-                      <h4>System Recommendations: (Select one to proceed)</h4>
-                      {systemRecommendations.map((rec, index) => (
-                        <div 
-                          key={index} 
-                          className={`recommendation-item ${selectedRecommendation === rec ? 'selected' : ''}`}
-                          onClick={() => setSelectedRecommendation(rec)}
-                          style={{ cursor: 'pointer', border: selectedRecommendation === rec ? '2px solid #007bff' : '1px solid #ddd' }}
-                        >
-                          <div className="rec-header">
-                            <span className="rec-rank">
-                              {selectedRecommendation === rec ? '✓ Selected' : `Option #${index + 1}`}
-                            </span>
-                            <span className="rec-coverage">Fixes {rec.weakSlotsCovered}/{rec.totalWeakSlots} gaps</span>
-                          </div>
-                          <div className="rec-details">
-                            <strong>{rec.houseName}</strong> - {rec.shift} Shift
-                            <div className="rec-days">Work Days: {rec.workDays.join(', ')}</div>
-                            <div className="rec-explanation">
-                              <small>{rec.explanation}</small>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      {!selectedRecommendation && (
-                        <div className="selection-reminder">
-                          <small style={{ color: '#dc3545', fontStyle: 'italic' }}>
-                            Please click on one of the recommendations above to select it.
-                          </small>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Manual Assignment */}
-                  {integrationMode === 'manual' && (
-                    <div className="manual-assignment">
-                      <h4>Manual Assignment:</h4>
-                      
-                      <div className="assignment-fields">
-                        <div className="field-group">
-                          <label>House:</label>
-                          <select 
-                            value={manualAssignment.house} 
-                            onChange={(e) => setManualAssignment(prev => ({...prev, house: e.target.value}))}
-                          >
-                            <option value="">Select House...</option>
-                            {houses.map(house => (
-                              <option key={house.house_id} value={house.house_id}>
-                                {house.house_name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="field-group">
-                          <label>Shift:</label>
-                          <select 
-                            value={manualAssignment.shift} 
-                            onChange={(e) => setManualAssignment(prev => ({...prev, shift: e.target.value}))}
-                          >
-                            <option value="">Select Shift...</option>
-                            {shiftDefs.map(shift => (
-                              <option key={shift.key} value={shift.key}>
-                                {shift.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="field-group">
-                          <label>Work Days (Select 5 consecutive days):</label>
-                          <div className="days-checkboxes">
-                            {daysOfWeek.map(day => (
-                              <label key={day} className="day-checkbox">
-                                <input 
-                                  type="checkbox"
-                                  checked={manualAssignment.workDays.includes(day)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      if (manualAssignment.workDays.length < 5) {
-                                        setManualAssignment(prev => ({
-                                          ...prev, 
-                                          workDays: [...prev.workDays, day]
-                                        }));
-                                      }
-                                    } else {
-                                      setManualAssignment(prev => ({
-                                        ...prev,
-                                        workDays: prev.workDays.filter(d => d !== day)
-                                      }));
-                                    }
-                                  }}
-                                />
-                                {day.slice(0, 3)}
-                              </label>
-                            ))}
-                          </div>
-                          <small>Selected: {manualAssignment.workDays.length}/5 days</small>
-                          {manualAssignment.workDays.length === 5 && !areWorkDaysConsecutive(manualAssignment.workDays) && (
-                            <small style={{ color: '#dc3545', display: 'block', marginTop: '4px', fontWeight: 'bold' }}>
-                              ⚠️ Rest days must be consecutive (2 consecutive days off)
-                            </small>
-                          )}
-                          {manualAssignment.workDays.length === 5 && areWorkDaysConsecutive(manualAssignment.workDays) && (
-                            <small style={{ color: '#28a745', display: 'block', marginTop: '4px', fontWeight: 'bold' }}>
-                              ✓ Rest days are consecutive
-                            </small>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            
-            <div className="modal-footer">
-              <button 
-                className="execute-integration-btn" 
-                onClick={executeNewCaregiverIntegration}
-                disabled={!selectedNewCaregiver || 
-                  (integrationMode === 'auto' && !selectedRecommendation) ||
-                  (integrationMode === 'manual' && (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length !== 5 || !areWorkDaysConsecutive(manualAssignment.workDays)))}
-              >
-                Integrate Caregiver
-              </button>
-              <button className="cancel-integration-btn" onClick={cancelNewCaregiverIntegration}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <NewCaregiverModal
+        isOpen={showNewCaregiverModal}
+        unassignedCaregivers={unassignedCaregivers}
+        selectedNewCaregiver={selectedNewCaregiver}
+        handleCaregiverSelection={handleCaregiverSelection}
+        integrationMode={integrationMode}
+        setIntegrationMode={setIntegrationMode}
+        setSelectedRecommendation={setSelectedRecommendation}
+        systemRecommendations={systemRecommendations}
+        selectedRecommendation={selectedRecommendation}
+        manualAssignment={manualAssignment}
+        setManualAssignment={setManualAssignment}
+        houses={houses}
+        shiftDefs={shiftDefs}
+        daysOfWeek={daysOfWeek}
+        areWorkDaysConsecutive={(workDays) => areWorkDaysConsecutive(workDays, daysOfWeek)}
+        onExecute={executeNewCaregiverIntegration}
+        onCancel={cancelNewCaregiverIntegration}
+      />
 
       {/* Custom Alert Modal */}
-      {showCustomAlert && (
-        <div className="popup-overlay">
-          <div className="popup-content custom-alert">
-            <div className="popup-title">
-              {customAlertTitle}
-            </div>
-            <div className="alert-message">
-              {customAlertMessage}
-            </div>
-            <div className="popup-buttons">
-              <button className="popup-btn ok-btn" onClick={closeCustomAlert}>
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CustomAlertModal
+        isOpen={showCustomAlert}
+        title={customAlertTitle}
+        message={customAlertMessage}
+        onClose={closeCustomAlert}
+      />
 
     </div>
   );

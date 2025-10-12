@@ -6,7 +6,7 @@ import { FaHeartbeat, FaUser, FaNotesMedical, FaClipboardList, FaUserSlash } fro
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import "./profileElderly.css";
+import "../css/profileElderly.css";
 
 
 export default function Profile_Elderly() {

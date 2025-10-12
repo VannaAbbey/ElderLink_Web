@@ -7,7 +7,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
-import "./edit_cg_assign.css";
+import "../css/edit_cg_assign.css";
 
 const EditCgAssign = () => {
   const [formData, setFormData] = useState({
