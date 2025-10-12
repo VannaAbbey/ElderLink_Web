@@ -6,7 +6,7 @@ import { FaUser, FaPhone, FaEnvelope } from "react-icons/fa";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import "./profileCaregiver.css";
+import "../css/profileCaregiver.css";
 
 export default function ProfileCaregiver() {
   const { id } = useParams();

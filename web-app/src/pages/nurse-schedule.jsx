@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { onSnapshot, collection, query, where } from "firebase/firestore";
-import "./schedule.css";
+import "../css/schedule.css";
 import Navbar from "./navbar";
 import { NurseScheduleService } from "../services/nurseScheduleService";
 import { markNurseAbsent, getTempReassignments, hasAbsenceForDate, batchCheckAbsencesForDate } from "../services/nurseAbsenceService";

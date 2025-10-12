@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db } from "../firebase";
-import "./profileElderly.css";
+import "../css/profileElderly.css";
 
 export default function EditElderlyOverlay({ elderId, onClose, onUpdate }) {
   const [formData, setFormData] = useState({

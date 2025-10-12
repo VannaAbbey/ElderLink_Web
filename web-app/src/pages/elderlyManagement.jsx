@@ -4,7 +4,7 @@ import { db } from "../firebase";
 import { collection, getDocs } from "firebase/firestore";
 import Navbar from "./navbar";
 import HouseView from "./houseView";
-import "./elderlyManagement.css";
+import "../css/elderlyManagement.css";
 
 
 export default function ElderlyManagement() {

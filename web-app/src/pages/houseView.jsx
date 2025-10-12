@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import "./elderlyManagement.css";
+import "../css/elderlyManagement.css";
 import EditElderlyOverlay from "./edit_elderly_profile";
 
 export default function HouseView({ houseId: propHouseId }) {
