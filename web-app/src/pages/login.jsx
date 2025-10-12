@@ -4,7 +4,7 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { MdVisibility, MdVisibilityOff } from "react-icons/md";
-import "./login.css";
+import "../css/login.css";
 
 export default function Login() {
   const [email, setEmail] = useState("");

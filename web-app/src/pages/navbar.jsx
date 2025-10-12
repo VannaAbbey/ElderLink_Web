@@ -6,7 +6,7 @@ import { FaBell, FaBars, FaTimes } from "react-icons/fa";
 import { collection, query, where, onSnapshot, updateDoc, doc, getDoc, getDocs } from "firebase/firestore";
 import { processApprovedLeave } from "../services/absenceService";
 import Notifications from "./notifications";
-import "./navbar.css";
+import "../css/navbar.css";
 
 export default function Navbar() {
   const navigate = useNavigate();

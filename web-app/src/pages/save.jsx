@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import "./elderlyManagement.css.css";
+import "../css/elderlyManagement.css";
 
 const EditCaregiverProfile = () => {
   const navigate = useNavigate();

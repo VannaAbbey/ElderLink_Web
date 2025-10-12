@@ -12,7 +12,7 @@ import {
 } from "firebase/firestore";
 import { useLocation, useNavigate } from "react-router-dom";
 import { processApprovedLeave } from "../services/absenceService";
-import "./elderlyManagement.css";
+import "../css/elderlyManagement.css";
 import "../css/notifications.css";
 
 export default function Notifications({ isOpen, onClose, isModal = false, focusedNotification = null }) {

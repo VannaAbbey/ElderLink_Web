@@ -11,7 +11,7 @@ import {
   updateDoc,
   deleteDoc,
 } from "firebase/firestore";
-import "./schedule.css";
+import "../css/schedule.css";
 
 export default function Schedule() {
   const [caregivers, setCaregivers] = useState([]);

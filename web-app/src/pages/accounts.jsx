@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import Navbar from "./navbar";
 import EditCgProfile from "./edit_cg_profile";
 import EditNurseProfile from "./edit_nurse_profile";
-import "./accounts.css"; 
+import "../css/accounts.css"; 
 
 export default function Accounts() {
   const [activeTab, setActiveTab] = useState("caregiver");
