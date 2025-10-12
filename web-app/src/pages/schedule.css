@@ -33,6 +33,12 @@
   border: 1px solid #ccc;
 }
 
+/* Specific width for the custom months input */
+.control-panel input[type="number"] {
+  min-width: 150px;
+  width: 150px;
+}
+
 .control-panel button {
   background-color: #216386;
   color: white;
@@ -81,7 +87,7 @@
   background-color: white;
   border-radius: 10px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  max-width: 1300px; /* Narrow width for breathing space */
+  max-width: 1320px; /* Narrow width for breathing space */
   width: 100%;
   margin: 0 auto; /* Center container on page */
   padding: 15px;
@@ -89,11 +95,92 @@
   top: -5px; /* Para dikit sa tabs */
 }
 
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 20px; /* Add space between sections */
+}
+
+.table-header > div {
+  display: flex;
+  align-items: center;
+}
+
 .shift-tabs {
   display: flex;
   gap: 5px;
   margin: 0;
   padding: 0;
+}
+
+/* Add space between multiple shift-tabs sections (for nurse-schedule day tabs) */
+.shift-tabs + .shift-tabs {
+  margin-top: 15px;
+}
+
+/* ========== DAYS OF WEEK TABS - COMMENT OUT THIS SECTION TO REMOVE ========== */
+.day-tabs {
+  display: flex;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+}
+
+.day-tab {
+  padding: 8px 12px;
+  border-radius: 8px 8px 0 0;
+  border: none;
+  background-color: #f8f9fa;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: #495057;
+  transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.day-tab.active-day {
+  background-color: #28a745;
+  color: white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  font-weight: bold;
+}
+
+.day-tab:hover:not(.active-day) {
+  background-color: #e9ecef;
+  transform: translateY(-1px);
+}
+/* ========== END DAYS OF WEEK TABS SECTION ========== */
+
+.date-picker-top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-picker-top-right .date-picker-label {
+  font-weight: 600;
+  color: #495057;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.date-picker-top-right .date-picker-input {
+  padding: 8px 10px;
+  border: 2px solid #dee2e6;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  transition: border-color 0.2s;
+  min-width: 140px;
+}
+
+.date-picker-top-right .date-picker-input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
 }
 
 .schedule-table {
@@ -149,15 +236,63 @@
 }
 
 /* Row styling for absent caregivers */
-.absent-row {
-  background-color: rgba(255, 0, 0, 0.3);
+.schedule-table tr.absent-row {
+  background-color: rgba(255, 182, 193, 0.6) !important;
   font-weight: bold;
+}
+
+.schedule-table tr.absent-row td {
+  background-color: rgba(255, 182, 193, 0.6) !important;
+}
+
+/* Row styling for caregivers on leave */
+.schedule-table tr.on-leave-row {
+  background-color: rgba(76, 175, 80, 0.2) !important;
+  border-left: 4px solid #4caf50 !important;
+  font-weight: bold;
+}
+
+.schedule-table tr.on-leave-row td {
+  background-color: rgba(76, 175, 80, 0.2) !important;
+}
+
+/* Row styling for emergency coverage caregivers */
+.schedule-table tr.emergency-row {
+  background-color: rgba(255, 193, 7, 0.4) !important;
+  border-left: 4px solid #f39c12 !important;
+  font-weight: bold;
+}
+
+.schedule-table tr.emergency-row td {
+  background-color: rgba(255, 193, 7, 0.4) !important;
+}
+
+/* Emergency coverage badge */
+.emergency-badge {
+  display: inline-block;
+  background: #f39c12;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: bold;
+  margin-right: 8px;
 }
 
 /* Text notice for absent caregivers */
 .absent-text {
   color: red;
   margin-right: 8px;
+}
+
+/* Text notice for caregivers on leave */
+.on-leave-text {
+  color: #4caf50;
+  font-weight: bold;
+  margin-right: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 /* Buttons */
@@ -201,12 +336,85 @@
   z-index: 1000;
 }
 
+/* Overlay styles for confirmation dialogs */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.overlay-content {
+  background: #fff;
+  padding: 30px 40px;
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  font-size: 16px;
+  color: #333;
+  max-width: 400px;
+  width: 90%;
+}
+
+.overlay-content p {
+  margin: 0 0 20px 0;
+  line-height: 1.5;
+}
+
+.overlay-content button {
+  margin: 0 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.overlay-content button:first-of-type {
+  background: #007bff;
+  color: white;
+}
+
+.overlay-content button:first-of-type:hover {
+  background: #0056b3;
+}
+
+.overlay-content button:last-of-type {
+  background: #6c757d;
+  color: white;
+}
+
+.overlay-content button:last-of-type:hover {
+  background: #545b62;
+}
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
 .modal {
   background: #fff;
   padding: 20px;
   border-radius: 10px;
   width: 400px;
   max-width: 90%;
+  text-align: center;
 }
 
 .modal h3 {
@@ -278,31 +486,6 @@
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
-}
-
-/* Day Tabs - match the same design as shift tabs */
-.day-tabs {
-  display: flex;
-  gap: 5px;
-  margin: 10px 0; /* space between shift tabs and day tabs */
-  padding: 0;
-}
-
-.day-tab {
-  padding: 12px 44px;
-  border-radius: 10px 10px 0 0;
-  border: none;
-  background-color: #ece8e8;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-  transition: all 0.2s;
-}
-
-.day-tab.active-day {
-  background-color: #216386;
-  color: white;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
-  font-weight: bold;
 }
 
 .button-toggle {
@@ -386,6 +569,165 @@
   vertical-align: middle;
   text-align: center;
   padding: 6px;
+  max-width: 300px;
+  width: auto;
+  overflow: hidden;
+}
+
+.nurse-schedule-table td:nth-child(1) {
+  width: 100px;
+}
+
+/* Specific styling for nurse schedule table columns */
+.nurse-schedule-table td:nth-child(2) {
+  text-align: left;
+  vertical-align: top;
+  max-width: 800px;
+  width: 800px;
+}
+
+.nurse-schedule-table td:nth-child(3) {
+  text-align: center;
+  vertical-align: middle;
+  width: 50px;
+  max-width: 50px;
+}
+
+/* Edit mode table with equal column widths */
+.nurse-edit-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  table-layout: fixed; /* Forces equal column distribution */
+}
+
+.nurse-edit-table th,
+.nurse-edit-table td {
+  border: 1px solid #ddd;
+  padding: 12px;
+  text-align: center;
+  width: auto; /* Equal width distribution */
+  vertical-align: middle;
+}
+
+.nurse-edit-table th {
+  background-color: #216386 !important;
+  color: white;
+  text-align: center;
+  font-weight: bold;
+  padding: 12px;
+}
+
+/* First column (Nurse names) - left aligned */
+.nurse-edit-table td:first-child,
+.nurse-edit-table th:first-child {
+  text-align: left;
+  font-weight: bold;
+}
+
+/* Day columns - center aligned */
+.nurse-edit-table td:not(:first-child) {
+  text-align: center;
+}
+
+/* Select dropdowns in edit table */
+.nurse-edit-table select {
+  width: 90%;
+  max-width: none;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+/* New Nurse Table Styling */
+.new-nurse-table {
+  border: 2px solid #28a745;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(40, 167, 69, 0.1);
+}
+
+.new-nurse-table th {
+  background-color: #28a745 !important;
+  color: white;
+}
+
+.new-nurse-row {
+  background-color: rgba(40, 167, 69, 0.05);
+}
+
+.new-nurse-row:hover {
+  background-color: rgba(40, 167, 69, 0.1);
+}
+
+/* Quick Actions Column Styling */
+.quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 120px;
+}
+
+.quick-actions select {
+  width: 100% !important;
+  font-size: 11px !important;
+  padding: 3px 4px !important;
+  background: linear-gradient(145deg, #f8f9fa, #e9ecef);
+  border: 1px solid #28a745;
+  border-radius: 4px;
+}
+
+.quick-actions select:hover {
+  background: linear-gradient(145deg, #e9ecef, #dee2e6);
+  box-shadow: 0 2px 4px rgba(40, 167, 69, 0.2);
+}
+
+/* Visual indicators for new nurses */
+.new-nurse-row td:first-child::before {
+  content: "🆕";
+  margin-right: 6px;
+  font-size: 14px;
+}
+
+/* Highlight assigned days for new nurses */
+.new-nurse-row select[style*="background-color: rgb(232, 245, 232)"] {
+  border: 2px solid #28a745;
+  font-weight: bold;
+}
+
+/* New nurses info banner */
+.new-nurses-info {
+  animation: fadeInSlide 0.5s ease-out;
+}
+
+@keyframes fadeInSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Section headers */
+.schedule-page h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: 2px solid;
+  display: inline-block;
+  min-width: 200px;
+}
+
+.schedule-page h3[style*="color: rgb(33, 99, 134)"] {
+  border-bottom-color: #216386;
+}
+
+.schedule-page h3[style*="color: rgb(40, 167, 69)"] {
+  border-bottom-color: #28a745;
 }
 
 /* Prevent nurse names from wrapping */
@@ -394,34 +736,22 @@
   white-space: nowrap;   /* keep in one line */
   text-align: left;      /* align nicely */
   padding: 6px 12px;
+  width: 100px;
   max-width: 200px;      /* optional: constrain column */
-  overflow: hidden;      /* if too long, hide */
-  text-overflow: ellipsis; /* add ... if truncated */
 }
 
-/* ✅ Day Tabs - same look as House/Shift Tabs */
-.day-tabs {
-  display: flex;
-  gap: 5px;
-  margin: 10px 0; /* space between shift tabs and day tabs */
-  padding: 0;
+.schedule-table td:nth-child(2) {
+  text-align: center;      /* align nicely */
+  padding: 6px 12px;
+  width: 200px;
+  max-width: 200px;      /* optional: constrain column */
 }
 
-.day-tab {
-  padding: 12px 44px; /* same as shift-tab */
-  border-radius: 10px 10px 0 0;
-  border: none;
-  background-color: #ece8e8;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-  transition: all 0.2s;
-}
-
-.day-tab.active {
-  background-color: #216386;
-  color: white;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
-  font-weight: bold;
+.schedule-table td:nth-child(4) {
+  text-align: center;
+  padding: 6px 12px;
+  max-width: 100px;
+  width: 100px;
 }
 
 .toggle-header {
@@ -437,10 +767,957 @@
 }
 
 .schedule-inline {
+  background: rgba(85, 162, 204, 0.05);
+  border: 1px solid rgba(11, 33, 45, 0.2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
   font-size: 14px;
   color: #333;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
 }
+
 .schedule-inline strong {
-  color: #000;
+  color: #216386;
+  font-weight: 600;
+}
+
+/* Confirmation Popup Styles */
+.popup-content {
+  background: white;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+}
+
+.popup-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 16px;
+}
+
+.popup-title .caregiver-name {
+  color: #dc3545;
+  font-weight: 600;
+}
+
+.popup-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.popup-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.popup-btn.yes {
+  background: #dc3545;
+  color: white;
+}
+
+.popup-btn.yes:hover {
+  background: #c82333;
+}
+
+.popup-btn.no {
+  background: #6c757d;
+  color: white;
+}
+
+.popup-btn.no:hover {
+  background: #5a6268;
+}
+
+/* Emergency Coverage Modal Styles */
+.emergency-modal {
+  background: white;
+  padding: 24px;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  max-width: 800px;
+  width: 95%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  text-align: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #e74c3c;
+}
+
+.modal-header h3 {
+  color: #e74c3c;
+  font-size: 24px;
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.modal-header p {
+  color: #666;
+  font-size: 16px;
+  margin: 0;
+}
+
+.modal-body {
+  margin-bottom: 20px;
+}
+
+.emergency-option {
+  background: #fff5f5;
+  border: 2px solid #fecaca;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.emergency-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.emergency-info strong {
+  color: #dc2626;
+  font-size: 18px;
+}
+
+.absent-count {
+  background: #ef4444;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.donor-selection {
+  margin-top: 12px;
+}
+
+.donor-selection label {
+  display: block;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.donor-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 2px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  margin-bottom: 8px;
+}
+
+.donor-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.selected-choice {
+  background: #dcfce7;
+  border: 1px solid #16a34a;
+  color: #15803d;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.no-donors {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 12px;
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.execute-emergency-btn {
+  background: #dc2626;
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.execute-emergency-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.execute-emergency-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.cancel-emergency-btn {
+  background: #6b7280;
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.cancel-emergency-btn:hover {
+  background: #4b5563;
+}
+
+/* New Caregiver Integration Modal Styles */
+.integration-modal {
+  background: white;
+  padding: 24px;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  max-width: 900px;
+  width: 95%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.integration-modal .modal-header {
+  text-align: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #28a745;
+}
+
+.integration-modal .modal-header h3 {
+  color: #28a745;
+  font-size: 24px;
+  margin-bottom: 8px;
+  font-weight: bold;
+}
+
+.integration-modal .modal-header p {
+  color: #666;
+  font-size: 16px;
+  margin: 0;
+}
+
+.caregiver-selection {
+  margin-bottom: 24px;
+}
+
+.caregiver-selection h4 {
+  color: #333;
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+
+.caregiver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.caregiver-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: white;
+}
+
+.caregiver-item:hover {
+  border-color: #28a745;
+  background: #f0f9ff;
+}
+
+.caregiver-item.selected {
+  border-color: #28a745;
+  background: #dcfce7;
+  box-shadow: 0 2px 4px rgba(40, 167, 69, 0.1);
+}
+
+.caregiver-name {
+  font-weight: 600;
+  color: #333;
+}
+
+.caregiver-info {
+  font-size: 14px;
+  color: #666;
+}
+
+.integration-mode {
+  margin-bottom: 24px;
+}
+
+.integration-mode h4 {
+  color: #333;
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.mode-options {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mode-option {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-option:hover {
+  border-color: #28a745;
+  background: #f9fafb;
+}
+
+.mode-option input[type="radio"] {
+  margin-left: 12px;
+  margin-top: 14px;
+  flex-shrink: 0;
+  order: 2;
+}
+
+.mode-option-content {
+  display: flex;
+  flex-direction: column;
+  order: 1;
+  flex: 1;
+}
+
+.mode-option span {
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.mode-option small {
+  color: #666;
+  font-size: 14px;
+}
+
+.mode-option input[type="radio"]:checked + span {
+  color: #28a745;
+}
+
+.recommendations {
+  margin-bottom: 24px;
+}
+
+.recommendations h4 {
+  color: #333;
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.recommendation-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  background: #f8f9fa;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.recommendation-item:hover {
+  border-color: #007bff;
+  background: #e7f3ff;
+  box-shadow: 0 2px 4px rgba(0, 123, 255, 0.1);
+}
+
+.recommendation-item.selected {
+  border: 2px solid #007bff !important;
+  background: #e7f3ff !important;
+  box-shadow: 0 2px 8px rgba(0, 123, 255, 0.2);
+}
+
+.selection-reminder {
+  margin-top: 12px;
+  padding: 8px;
+  text-align: center;
+}
+
+.rec-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.rec-rank {
+  font-weight: bold;
+  color: #28a745;
+}
+
+.rec-coverage {
+  background: #dc3545;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.rec-details {
+  color: #333;
+}
+
+.rec-details strong {
+  font-size: 16px;
+}
+
+.rec-days {
+  color: #666;
+  font-size: 14px;
+  margin: 4px 0;
+}
+
+.rec-explanation {
+  margin-top: 8px;
+}
+
+.rec-explanation small {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.manual-assignment {
+  margin-bottom: 24px;
+}
+
+.manual-assignment h4 {
+  color: #333;
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.assignment-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-group label {
+  font-weight: 600;
+  color: #333;
+  font-size: 14px;
+}
+
+.field-group select {
+  padding: 8px 12px;
+  border: 2px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+}
+
+.field-group select:focus {
+  outline: none;
+  border-color: #28a745;
+  box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.1);
+}
+
+.days-checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.day-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.day-checkbox input[type="checkbox"] {
+  margin: 0;
+}
+
+.execute-integration-btn {
+  background: #28a745;
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.execute-integration-btn:hover:not(:disabled) {
+  background: #218838;
+}
+
+.execute-integration-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.cancel-integration-btn {
+  background: #6b7280;
+  color: white;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.cancel-integration-btn:hover {
+  background: #4b5563;
+}
+
+/* Custom Alert Modal Styles */
+.custom-alert {
+  max-width: 500px;
+  width: 90%;
+  text-align: center;
+  margin-right: 30em;
+  margin-top: 20em;
+}
+
+.alert-message {
+  font-size: 16px;
+  line-height: 1.5;
+  color: #495057;
+  margin: 20px 0;
+  white-space: pre-line; /* Preserves line breaks from \n */
+  text-align: center;
+}
+
+.ok-btn {
+  background-color: #007bff;
+  color: white;
+  min-width: 80px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: background-color 0.2s;
+  margin-top: 8px;
+}
+
+.ok-btn:hover {
+  background-color: #0056b3;
+}
+
+/* Accordion-style House Assignment Styles organized under schedule-page */
+.schedule-page .assignment-accordion {
+  width: 100%;
+  max-width: 100%;
+}
+
+.schedule-page .day-group {
+  margin-bottom: 12px;
+}
+
+.schedule-page .day-header {
+  color: #1976d2;
+  font-weight: bold;
+  font-size: 14px;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.schedule-page .house-accordions {
+  margin-left: 8px;
+}
+
+.schedule-page .house-accordion {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  background: #fafafa;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.schedule-page .house-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: #f5f5f5;
+  transition: background-color 0.2s ease;
+  border-bottom: 1px solid #e0e0e0;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 36px;
+}
+
+.schedule-page .house-header:hover {
+  background: #e8f4fd;
+}
+
+.schedule-page .house-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.schedule-page .house-name {
+  font-weight: 600;
+  color: #0066cc;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.schedule-page .elderly-count {
+  font-size: 12px;
+  color: #666;
+  background: #e3f2fd;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.schedule-page .expand-icon {
+  font-weight: bold;
+  font-size: 16px;
+  color: #1976d2;
+  width: 20px;
+  text-align: center;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.schedule-page .house-header:hover .expand-icon {
+  transform: scale(1.1);
+}
+
+.schedule-page .elderly-list {
+  padding: 10px 12px;
+  background: white;
+  color: #333;
+  font-size: 13px;
+  line-height: 1.4;
+  border-top: 1px solid #f0f0f0;
+  animation: expandDown 0.2s ease-out;
+  width: 100%;
+  box-sizing: border-box;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.schedule-page .no-assignments {
+  color: #888;
+  font-style: italic;
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+/* Animation for expanding elderly list */
+@keyframes expandDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 200px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+}
+
+/* ===== SEARCH PANEL STYLES ===== */
+.search-panel {
+  position: relative;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.caregiver-search-input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 16px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  outline: none;
+  background: white;
+  transition: border-color 0.2s ease;
+}
+
+.caregiver-search-input:focus {
+  border-color: #216386;
+  box-shadow: 0 0 0 3px rgba(33, 99, 134, 0.1);
+}
+
+.clear-search-btn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #999;
+  padding: 4px;
+  line-height: 1;
+  transition: color 0.2s ease;
+}
+
+.clear-search-btn:hover {
+  color: #666;
+}
+
+.search-results-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 2px solid #ddd;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.search-results-header {
+  padding: 12px 16px;
+  background: #f8f9fa;
+  font-weight: bold;
+  color: #216386;
+  border-bottom: 1px solid #eee;
+}
+
+.no-results {
+  padding: 20px 16px;
+  text-align: center;
+  color: #999;
+  font-style: italic;
+}
+
+.search-result-item {
+  padding: 16px;
+  border-bottom: 1px solid #eee;
+  transition: background-color 0.2s ease;
+}
+
+.search-result-item:hover {
+  background-color: #f8f9fa;
+}
+
+.search-result-item:last-child {
+  border-bottom: none;
+}
+
+.search-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.caregiver-name {
+  font-weight: bold;
+  font-size: 16px;
+  color: #333;
+}
+
+.search-result-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.absence-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.absence-badge.absent {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.absence-badge.on-leave {
+  background: #e8f5e8;
+  color: #2e7d32;
+}
+
+.emergency-badge {
+  padding: 4px 8px;
+  background: #fff3e0;
+  color: #f57c00;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.search-result-details {
+  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.search-result-details > div {
+  margin-bottom: 4px;
+}
+
+.assignment-info strong,
+.work-days strong,
+.elderly-count strong {
+  color: #666;
+  font-weight: 600;
+}
+
+.elderly-names {
+  color: #888;
+  font-size: 13px;
+  padding-left: 16px;
+}
+
+.navigate-btn {
+  background: #216386;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: bold;
+  transition: background-color 0.2s ease;
+}
+
+.navigate-btn:hover {
+  background: #1a5070;
+}
+
+/* Responsive adjustments for search */
+@media (max-width: 768px) {
+  .search-panel {
+    max-width: none;
+    margin: 0 16px 20px 16px;
+  }
+  
+  .caregiver-search-input {
+    font-size: 14px;
+    padding: 10px 14px;
+  }
+  
+  .search-result-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .search-result-badges {
+    align-self: flex-end;
+  }
+  
+  .search-result-details {
+    font-size: 13px;
+  }
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 768px) {
+  .schedule-page .house-header {
+    padding: 6px 8px;
+  }
+  
+  .schedule-page .house-name {
+    font-size: 13px;
+  }
+  
+  .schedule-page .elderly-count {
+    font-size: 11px;
+    padding: 1px 4px;
+  }
+  
+  .schedule-page .elderly-list {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
 }
 
