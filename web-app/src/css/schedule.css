@@ -1014,21 +1014,26 @@
   overflow-y: auto;
 }
 
-.integration-modal .modal-header {
+.integration-modal-header {
   text-align: center;
   margin-bottom: 24px;
+  padding: 16px;
   padding-bottom: 16px;
   border-bottom: 2px solid #28a745;
+  background: white !important;
+  background-color: white !important;
+  background-image: none !important;
+  border-radius: 8px 8px 0 0;
 }
 
-.integration-modal .modal-header h3 {
-  color: #28a745;
+.integration-modal-header h3 {
+  color: #28a745 !important;
   font-size: 24px;
   margin-bottom: 8px;
   font-weight: bold;
 }
 
-.integration-modal .modal-header p {
+.integration-modal-header p {
   color: #666;
   font-size: 16px;
   margin: 0;
@@ -1163,11 +1168,12 @@
 .recommendation-item {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 12px;
-  background: #f8f9fa;
+  padding: 18px;
+  margin-bottom: 14px;
+  background: white;
   cursor: pointer;
   transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .recommendation-item:hover {
@@ -1201,12 +1207,18 @@
 }
 
 .rec-coverage {
-  background: #dc3545;
+  background: #007bff;
   color: white;
-  padding: 2px 8px;
+  padding: 4px 10px;
   border-radius: 12px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: bold;
+  cursor: help;
+  transition: background-color 0.2s;
+}
+
+.rec-coverage:hover {
+  background: #0056b3;
 }
 
 .rec-details {
@@ -1224,12 +1236,16 @@
 }
 
 .rec-explanation {
-  margin-top: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  border-left: 3px solid #007bff;
 }
 
 .rec-explanation small {
-  color: #6b7280;
-  font-style: italic;
+  color: #495057;
+  line-height: 1.6;
 }
 
 .manual-assignment {

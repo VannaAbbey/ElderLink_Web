@@ -6,7 +6,7 @@ import { FaUser, FaPhone, FaEnvelope } from "react-icons/fa";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import "./profileNurse.css";
+import "../css/profileNurse.css";
 
 export default function ProfileNurse() {
   const { id } = useParams();

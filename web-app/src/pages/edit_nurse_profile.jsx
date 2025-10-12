@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FaUserNurse, FaUserCircle } from "react-icons/fa"; // nurse + user icon
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
-import "./edit_nurse_profile.css";
+import "../css/edit_nurse_profile.css";
 import EditNurseOverlay from "./edit_nurse_overlay.jsx";
 
 

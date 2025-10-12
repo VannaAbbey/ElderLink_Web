@@ -3,7 +3,7 @@ import { collection, getDocs } from "firebase/firestore";
 import { db } from "../firebase";
 import Navbar from "./navbar";
 import { useNavigate } from "react-router-dom";
-import "./dashboard.css";
+import "../css/dashboard.css";
 
 export default function Dashboard() {
   const [totalElderly, setTotalElderly] = useState(0);
