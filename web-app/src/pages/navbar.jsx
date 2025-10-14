@@ -530,12 +530,12 @@ export default function Navbar() {
         >
           Nurse Schedule
         </li>
-        <li
+        {/* <li
           className={location.pathname.startsWith("/incident-reports") ? "active" : ""}
           onClick={() => { navigate("/incident-reports"); setMenuOpen(false); }}
         >
           Incident Reports
-        </li>
+        </li> */}
         <li
           className={location.pathname.startsWith("/accounts") ? "active" : ""}
           onClick={() => { navigate("/accounts"); setMenuOpen(false); }}
