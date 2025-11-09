@@ -260,6 +260,7 @@ export const fetchElderlyAssignments = async () => {
       query(
         collection(db, "elderly_assignments"),
         where("status", "==", "active"),
+        where("is_current", "==", true),
         where("user_type", "==", "caregiver")
       )
     );
@@ -389,7 +390,8 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
       { name: "3rd Shift (10:00 PM - 6:00 AM)", key: "3rd", time_range: { start: "22:00", end: "06:00" } },
     ];
 
-    // 🔹 1. Deactivate current assignments
+    // 🔹 1. Deactivate current house_shift_assignments
+    console.log(`📋 Deactivating current house_shift_assignments...`);
     const allAssignSnap = await getDocs(
       query(
         collection(db, "house_shift_assignments"), 
@@ -417,6 +419,115 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
       batch = writeBatch(db);
       writeCount = 0;
     }
+    console.log(`✅ Deactivated ${allAssignSnap.docs.length} house_shift_assignments`);
+
+    // 🔹 1.1 Deactivate current elderly_assignments (mark as inactive instead of deleting)
+    console.log(`📋 Deactivating current elderly_assignments...`);
+    const elderlyAssignSnap = await getDocs(
+      query(
+        collection(db, "elderly_assignments"),
+        where("status", "==", "active"),
+        where("is_current", "==", true),
+        where("user_type", "==", "caregiver")
+      )
+    );
+
+    for (const d of elderlyAssignSnap.docs) {
+      batch.update(doc(db, "elderly_assignments", d.id), { 
+        status: "inactive",
+        is_current: false,
+        deactivated_at: Timestamp.now()
+      });
+      writeCount++;
+      if (writeCount >= BATCH_SIZE) {
+        await batch.commit();
+        await new Promise((r) => setTimeout(r, 0));
+        batch = writeBatch(db);
+        writeCount = 0;
+      }
+    }
+    if (writeCount > 0) {
+      await batch.commit();
+      await new Promise((r) => setTimeout(r, 0));
+      batch = writeBatch(db);
+      writeCount = 0;
+    }
+    console.log(`✅ Deactivated ${elderlyAssignSnap.docs.length} elderly_assignments`);
+
+    // 🔹 1.2 Clean up old temporary_assignments (remove expired ones from previous schedule versions)
+    console.log(`🧹 Cleaning up old temporary_assignments...`);
+    const currentVersion = await getMaxVersion();
+    const tempAssignSnap = await getDocs(collection(db, "temporary_assignments"));
+    
+    let cleanedTempCount = 0;
+    for (const d of tempAssignSnap.docs) {
+      const data = d.data();
+      // Remove temp assignments from old versions (keep current version for migration period)
+      if (data.assign_version && data.assign_version < currentVersion - 1) {
+        batch.delete(doc(db, "temporary_assignments", d.id));
+        cleanedTempCount++;
+        writeCount++;
+        if (writeCount >= BATCH_SIZE) {
+          await batch.commit();
+          await new Promise((r) => setTimeout(r, 0));
+          batch = writeBatch(db);
+          writeCount = 0;
+        }
+      }
+    }
+    if (writeCount > 0) {
+      await batch.commit();
+      await new Promise((r) => setTimeout(r, 0));
+      batch = writeBatch(db);
+      writeCount = 0;
+    }
+    console.log(`✅ Cleaned up ${cleanedTempCount} old temporary_assignments from previous versions`);
+
+    // 🔹 1.3 Clean up expired absences (optional - remove old absence records)
+    console.log(`🧹 Cleaning up expired absence records...`);
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)); // 30 days ago
+    
+    const absenceSnap = await getDocs(
+      query(
+        collection(db, "nurse_cg_absence"),
+        where("user_type", "==", "caregiver")
+      )
+    );
+    
+    let cleanedAbsenceCount = 0;
+    for (const d of absenceSnap.docs) {
+      const data = d.data();
+      // Remove absence records older than 30 days (unless marked do_not_clear)
+      if (data.absence_date && !data.do_not_clear) {
+        const absenceDate = new Date(data.absence_date);
+        if (absenceDate < thirtyDaysAgo) {
+          batch.delete(doc(db, "nurse_cg_absence", d.id));
+          cleanedAbsenceCount++;
+          writeCount++;
+          if (writeCount >= BATCH_SIZE) {
+            await batch.commit();
+            await new Promise((r) => setTimeout(r, 0));
+            batch = writeBatch(db);
+            writeCount = 0;
+          }
+        }
+      }
+    }
+    if (writeCount > 0) {
+      await batch.commit();
+      await new Promise((r) => setTimeout(r, 0));
+      batch = writeBatch(db);
+      writeCount = 0;
+    }
+    console.log(`✅ Cleaned up ${cleanedAbsenceCount} expired absence records (older than 30 days)`);
+    
+    console.log(`\n🎯 Database Cleanup Summary:`);
+    console.log(`   • House shift assignments deactivated: ${allAssignSnap.docs.length}`);
+    console.log(`   • Elderly assignments deactivated: ${elderlyAssignSnap.docs.length}`);
+    console.log(`   • Old temporary assignments removed: ${cleanedTempCount}`);
+    console.log(`   • Expired absence records removed: ${cleanedAbsenceCount}`);
+    console.log(`   ✅ Database ready for new schedule generation\n`);
 
     // 🔹 2. Versioning + dates
     const prevVersion = await getMaxVersion();
@@ -1067,6 +1178,144 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
   } catch (error) {
     console.error("Error generating schedule:", error);
     throw new Error("Failed to generate schedule: " + error.message);
+  }
+};
+
+// Database maintenance function - removes very old inactive records
+export const cleanupOldScheduleData = async (daysToKeep = 90) => {
+  try {
+    console.log(`🧹 Starting database maintenance - removing records older than ${daysToKeep} days...`);
+    
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+    const cutoffTimestamp = Timestamp.fromDate(cutoffDate);
+    
+    let batch = writeBatch(db);
+    let writeCount = 0;
+    let totalCleaned = {
+      houseAssignments: 0,
+      elderlyAssignments: 0,
+      tempAssignments: 0,
+      absences: 0
+    };
+
+    // 1. Clean up old inactive house_shift_assignments
+    const oldHouseAssigns = await getDocs(
+      query(
+        collection(db, "house_shift_assignments"),
+        where("is_current", "==", false),
+        where("user_type", "==", "caregiver")
+      )
+    );
+
+    for (const d of oldHouseAssigns.docs) {
+      const data = d.data();
+      // Check if end_date is older than cutoff
+      if (data.end_date && data.end_date.toDate() < cutoffDate) {
+        batch.delete(doc(db, "house_shift_assignments", d.id));
+        totalCleaned.houseAssignments++;
+        writeCount++;
+        if (writeCount >= BATCH_SIZE) {
+          await batch.commit();
+          batch = writeBatch(db);
+          writeCount = 0;
+        }
+      }
+    }
+
+    // 2. Clean up old inactive elderly_assignments
+    const oldElderlyAssigns = await getDocs(
+      query(
+        collection(db, "elderly_assignments"),
+        where("status", "==", "inactive"),
+        where("user_type", "==", "caregiver")
+      )
+    );
+
+    for (const d of oldElderlyAssigns.docs) {
+      const data = d.data();
+      // Check if deactivated_at is older than cutoff
+      if (data.deactivated_at && data.deactivated_at.toDate() < cutoffDate) {
+        batch.delete(doc(db, "elderly_assignments", d.id));
+        totalCleaned.elderlyAssignments++;
+        writeCount++;
+        if (writeCount >= BATCH_SIZE) {
+          await batch.commit();
+          batch = writeBatch(db);
+          writeCount = 0;
+        }
+      }
+    }
+
+    // 3. Clean up very old temporary_assignments (any without assign_version or very old dates)
+    const allTempAssigns = await getDocs(collection(db, "temporary_assignments"));
+    
+    for (const d of allTempAssigns.docs) {
+      const data = d.data();
+      // Remove if date is older than cutoff
+      if (data.date) {
+        const assignDate = new Date(data.date);
+        if (assignDate < cutoffDate) {
+          batch.delete(doc(db, "temporary_assignments", d.id));
+          totalCleaned.tempAssignments++;
+          writeCount++;
+          if (writeCount >= BATCH_SIZE) {
+            await batch.commit();
+            batch = writeBatch(db);
+            writeCount = 0;
+          }
+        }
+      }
+    }
+
+    // 4. Clean up very old absence records (unless marked do_not_clear)
+    const allAbsences = await getDocs(
+      query(
+        collection(db, "nurse_cg_absence"),
+        where("user_type", "==", "caregiver")
+      )
+    );
+    
+    for (const d of allAbsences.docs) {
+      const data = d.data();
+      if (data.absence_date && !data.do_not_clear) {
+        const absenceDate = new Date(data.absence_date);
+        if (absenceDate < cutoffDate) {
+          batch.delete(doc(db, "nurse_cg_absence", d.id));
+          totalCleaned.absences++;
+          writeCount++;
+          if (writeCount >= BATCH_SIZE) {
+            await batch.commit();
+            batch = writeBatch(db);
+            writeCount = 0;
+          }
+        }
+      }
+    }
+
+    // Final commit
+    if (writeCount > 0) {
+      await batch.commit();
+    }
+
+    console.log(`✅ Database maintenance complete!`);
+    console.log(`   • Old house assignments removed: ${totalCleaned.houseAssignments}`);
+    console.log(`   • Old elderly assignments removed: ${totalCleaned.elderlyAssignments}`);
+    console.log(`   • Old temporary assignments removed: ${totalCleaned.tempAssignments}`);
+    console.log(`   • Old absence records removed: ${totalCleaned.absences}`);
+
+    return {
+      success: true,
+      message: `Cleaned up ${Object.values(totalCleaned).reduce((a, b) => a + b, 0)} old records`,
+      details: totalCleaned
+    };
+
+  } catch (error) {
+    console.error("Error during database maintenance:", error);
+    return { 
+      success: false, 
+      message: `Database maintenance failed: ${error.message}` 
+    };
   }
 };
 

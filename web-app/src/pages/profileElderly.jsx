@@ -153,7 +153,7 @@ export default function Profile_Elderly() {
       <div className="elderly-profile-container-img">
         <div className="profile-left">
           <img
-            src={elder.elderly_profilePic || "/images/house1.png"}
+            src={elder.elderly_profilePic || "/images/people_icon.png"}
             alt={elder.elderly_fname}
             className="profile-picture-large"
           />

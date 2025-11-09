@@ -43,6 +43,10 @@ export default function Navbar() {
 
   const handleLogout = async () => {
     try {
+      // 🔐 Clear session token on logout
+      localStorage.removeItem('session_token');
+      localStorage.removeItem('user_id');
+      
       await signOut(auth);
       navigate("/login", { replace: true });
     } catch (error) {
@@ -530,12 +534,12 @@ export default function Navbar() {
         >
           Nurse Schedule
         </li>
-        <li
+        {/* <li
           className={location.pathname.startsWith("/incident-reports") ? "active" : ""}
           onClick={() => { navigate("/incident-reports"); setMenuOpen(false); }}
         >
           Incident Reports
-        </li>
+        </li> */}
         <li
           className={location.pathname.startsWith("/accounts") ? "active" : ""}
           onClick={() => { navigate("/accounts"); setMenuOpen(false); }}

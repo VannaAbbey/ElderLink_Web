@@ -40,16 +40,27 @@ export const detectUnassignedCaregivers = async () => {
       assignedCaregiverIds.add(doc.data().user_id);
     });
     
-    // Find unassigned caregivers
+    // Find unassigned caregivers (exclude resigned/deactivated caregivers)
     const unassignedCaregivers = [];
+    let deactivatedCount = 0;
+    
     allCaregivers.docs.forEach(doc => {
       const caregiverData = { id: doc.id, ...doc.data() };
+      
+      // ✅ FILTER: Only include caregivers who are ACTIVE (user_activation !== false)
+      const isActive = caregiverData.user_activation !== false;
+      
       if (!assignedCaregiverIds.has(doc.id)) {
-        unassignedCaregivers.push(caregiverData);
+        if (isActive) {
+          unassignedCaregivers.push(caregiverData);
+        } else {
+          deactivatedCount++;
+          console.log(`🚫 Skipping deactivated caregiver: ${caregiverData.user_fname} ${caregiverData.user_lname} (${doc.id})`);
+        }
       }
     });
     
-    console.log(`🔍 Found ${unassignedCaregivers.length} unassigned caregivers out of ${allCaregivers.docs.length} total`);
+    console.log(`🔍 Found ${unassignedCaregivers.length} active unassigned caregivers out of ${allCaregivers.docs.length} total (${deactivatedCount} deactivated excluded)`);
     
     return unassignedCaregivers;
     
@@ -110,36 +121,56 @@ export const generateCaregiverRecommendations = async (caregiverId, assignments,
       }
     }
     
-    // Sort by coverage improvement with house diversity
-    allRecommendations.sort((a, b) => {
-      // Primary: Most weak slots covered
+    // ENSURE ONE RECOMMENDATION PER HOUSE: Get the best recommendation from EACH of the 5 houses
+    const houseRecommendations = [];
+    
+    // For each house, find the best recommendation (highest coverage improvement)
+    for (const house of houses) {
+      const houseRecs = allRecommendations.filter(rec => rec.house === house.house_id);
+      
+      if (houseRecs.length > 0) {
+        // Sort by coverage improvement score (prioritize fixing the most gaps)
+        houseRecs.sort((a, b) => {
+          if (b.weakSlotsCovered !== a.weakSlotsCovered) {
+            return b.weakSlotsCovered - a.weakSlotsCovered;
+          }
+          return b.improvementScore - a.improvementScore;
+        });
+        houseRecommendations.push(houseRecs[0]); // Take the best recommendation for this house
+      } else {
+        // If no weak slots found for this house, create a balanced recommendation
+        // This ensures ALL houses are represented even if they have adequate coverage
+        console.log(`ℹ️ House ${house.house_name} has adequate coverage. Creating balanced assignment recommendation...`);
+        
+        const allPatterns = generateAllConsecutivePatterns(daysOfWeek);
+        const balancedRec = {
+          house: house.house_id,
+          houseName: house.house_name,
+          shift: "1st", // Default to 1st shift for balanced assignments
+          workDays: allPatterns[0].days, // Monday-Friday pattern
+          weakSlotsCovered: 0,
+          totalWeakSlots: weakSlots.length,
+          improvementScore: 0,
+          explanation: generateCoverageExplanation({ 
+            weakSlotsCovered: 0, 
+            criticalSlotsCovered: 0, 
+            bedriddenSlotsCovered: 0, 
+            weekendDaysCovered: 0 
+          }, house.house_name, "1st", allPatterns[0].days)
+        };
+        houseRecommendations.push(balancedRec);
+      }
+    }
+    
+    // Sort the 5 house recommendations by their coverage improvement (best first)
+    houseRecommendations.sort((a, b) => {
       if (b.weakSlotsCovered !== a.weakSlotsCovered) {
         return b.weakSlotsCovered - a.weakSlotsCovered;
       }
-      // Secondary: Higher improvement score (considers additional factors)
       return b.improvementScore - a.improvementScore;
     });
     
-    // Ensure house diversity in top recommendations
-    const diverseRecommendations = [];
-    const housesUsed = new Set();
-    
-    // First pass: Get best recommendation from each house
-    for (const rec of allRecommendations) {
-      if (!housesUsed.has(rec.house) && diverseRecommendations.length < 5) {
-        diverseRecommendations.push(rec);
-        housesUsed.add(rec.house);
-      }
-    }
-    
-    // Second pass: Fill remaining slots with other good recommendations
-    for (const rec of allRecommendations) {
-      if (!diverseRecommendations.includes(rec) && diverseRecommendations.length < 5) {
-        diverseRecommendations.push(rec);
-      }
-    }
-    
-    const topRecommendations = diverseRecommendations;
+    const topRecommendations = houseRecommendations.slice(0, 5); // Ensure exactly 5 (one per house)
     
     console.log(`✅ Generated ${topRecommendations.length} coverage-focused recommendations`);
     topRecommendations.forEach((rec, index) => {
@@ -154,12 +185,20 @@ export const generateCaregiverRecommendations = async (caregiverId, assignments,
   }
 };
 
-// Step 1: Identify weakest house/shift/day combinations below coverage threshold
+// Step 1: Identify weakest house/shift/day combinations
+// Strategy: Find slots with lowest coverage for EACH house to ensure all houses are represented
 const identifyWeakestCoverageSlots = async (houses, shifts, daysOfWeek, assignments) => {
   const weakSlots = [];
-  const coverageThreshold = 1; // Minimum caregivers per slot
+  // ✅ STRICTER THRESHOLD: Only flag slots with 0 or 1 caregiver as "weak"
+  // This reduces false positives and focuses on truly understaffed positions
+  const criticalCoverageThreshold = 1; // 0 or 1 caregiver = CRITICAL need
+  
+  // Track the weakest slots per house to ensure all houses get representation
+  const houseSlots = {};
   
   for (const house of houses) {
+    houseSlots[house.house_id] = [];
+    
     for (const shift of shifts) {
       // Get all assignments for this house/shift
       const relevantAssignments = assignments.filter(assignment => 
@@ -184,26 +223,48 @@ const identifyWeakestCoverageSlots = async (houses, shifts, daysOfWeek, assignme
         }
       });
       
-      // Identify slots below threshold
+      // Identify ALL slots and their coverage levels (not just below threshold)
       daysOfWeek.forEach(day => {
         const coverage = dailyCoverage[day];
         const isBedridden = house.house_id === "H002" || house.house_id === "H003";
-        const adjustedThreshold = isBedridden ? coverageThreshold + 1 : coverageThreshold; // Higher threshold for bedridden
         
-        if (coverage < adjustedThreshold) {
-          weakSlots.push({
-            house: house.house_id,
-            houseName: house.house_name,
-            shift: shift,
-            day: day,
-            currentCoverage: coverage,
-            neededCoverage: adjustedThreshold - coverage,
-            isBedridden: isBedridden,
-            isCritical: coverage === 0, // No coverage at all
-            isWeekend: day === 'Saturday' || day === 'Sunday'
-          });
+        // ✅ STRICTER LOGIC: Only count as "weak" if 0 or 1 caregiver
+        // Bedridden houses still get higher priority but use same threshold
+        const isCriticallyUnderstaffed = coverage <= criticalCoverageThreshold;
+        
+        const slot = {
+          house: house.house_id,
+          houseName: house.house_name,
+          shift: shift,
+          day: day,
+          currentCoverage: coverage,
+          neededCoverage: isCriticallyUnderstaffed ? Math.max(0, 2 - coverage) : 0, // Need at least 2
+          isBedridden: isBedridden,
+          isCritical: coverage === 0, // No coverage at all (HIGHEST PRIORITY)
+          isWeakened: coverage === 1, // Only 1 caregiver (SECOND PRIORITY)
+          isWeekend: day === 'Saturday' || day === 'Sunday'
+        };
+        
+        houseSlots[house.house_id].push(slot);
+        
+        // ✅ Only add to weak slots if 0 or 1 caregiver (critically understaffed)
+        if (isCriticallyUnderstaffed) {
+          weakSlots.push(slot);
         }
       });
+    }
+    
+    // ✅ IMPROVED LOGIC: Only add "adequate" houses if they have slots with exactly 1 caregiver
+    // This ensures we still provide recommendations but only for genuinely weak positions
+    const houseWeakSlots = houseSlots[house.house_id].filter(s => s.isCritical || s.isWeakened);
+    if (houseWeakSlots.length === 0 && houseSlots[house.house_id].length > 0) {
+      // Check if there are any slots with exactly 2 caregivers (could use backup)
+      const moderateSlots = houseSlots[house.house_id].filter(s => s.currentCoverage === 2);
+      if (moderateSlots.length > 0) {
+        // Only include these if other houses also have adequate coverage
+        // This keeps the system balanced
+        console.log(`ℹ️ House ${house.house_name} has adequate coverage (2+ caregivers per slot). Will include in balanced recommendations only if needed.`);
+      }
     }
   }
   
@@ -270,37 +331,41 @@ const calculateCoverageImprovement = (houseId, shift, workDays, weakSlots) => {
   };
 };
 
-// Step 4: Generate clear explanation for the recommendation
+// Step 4: Generate clear, user-friendly explanation for the recommendation
 const generateCoverageExplanation = (improvement, houseName, shift, workDays) => {
-  const explanations = [];
+  const parts = [];
   
-  // Primary benefit
-  if (improvement.weakSlotsCovered > 0) {
-    explanations.push(`Covers ${improvement.weakSlotsCovered} understaffed shift${improvement.weakSlotsCovered > 1 ? 's' : ''}`);
-  }
-  
-  // Critical coverage
+  // Main reason: Why this house/shift needs help
   if (improvement.criticalSlotsCovered > 0) {
-    explanations.push(`Fills ${improvement.criticalSlotsCovered} critical gap${improvement.criticalSlotsCovered > 1 ? 's' : ''} (zero coverage)`);
+    // Critical: No coverage at all
+    parts.push(`🚨 Critical Need: This house currently has NO caregivers covering ${improvement.criticalSlotsCovered} day${improvement.criticalSlotsCovered > 1 ? 's' : ''} during this shift`);
+  } else if (improvement.weakSlotsCovered > 0) {
+    // Understaffed: Has some coverage but needs more
+    parts.push(`⚠️ Understaffed: This house needs additional caregiver coverage for ${improvement.weakSlotsCovered} day${improvement.weakSlotsCovered > 1 ? 's' : ''} during this shift`);
+  } else {
+    // Balanced coverage
+    parts.push(`✓ Balanced: This assignment provides balanced coverage across all houses`);
   }
   
   // Bedridden house priority
   if (improvement.bedriddenSlotsCovered > 0) {
-    explanations.push(`Supports high-priority bedridden house (${houseName})`);
+    parts.push(`🛏️ Priority: ${houseName} has bedridden residents requiring extra attention`);
   }
   
-  // Weekend coverage
+  // Weekend coverage bonus
   if (improvement.weekendDaysCovered > 0) {
     const weekendDays = workDays.filter(day => day === 'Saturday' || day === 'Sunday');
-    explanations.push(`Provides weekend coverage (${weekendDays.join(', ')})`);
+    parts.push(`📅 Weekend Coverage: Works ${weekendDays.join(' & ')}`);
   }
   
-  // Work pattern summary
+  // Work schedule summary
   const startDay = workDays[0];
   const endDay = workDays[workDays.length - 1];
-  explanations.push(`Work pattern: ${startDay} to ${endDay} (${shift} shift)`);
+  const restDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    .filter(day => !workDays.includes(day));
+  parts.push(`🗓️ Schedule: Works ${startDay}-${endDay}, rests ${restDays.join(' & ')}`);
   
-  return explanations.join('. ');
+  return parts.join('\n');
 };
 
 // Integrate new caregiver into existing schedule
@@ -338,6 +403,23 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     if (!startDate || !endDate) {
       console.error("Current assignment structure:", currentAssignment);
       throw new Error("Could not find start_date or end_date in current assignment. Please check the assignment structure.");
+    }
+    
+    // ⚠️ CRITICAL: Check if this caregiver already has an assignment for this house/shift
+    // This prevents duplicate assignments when integration is called multiple times
+    const existingAssignmentQuery = query(
+      collection(db, "house_shift_assignments"),
+      where("user_id", "==", caregiverId),
+      where("house_id", "==", assignmentData.house),
+      where("shift", "==", assignmentData.shift),
+      where("is_current", "==", true)
+    );
+    
+    const existingAssignmentSnapshot = await getDocs(existingAssignmentQuery);
+    
+    if (!existingAssignmentSnapshot.empty) {
+      console.log(`⚠️ Caregiver ${caregiverId} already has an assignment for ${assignmentData.house} - ${assignmentData.shift} shift`);
+      throw new Error(`This caregiver already has an assignment for ${assignmentData.house} - ${assignmentData.shift} shift. Please remove the existing assignment first or use a different house/shift combination.`);
     }
     
     const batch = writeBatch(db);
@@ -442,7 +524,7 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     for (const workDay of assignmentData.workDays) {
       console.log(`📅 Processing ${workDay} for complete elderly redistribution...`);
       
-      // STEP 1: Query database DIRECTLY to find ALL existing elderly assignments for this day/shift/house
+      // STEP 1A: Query database DIRECTLY to find ALL existing elderly assignments for this day/shift/house
       // This ensures we find ALL assignments including orphaned ones (deleted caregivers)
       // DO NOT filter by version - we want to deactivate ALL active assignments regardless of version
       // NOTE: house_id in elderly_assignments is stored as an ARRAY, so we can't use where() directly
@@ -455,6 +537,45 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
       );
       
       const elderlyAssignmentsSnapshot = await getDocs(elderlyAssignmentsQuery);
+      
+      // STEP 1B: ALSO query temporary_assignments for this day (for absent caregivers)
+      // Format the date as YYYY-MM-DD to match temporary_assignments date format
+      const dateObj = new Date(startDate.toDate ? startDate.toDate() : startDate);
+      
+      // Convert day names to JavaScript Date indices (0=Sunday, 1=Monday, ..., 6=Saturday)
+      const dayNameToDateIndex = {
+        'Sunday': 0,
+        'Monday': 1,
+        'Tuesday': 2,
+        'Wednesday': 3,
+        'Thursday': 4,
+        'Friday': 5,
+        'Saturday': 6
+      };
+      
+      const targetDayIndex = dayNameToDateIndex[workDay];
+      const currentDayIndex = dateObj.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      
+      // Calculate days offset to reach the target day
+      let daysOffset = targetDayIndex - currentDayIndex;
+      if (daysOffset < 0) {
+        daysOffset += 7; // If target day is before current day, go to next week
+      }
+      
+      const workDayDate = new Date(dateObj);
+      workDayDate.setDate(dateObj.getDate() + daysOffset);
+      const workDayDateStr = workDayDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      console.log(`🔍 Querying temporary_assignments for ${workDay} = ${workDayDateStr} (current date: ${dateObj.toISOString().split('T')[0]}, offset: ${daysOffset} days)`);
+      
+      const tempAssignmentsQuery = query(
+        collection(db, "temporary_assignments"),
+        where("date", "==", workDayDateStr),
+        where("is_active", "==", true)
+      );
+      
+      const tempAssignmentsSnapshot = await getDocs(tempAssignmentsQuery);
+      console.log(`📋 Found ${tempAssignmentsSnapshot.docs.length} temporary assignments for ${workDayDateStr}`);
       
       // Filter by house_id (since it's an array, we need to filter in memory)
       const existingDayAssignments = elderlyAssignmentsSnapshot.docs
@@ -481,9 +602,11 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
       }
       
       // STEP 2: Collect all elderly currently assigned to this day/shift/house (handle array structure)
+      // INCLUDE elderly from both permanent assignments AND temporary absence assignments
       const elderlyToRedistribute = [];
       const existingElderlyIds = new Set();
       
+      // 2A: Collect elderly from permanent assignments
       for (const assignment of existingDayAssignments) {
         // Handle array structure - each assignment now contains multiple elderly
         const elderlyIds = assignment.elderly_ids || [];
@@ -509,6 +632,47 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
         });
       }
       
+      // 2B: ALSO collect elderly from temporary assignments (from absent caregivers)
+      // Filter temporary assignments for this house/shift
+      const relevantTempAssignments = tempAssignmentsSnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(temp => {
+          // Check if this temporary assignment is for our house/shift
+          return temp.house_id === assignmentData.house && temp.shift === assignmentData.shift;
+        });
+      
+      console.log(`🔍 Found ${relevantTempAssignments.length} relevant temporary assignments for ${assignmentData.house} ${assignmentData.shift}`);
+      
+      for (const tempAssignment of relevantTempAssignments) {
+        const elderlyIds = tempAssignment.elderly_ids || [];
+        
+        console.log(`📦 Temporary assignment from ${tempAssignment.from_caregiver_id} to ${tempAssignment.to_caregiver_id}: ${elderlyIds.length} elderly`);
+        
+        for (const elderlyId of elderlyIds) {
+          if (!existingElderlyIds.has(elderlyId)) {
+            existingElderlyIds.add(elderlyId);
+            
+            // Find the elderly details from our elderly list
+            const elderlyDetails = elderlyList.find(e => e.id === elderlyId);
+            if (elderlyDetails) {
+              elderlyToRedistribute.push(elderlyDetails);
+              console.log(`  ✅ Added ${elderlyDetails.elderly_fname} ${elderlyDetails.elderly_lname} from temporary assignment`);
+            } else {
+              console.warn(`⚠️ Could not find elderly details for ID: ${elderlyId}`);
+            }
+          } else {
+            console.log(`  ⏭️ Skipping duplicate elderly ${elderlyId} (already in redistribution list)`);
+          }
+        }
+        
+        // Mark temporary assignment for deactivation
+        assignmentsToDeactivate.push({
+          id: tempAssignment.id,
+          reason: `complete_redistribution_new_caregiver_${caregiverId}_${workDay}`,
+          isTemporary: true // Flag to identify temporary assignments
+        });
+      }
+      
       // CRITICAL FIX: If no existing assignments found, we still need to assign ALL house elderly
       // But we need to deduplicate - don't add elderly that are already in the redistribution list
       if (existingDayAssignments.length === 0 && elderlyList.length > 0) {
@@ -525,17 +689,54 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
       console.log(`👥 Will redistribute ${elderlyToRedistribute.length} unique elderly among caregivers`);
       
       // STEP 3: Identify ALL caregivers working this day/shift (including new one)
+      // EXCLUDE caregivers who are marked absent for this specific date
       const workingCaregivers = [];
       
-      // Add new caregiver first
-      workingCaregivers.push({
-        caregiver_id: caregiverId,
-        caregiver_name: `${caregiverData.user_fname} ${caregiverData.user_lname}`.toLowerCase(),
-        user_fname: caregiverData.user_fname,
-        user_lname: caregiverData.user_lname
+      // Get list of absent caregivers for this specific date
+      // Query BOTH old and new absence collections to ensure compatibility
+      const absentCaregiverIds = new Set();
+      
+      // Query nurse_cg_absence collection (newer format used by markCaregiverAbsent)
+      const absencesQuery1 = query(
+        collection(db, "nurse_cg_absence"),
+        where("absence_date", "==", workDayDateStr),
+        where("status", "==", "active"),
+        where("user_type", "==", "caregiver")
+      );
+      const absencesSnapshot1 = await getDocs(absencesQuery1);
+      absencesSnapshot1.docs.forEach(doc => {
+        const absence = doc.data();
+        absentCaregiverIds.add(absence.user_id);
+        console.log(`🚫 Caregiver ${absence.user_id} is ABSENT on ${workDayDateStr} (from nurse_cg_absence) - excluding from redistribution`);
       });
       
-      // Add existing caregivers working this day/shift
+      // Also query old caregiver_absences collection for backward compatibility
+      const absencesQuery2 = query(
+        collection(db, "caregiver_absences"),
+        where("date", "==", workDayDateStr),
+        where("type", "==", "absent")
+      );
+      const absencesSnapshot2 = await getDocs(absencesQuery2);
+      absencesSnapshot2.docs.forEach(doc => {
+        const absence = doc.data();
+        const caregiverId = absence.caregiver_id || absence.user_id;
+        absentCaregiverIds.add(caregiverId);
+        console.log(`🚫 Caregiver ${caregiverId} is ABSENT on ${workDayDateStr} (from caregiver_absences) - excluding from redistribution`);
+      });
+      
+      // Add new caregiver first (if not absent)
+      if (!absentCaregiverIds.has(caregiverId)) {
+        workingCaregivers.push({
+          caregiver_id: caregiverId,
+          caregiver_name: `${caregiverData.user_fname} ${caregiverData.user_lname}`.toLowerCase(),
+          user_fname: caregiverData.user_fname,
+          user_lname: caregiverData.user_lname
+        });
+      } else {
+        console.log(`⚠️ New caregiver ${caregiverId} is ABSENT on ${workDayDateStr} - not including in redistribution`);
+      }
+      
+      // Add existing caregivers working this day/shift (exclude absent ones)
       for (const cg of houseCaregivers) {
         // Check if this caregiver is assigned to work on this specific day and shift
         if (cg.house_id === assignmentData.house &&
@@ -543,6 +744,12 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
             cg.is_current &&
             cg.days_assigned && 
             cg.days_assigned.includes(workDay)) {
+          
+          // EXCLUDE if caregiver is absent
+          if (absentCaregiverIds.has(cg.user_id)) {
+            console.log(`🚫 Skipping caregiver ${cg.user_id} - marked ABSENT on ${workDayDateStr}`);
+            continue;
+          }
           
           // Get caregiver details from users collection for proper redistribution
           const existingCaregiverDoc = allCaregivers.docs.find(doc => doc.id === cg.user_id);
@@ -685,16 +892,28 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
       });
     }
     
-    // Deactivate conflicting assignments
+    // Deactivate conflicting assignments (both permanent AND temporary)
     for (const deactivation of assignmentsToDeactivate) {
-      console.log(`🗑️ Deactivating assignment ${deactivation.id}`);
-      batch.update(doc(db, "elderly_assignments", deactivation.id), {
-        status: "redistributed",
-        is_current: false,
-        deactivated_at: Timestamp.now(),
-        deactivation_reason: deactivation.reason,
-        redistributed_by: "new_caregiver_integration"
-      });
+      if (deactivation.isTemporary) {
+        // Deactivate temporary assignment
+        console.log(`🗑️ Deactivating TEMPORARY assignment ${deactivation.id}`);
+        batch.update(doc(db, "temporary_assignments", deactivation.id), {
+          is_active: false,
+          deactivated_at: Timestamp.now(),
+          deactivation_reason: deactivation.reason,
+          replaced_by: "new_caregiver_integration_permanent_redistribution"
+        });
+      } else {
+        // Deactivate permanent elderly assignment
+        console.log(`🗑️ Deactivating PERMANENT assignment ${deactivation.id}`);
+        batch.update(doc(db, "elderly_assignments", deactivation.id), {
+          status: "redistributed",
+          is_current: false,
+          deactivated_at: Timestamp.now(),
+          deactivation_reason: deactivation.reason,
+          redistributed_by: "new_caregiver_integration"
+        });
+      }
       writeCount++;
     }
     

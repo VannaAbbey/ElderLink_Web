@@ -20,6 +20,11 @@ import {
 // Helper function to check if a user is absent on a specific date
 export const checkUserAbsence = async (userId, absenceDate, userType = null) => {
   try {
+    console.log(`\n%c🔍 checkUserAbsence DEBUG:`, 'color: #FFD93D; font-weight: bold; background: #333; padding: 2px 8px; border-radius: 4px');
+    console.log(`%c   userId: "${userId}"`, 'color: #4ECDC4');
+    console.log(`%c   absenceDate: "${absenceDate}"`, 'color: #4ECDC4');
+    console.log(`%c   userType: "${userType}"`, 'color: #4ECDC4');
+    
     let q = query(
       collection(db, "nurse_cg_absence"),
       where("user_id", "==", userId),
@@ -29,12 +34,31 @@ export const checkUserAbsence = async (userId, absenceDate, userType = null) => 
     
     if (userType) {
       q = query(q, where("user_type", "==", userType));
+      console.log(`%c   ✅ Added user_type filter: "${userType}"`, 'color: #95E1D3');
     }
     
+    console.log(`%c   🔎 Executing query on nurse_cg_absence collection...`, 'color: #F38181');
     const snap = await getDocs(q);
+    console.log(`%c   📊 Query returned ${snap.size} documents`, snap.size > 0 ? 'color: #95E1D3; font-weight: bold' : 'color: #FF6B6B; font-weight: bold');
+    
+    if (snap.empty) {
+      console.log(`%c   ❌ No matching absence records found`, 'color: #FF6B6B; font-weight: bold');
+    } else {
+      console.log(`%c   ✅ Found ${snap.size} absence record(s):`, 'color: #95E1D3; font-weight: bold');
+      snap.forEach(doc => {
+        const data = doc.data();
+        console.log(`%c      - Doc ID: ${doc.id}`, 'color: #4ECDC4');
+        console.log(`        user_id: "${data.user_id}"`);
+        console.log(`        absence_date: "${data.absence_date}"`);
+        console.log(`        user_type: "${data.user_type}"`);
+        console.log(`        status: "${data.status}"`);
+        console.log(`        shift: "${data.shift}"`);
+      });
+    }
+    
     return !snap.empty;
   } catch (error) {
-    console.error("Error checking user absence:", error);
+    console.error("%c❌ Error checking user absence:", 'color: #FF6B6B; font-weight: bold', error);
     return false;
   }
 };
@@ -290,6 +314,7 @@ export const markCaregiverAbsent = async (
         elderly_ids: chunk, // Array of elderly IDs instead of single elderly_id
         from_user_id: userId,
         to_user_id: targetUserId,
+        user_type: "caregiver", // NEW: Track user type for consistency with unified schema
         assignment_type: "absence_coverage",
         day: dayName,
         shift: assign.shift,
@@ -606,6 +631,7 @@ export const processApprovedLeave = async (
                   from_user_id: userId,
                   to_user_id: coverageCaregivers[i].user_id || coverageCaregivers[i].caregiver_id,
                   elderly_ids: chunks[i],
+                  user_type: leaveRequestData.user_type || "caregiver", // NEW: Track user type (caregiver or nurse)
                   assignment_type: "absence_coverage",
                   day: dayName,
                   shift: userAssignment.shift,

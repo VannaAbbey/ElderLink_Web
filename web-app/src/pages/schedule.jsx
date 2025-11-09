@@ -15,6 +15,7 @@ import * as ScheduleService from "../services/scheduleService";
 import * as NewCaregiverService from "../services/newCaregiverService";
 import * as EmergencyService from "../services/emergencyService";
 import * as AbsenceService from "../services/absenceService";
+import { exportScheduleToPDF } from "../services/scheduleExportService";
 import {
   formatDateString,
   isCaregiverAbsent,
@@ -60,6 +61,7 @@ export default function Schedule() {
   // New caregiver integration modal states
   const [showNewCaregiverModal, setShowNewCaregiverModal] = useState(false);
   const [unassignedCaregivers, setUnassignedCaregivers] = useState([]);
+  const [unassignedCount, setUnassignedCount] = useState(0); // Badge count for notification
   const [selectedNewCaregiver, setSelectedNewCaregiver] = useState(null);
   const [integrationMode, setIntegrationMode] = useState('auto'); // 'auto' or 'manual'
   const [manualAssignment, setManualAssignment] = useState({
@@ -88,7 +90,18 @@ export default function Schedule() {
   const [showCustomAlert, setShowCustomAlert] = useState(false);
   const [customAlertMessage, setCustomAlertMessage] = useState("");
   const [customAlertTitle, setCustomAlertTitle] = useState("Notification");
+  
+  // Validation error modal for "cannot mark absent" (when only 1 caregiver)
+  const [showCannotMarkAbsentModal, setShowCannotMarkAbsentModal] = useState(false);
+  const [cannotMarkAbsentMessage, setCannotMarkAbsentMessage] = useState("");
 
+  // Auto-regeneration notification modal
+  const [showAutoRegenModal, setShowAutoRegenModal] = useState(false);
+  const [autoRegenInfo, setAutoRegenInfo] = useState({ start: null, end: null, version: 0 });
+
+  // 🔧 DEBUG MODE: Set to true to use minutes instead of months for testing auto-regeneration
+  const DEBUG_MODE = false; // Toggle this to enable/disable debug mode
+  const [debugMinutes, setDebugMinutes] = useState(""); // Input for debug minutes
 
   // 3-shift schedule definitions
   const shiftDefs = [
@@ -203,28 +216,108 @@ export default function Schedule() {
 
   useEffect(() => {
     const checkAutoReshuffle = async () => {
-      if (assignments.length === 0) return;
+      if (assignments.length === 0) {
+        if (DEBUG_MODE) console.log(`🔧 DEBUG: No assignments found, skipping check`);
+        return;
+      }
 
       // Find the latest current assignment
       const currentAssigns = assignments.filter(a => a.is_current);
-      if (!currentAssigns.length) return;
+      if (!currentAssigns.length) {
+        if (DEBUG_MODE) console.log(`🔧 DEBUG: No current assignments found, skipping check`);
+        return;
+      }
+
+      // 🔧 DEBUG MODE: Log first assignment structure
+      if (DEBUG_MODE) {
+        console.log(`🔧 DEBUG: Total assignments: ${assignments.length}, Current assignments: ${currentAssigns.length}`);
+        console.log(`🔧 DEBUG: First assignment structure:`, currentAssigns[0]);
+      }
 
       // Get the latest end_date among all current assignments
+      // Check both root level end_date and nested schedule_period.end_date
       const latestEnd = currentAssigns
-        .map(a => a.end_date?.toDate())
+        .map(a => {
+          // Try schedule_period.end_date first (new structure), then fall back to root end_date (old structure)
+          const endDate = a.schedule_period?.end_date || a.end_date;
+          return endDate?.toDate ? endDate.toDate() : null;
+        })
+        .filter(date => date !== null) // Filter out null dates
         .sort((a, b) => b - a)[0];
 
       const now = new Date();
 
+      // 🔧 DEBUG MODE: More verbose logging and earlier trigger check
+      if (DEBUG_MODE) {
+        console.log(`🔧 DEBUG: Auto-reshuffle check running...`);
+        console.log(`🔧 DEBUG: Current time: ${now.toLocaleString()}`);
+        console.log(`🔧 DEBUG: Schedule end time: ${latestEnd?.toLocaleString() || 'UNDEFINED - NO END_DATE FOUND!'}`);
+        if (!latestEnd) {
+          console.log(`🔧 DEBUG: ❌ NO END_DATE FOUND in assignments! Check database structure.`);
+          console.log(`🔧 DEBUG: Sample assignment:`, currentAssigns[0]);
+        }
+        if (latestEnd) {
+          const timeDiff = now - latestEnd;
+          const secondsDiff = Math.floor(timeDiff / 1000);
+          console.log(`🔧 DEBUG: Time difference: ${secondsDiff} seconds (${timeDiff > 0 ? 'PAST' : 'FUTURE'})`);
+        }
+      }
+
       if (latestEnd && now > latestEnd) {
-        console.log("Auto reshuffle triggered!");
+        console.log("🚨 Auto reshuffle triggered!");
         const months = customDuration ? parseInt(customDuration) : duration;
-        await handleScheduleGeneration(months);
+        
+        try {
+          setIsGenerating(true);
+          await handleScheduleGeneration(months);
+          
+          // Show auto-regeneration notification modal
+          await new Promise(resolve => setTimeout(resolve, 500)); // Wait for DB sync
+          const newAssignments = await ScheduleService.fetchAssignments(true);
+          
+          if (newAssignments && newAssignments.length > 0) {
+            const firstAssignment = newAssignments[0];
+            let start, end, version;
+            
+            // Try schedule_period first (new structure), then fall back to root level (old structure)
+            if (firstAssignment.schedule_period) {
+              start = firstAssignment.schedule_period.start_date?.toDate?.() || 
+                      (firstAssignment.schedule_period.start_date ? new Date(firstAssignment.schedule_period.start_date) : null);
+              end = firstAssignment.schedule_period.end_date?.toDate?.() || 
+                    (firstAssignment.schedule_period.end_date ? new Date(firstAssignment.schedule_period.end_date) : null);
+            } else {
+              start = firstAssignment.start_date?.toDate?.() || 
+                      (firstAssignment.start_date ? new Date(firstAssignment.start_date) : null);
+              end = firstAssignment.end_date?.toDate?.() || 
+                    (firstAssignment.end_date ? new Date(firstAssignment.end_date) : null);
+            }
+            
+            version = firstAssignment.version || 0;
+            
+            setAutoRegenInfo({ start, end, version });
+            setShowAutoRegenModal(true);
+          }
+        } catch (error) {
+          console.error("Error during auto-regeneration:", error);
+          showAlert("Auto-regeneration failed. Please generate schedule manually.", "Error");
+        } finally {
+          setIsGenerating(false);
+        }
       }
     };
 
+    // Initial check
     checkAutoReshuffle();
-  }, [assignments]); // runs whenever assignments are loaded/updated
+    
+    // 🔧 Set up interval to check every 10 seconds (or every 5 seconds in debug mode)
+    const intervalMs = DEBUG_MODE ? 5000 : 30000; // 5 seconds in debug, 30 seconds in production
+    const intervalId = setInterval(() => {
+      checkAutoReshuffle();
+    }, intervalMs);
+    
+    // Cleanup interval on unmount
+    return () => clearInterval(intervalId);
+  }, [assignments, DEBUG_MODE, customDuration, duration]); // runs when dependencies change
 
     // inside your Schedule component
   useEffect(() => {
@@ -273,6 +366,8 @@ export default function Schedule() {
   useEffect(() => {
     const q = query(
       collection(db, "elderly_assignments"),
+      where("status", "==", "active"),
+      where("is_current", "==", true),
       where("user_type", "==", "caregiver")
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -289,6 +384,75 @@ export default function Schedule() {
       }
     );
     return () => unsubscribe();
+  }, []);
+
+  // Monitor unassigned caregivers in real-time
+  useEffect(() => {
+    const checkUnassignedCaregivers = async () => {
+      try {
+        // Get all active caregivers
+        const allCaregiversSnapshot = await getDocs(
+          query(collection(db, "users"), where("user_type", "==", "caregiver"))
+        );
+        
+        // Get current assignments
+        const currentAssignmentsSnapshot = await getDocs(
+          query(
+            collection(db, "house_shift_assignments"), 
+            where("is_current", "==", true),
+            where("user_type", "==", "caregiver")
+          )
+        );
+        
+        const assignedCaregiverIds = new Set();
+        currentAssignmentsSnapshot.docs.forEach(doc => {
+          assignedCaregiverIds.add(doc.data().user_id);
+        });
+        
+        // Count unassigned active caregivers (exclude resigned/deactivated)
+        // IMPORTANT: Must match the filter logic in newCaregiverService.js detectUnassignedCaregivers()
+        let count = 0;
+        allCaregiversSnapshot.docs.forEach(doc => {
+          const data = doc.data();
+          // Check both user_status AND user_activation (matches service filter)
+          const isActive = data.user_activation !== false; // Exclude deactivated caregivers
+          const isResigned = data.user_status === "resigned" || data.user_status === "deactivated";
+          const isAssigned = assignedCaregiverIds.has(doc.id);
+          
+          // Only count caregivers that are: active, not resigned, and not assigned
+          if (isActive && !isResigned && !isAssigned) {
+            count++;
+          }
+        });
+        
+        setUnassignedCount(count);
+      } catch (error) {
+        console.error("Error checking unassigned caregivers:", error);
+      }
+    };
+
+    // Check immediately on mount
+    checkUnassignedCaregivers();
+
+    // Set up real-time listeners for both users and assignments
+    const unsubscribeUsers = onSnapshot(
+      query(collection(db, "users"), where("user_type", "==", "caregiver")),
+      () => checkUnassignedCaregivers()
+    );
+
+    const unsubscribeAssignments = onSnapshot(
+      query(
+        collection(db, "house_shift_assignments"),
+        where("is_current", "==", true),
+        where("user_type", "==", "caregiver")
+      ),
+      () => checkUnassignedCaregivers()
+    );
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeAssignments();
+    };
   }, []);
 
   useEffect(() => {
@@ -473,7 +637,16 @@ export default function Schedule() {
   const loadStaticData = async () => {
     try {
       const data = await ScheduleService.fetchStaticData();
-      setCaregivers(data.caregivers);
+      
+      // Filter out resigned caregivers (user_activation === false)
+      const activeCaregivers = data.caregivers.filter(cg => cg.user_activation !== false);
+      const resignedCount = data.caregivers.length - activeCaregivers.length;
+      
+      if (resignedCount > 0) {
+        console.log(`📊 Filtered out ${resignedCount} resigned caregiver(s) from schedule display`);
+      }
+      
+      setCaregivers(activeCaregivers);
       setHouses(data.houses);
       setElderlyList(data.elderly);
 
@@ -522,7 +695,16 @@ export default function Schedule() {
   // Schedule generation function - now uses API service
   const handleScheduleGeneration = async (months) => {
     try {
-      const result = await ScheduleService.generateSchedule(months, {
+      // 🔧 DEBUG MODE: Use minutes instead of months if debug mode is enabled
+      let durationInMonths = months;
+      if (DEBUG_MODE && debugMinutes && parseInt(debugMinutes) > 0) {
+        // Convert minutes to a fractional month value for the database
+        // 1 month ≈ 43800 minutes (30 days * 24 hours * 60 minutes)
+        durationInMonths = parseInt(debugMinutes) / 43800;
+        console.log(`🔧 DEBUG: Using ${debugMinutes} minutes (${durationInMonths.toFixed(6)} months) for schedule duration`);
+      }
+      
+      const result = await ScheduleService.generateSchedule(durationInMonths, {
         caregivers,
         houses,
         elderly: elderlyList
@@ -530,6 +712,14 @@ export default function Schedule() {
       
       if (result.success) {
         console.log("Schedule generated successfully:", result.message);
+        
+        // 🔧 DEBUG MODE: Log the actual end date for verification
+        if (DEBUG_MODE && debugMinutes) {
+          const endDate = new Date();
+          endDate.setMinutes(endDate.getMinutes() + parseInt(debugMinutes));
+          console.log(`🔧 DEBUG: Schedule should expire at: ${endDate.toLocaleString()}`);
+        }
+        
         setCurrentVersion(result.version);
         // Refresh data after generation
         await loadAllAssignments();
@@ -546,6 +736,33 @@ export default function Schedule() {
     setShowOverlay(false);
     try {
       await handleScheduleGeneration(pendingDuration);
+      
+      // Refresh schedule info immediately after generation
+      await new Promise(resolve => setTimeout(resolve, 500)); // Wait for DB operations
+      const currentAssignments = await ScheduleService.fetchAssignments(true);
+      
+      if (currentAssignments && currentAssignments.length > 0) {
+        const firstAssignment = currentAssignments[0];
+        let start, end;
+        
+        if (firstAssignment.schedule_period) {
+          start = firstAssignment.schedule_period.start?.toDate?.() || new Date(firstAssignment.schedule_period.start);
+          end = firstAssignment.schedule_period.end?.toDate?.() || new Date(firstAssignment.schedule_period.end);
+        } else {
+          start = firstAssignment.start_date?.toDate?.() || new Date(firstAssignment.start_date);
+          end = firstAssignment.end_date?.toDate?.() || new Date(firstAssignment.end_date);
+        }
+        
+        if (start && end) {
+          setScheduleInfo({ start, end });
+          const now = new Date();
+          const diffTime = end - now;
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          setDaysLeft(diffDays >= 0 ? diffDays : 0);
+          console.log("✅ Schedule info updated after generation");
+        }
+      }
+      
       setShowSuccess(true);
     } catch (err) {
       console.error("Error generating schedule:", err);
@@ -778,6 +995,36 @@ export default function Schedule() {
     setUnassignedCaregivers([]);
   };
 
+  // Handle PDF export
+  const handleExportPDF = async () => {
+    try {
+      if (!scheduleInfo || !scheduleInfo.start || !scheduleInfo.end) {
+        showAlert("No schedule available to export. Please generate a schedule first.", "No Schedule");
+        return;
+      }
+
+      console.log("📄 Preparing to export schedule to PDF...");
+      
+      await exportScheduleToPDF({
+        scheduleInfo,
+        assignments: assignments.filter(a => a.is_current), // Only export current assignments
+        elderlyAssigns,
+        caregivers,
+        houses,
+        elderlyList,
+        shiftDefs,
+        daysOfWeek,
+        currentVersion
+      });
+      
+      // PDF downloads silently - no success alert needed
+      console.log("✅ PDF export completed successfully");
+    } catch (error) {
+      console.error("PDF export error:", error);
+      showAlert(`Failed to export PDF: ${error.message}\n\nPlease try again or contact support if the issue persists.`, "Export Failed");
+    }
+  };
+
   const closeSuccess = () => setShowSuccess(false);
   const cancelGenerate = () => setShowOverlay(false);
 
@@ -786,6 +1033,44 @@ export default function Schedule() {
     // Store the assignment and show confirmation popup
     const assignment = assignments.find(a => a.id === assignDocId);
     if (assignment) {
+      // VALIDATION: Check if this caregiver is the only one working on this day and shift
+      const selectedDateStr = formatDateString(selectedDate);
+      const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
+      
+      // Count how many caregivers are working on this day/shift in this house (excluding already absent ones)
+      const caregiversOnThisDayShift = assignments.filter(a => {
+        // Must be current, same house, same shift
+        if (!a.is_current) return false;
+        if (a.house_id !== assignment.house_id) return false;
+        if (a.shift !== assignment.shift) return false;
+        
+        // Must be assigned to work on this day
+        const workDays = (a.days_assigned || []).map(d => d.toLowerCase());
+        if (!workDays.includes(dayName.toLowerCase())) return false;
+        
+        // Exclude caregivers who are already marked absent for this date
+        const isAlreadyAbsent = isCaregiverAbsent(a.user_id, selectedDateStr, absences);
+        if (isAlreadyAbsent) return false;
+        
+        return true;
+      });
+      
+      console.log(`🔍 Caregivers working on ${dayName} ${assignment.shift} shift in ${assignment.house_id}:`, caregiversOnThisDayShift.length);
+      
+      // If there's only 1 caregiver (the one we're trying to mark absent), prevent it with modal
+      if (caregiversOnThisDayShift.length <= 1) {
+        const caregiverFullName = caregiverName(assignment.user_id, caregivers);
+        const houseName = houses.find(h => h.house_id === assignment.house_id)?.house_name || assignment.house_id;
+        
+        setCannotMarkAbsentMessage(
+          `Cannot mark ${caregiverFullName} as absent.\n\n` +
+          `They are the ONLY caregiver working on ${dayName} during the ${assignment.shift} shift in ${houseName}.\n\n` +
+          `At least one caregiver must be present to care for the elderly. Please ensure there are at least 2 caregivers assigned to this shift before marking anyone absent.`
+        );
+        setShowCannotMarkAbsentModal(true);
+        return; // Exit without showing confirmation modal
+      }
+      
       setPendingAbsentAssignment({ assignDocId, assignment });
       setShowAbsentConfirm(true);
     }
@@ -839,7 +1124,7 @@ export default function Schedule() {
           showAlert(`🚨 Emergency coverage required!\n\nMarking this caregiver as absent has left ${result.emergencyCheck.emergencyCount} house/shift(s) with no coverage. Please select emergency coverage options.`, "Emergency Coverage Required");
         } else {
           // No emergency coverage needed
-          showAlert("✅ Caregiver marked as absent successfully. No emergency coverage needed.", "Success");
+          showAlert("✅ Caregiver marked as absent successfully.", "Success");
         }
       }
     } catch (error) {
@@ -857,20 +1142,20 @@ export default function Schedule() {
   };
 
   // --- Reset outdated absences (from previous days only) on component mount ---
-  useEffect(() => {
-    const resetOutdatedAbsences = async () => {
-      try {
-        console.log("🔄 Schedule component mounted - checking for outdated absences...");
-        const result = await AbsenceService.resetDailyAbsences();
-        console.log("📋 Reset result:", result);
-        await loadAllAssignments();
-      } catch (error) {
-        console.error("Error resetting outdated absences:", error);
-      }
-    };
+  // useEffect(() => {
+  //   const resetOutdatedAbsences = async () => {
+  //     try {
+  //       console.log("🔄 Schedule component mounted - checking for outdated absences...");
+  //       const result = await AbsenceService.resetDailyAbsences();
+  //       console.log("📋 Reset result:", result);
+  //       await loadAllAssignments();
+  //     } catch (error) {
+  //       console.error("Error resetting outdated absences:", error);
+  //     }
+  //   };
 
-    resetOutdatedAbsences();
-  }, []);
+  //   resetOutdatedAbsences();
+  // }, []);
 
   const getDisplayedEldersFor = (caregiverId) => {
   const selectedDateStr = formatDateString(selectedDate);
@@ -1138,6 +1423,44 @@ export default function Schedule() {
     }
   };
 
+  const handleDatabaseMaintenance = async () => {
+    if (!window.confirm(
+      "This will remove old inactive records older than 90 days from the database.\n\n" +
+      "This includes:\n" +
+      "• Old inactive house assignments\n" +
+      "• Old inactive elderly assignments\n" +
+      "• Expired temporary assignments\n" +
+      "• Old absence records\n\n" +
+      "Current schedules and recent data will NOT be affected.\n\n" +
+      "Continue with database maintenance?"
+    )) return;
+
+    try {
+      setIsGenerating(true); // Use loading spinner
+      const result = await ScheduleService.cleanupOldScheduleData(90); // Keep last 90 days
+      
+      if (result.success) {
+        showAlert(
+          `Database maintenance completed successfully!\n\n` +
+          `Records removed:\n` +
+          `• Old house assignments: ${result.details.houseAssignments}\n` +
+          `• Old elderly assignments: ${result.details.elderlyAssignments}\n` +
+          `• Old temporary assignments: ${result.details.tempAssignments}\n` +
+          `• Old absence records: ${result.details.absences}\n\n` +
+          `Total cleaned: ${Object.values(result.details).reduce((a, b) => a + b, 0)} records`,
+          "✅ Maintenance Complete"
+        );
+      } else {
+        showAlert(result.message, "Maintenance Failed");
+      }
+    } catch (error) {
+      console.error("Error during database maintenance:", error);
+      showAlert(`Database maintenance failed: ${error.message || "Unknown error occurred"}`, "Error");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   // Sort houses by house_id (H001 to H005)
   const sortedHouses = [...houses].sort((a, b) => {
     // Extract numeric part for comparison
@@ -1152,7 +1475,7 @@ export default function Schedule() {
       <Navbar /> {/* Always on top */}
     <main className="schedule-container">
 
-      <h2 className="page-title">Caregiver Scheduling</h2>
+      <h1 className="page-title">Caregiver Scheduling</h1>
 
       <div className="toggle-header">
         <div className="toggle-buttons">
@@ -1215,11 +1538,56 @@ export default function Schedule() {
             }
           }}
         />
+        
+        {/* 🔧 DEBUG MODE: Show minutes input when debug mode is enabled */}
+        {DEBUG_MODE && (
+          <>
+            <label style={{ marginLeft: 16, color: '#ff6b6b', fontWeight: 'bold' }}>
+              🔧 DEBUG - Minutes:
+            </label>
+            <input
+              type="number"
+              placeholder="Test Minutes"
+              value={debugMinutes}
+              min="1"
+              max="60"
+              style={{ 
+                border: '2px solid #ff6b6b',
+                backgroundColor: '#fff3f3'
+              }}
+              onKeyDown={(e) => {
+                if (!/[0-9]/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
+                  e.preventDefault();
+                }
+              }}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === '' || (parseInt(val) > 0 && parseInt(val) <= 60)) {
+                  setDebugMinutes(val);
+                  console.log(`🔧 DEBUG: Set test duration to ${val} minutes`);
+                }
+              }}
+              title="For testing: Schedule will expire after this many minutes"
+            />
+          </>
+        )}
+        
         <button onClick={handleGenerateClick}>Generate Schedule</button>
         <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
         {/* <button onClick={handleCleanupOrphanedAssignments} style={{ marginLeft: 8, background: '#dc3545', color: 'white' }}>🧹 Fix Unknown</button> */}
-        <button onClick={handleEmergencyCoverage} style={{ marginLeft: 8, background: '#f39c12', color: 'white' }}>🚨 Emergency Coverage</button>
-        <button onClick={handleNewCaregiverIntegration} style={{ marginLeft: 8, background: '#28a745', color: 'white' }}>👥 Add New Caregiver</button>
+        {/* <button onClick={handleDatabaseMaintenance} style={{ marginLeft: 8, background: '#9b59b6', color: 'white' }}>🗑️ Database Cleanup</button> */}
+        {/* <button onClick={handleEmergencyCoverage} style={{ marginLeft: 8, background: '#f39c12', color: 'white' }}>🚨 Emergency Coverage</button> */}
+        <button 
+          onClick={handleNewCaregiverIntegration} 
+          style={{ marginLeft: 8, background: '#28a745', color: 'white', position: 'relative' }}
+          disabled={!scheduleInfo}
+        >
+          👥 Add New Caregiver
+          {scheduleInfo && unassignedCount > 0 && (
+            <span className="notification-badge">{unassignedCount}</span>
+          )}
+        </button>
+        <button onClick={handleExportPDF} style={{ marginLeft: 8, background: '#007bff', color: 'white' }} disabled={!scheduleInfo}>📄 Download Schedule PDF</button>
       </div>
 
       {/* Search Bar */}
@@ -1298,6 +1666,7 @@ export default function Schedule() {
                 key={day}
                 className={`day-tab ${activeDay === day ? "active-day" : ""}`}
                 onClick={() => {
+                  console.log(`\n📅 ========== DAY TAB CLICKED: ${day} ==========`);
                   setActiveDay(day);
                   // Update the date picker to show a date that matches this day
                   const currentDate = new Date(selectedDate);
@@ -1308,6 +1677,30 @@ export default function Schedule() {
                   const newDate = new Date(currentDate);
                   newDate.setDate(currentDate.getDate() + dayDiff);
                   setSelectedDate(newDate);
+                  
+                  // Log all elderly assignments for this day and shift
+                  console.log(`🏠 House: ${activeHouseId || 'All Houses'}, Shift: ${activeShift}, Day: ${day}`);
+                  
+                  const relevantElderlyAssignments = elderlyAssigns.filter(ea => 
+                    ea.day === day && 
+                    ea.shift === activeShift &&
+                    ea.user_type === "caregiver"
+                  );
+                  
+                  console.log(`📋 Found ${relevantElderlyAssignments.length} elderly assignment(s) for ${day}:`);
+                  relevantElderlyAssignments.forEach((ea, index) => {
+                    const caregiver = caregivers.find(c => c.id === ea.user_id);
+                    const caregiverFullName = caregiver ? `${caregiver.user_fname} ${caregiver.user_lname}` : `Unknown (${ea.user_id})`;
+                    
+                    console.log(`  ${index + 1}. 👤 Caregiver: ${caregiverFullName}`);
+                    console.log(`     🆔 Assignment ID: ${ea.id}`);
+                    console.log(`     👵 Elderly Count: ${ea.elderly_ids?.length || 0}`);
+                    console.log(`     📍 House: ${ea.house_id || 'N/A'}`);
+                    console.log(`     ⏰ Shift: ${ea.shift}`);
+                    console.log(`     📆 Day: ${ea.day}`);
+                  });
+                  
+                  console.log(`========================================\n`);
                 }}
               >
                 {day.slice(0, 3)}
@@ -1397,7 +1790,15 @@ export default function Schedule() {
                 rowClassName = "emergency-row";
               }
               
-              console.log(`ROW RENDER - ${caregiverName(a.user_id, caregivers)} (${a.id}): className="${rowClassName}", isAbsent=${isAbsent}, isEmergency=${isEmergency}`);
+              // Find the elderly assignment ID for this caregiver on this day
+              const elderlyAssignment = elderlyAssigns.find(ea => 
+                ea.user_id === a.user_id && 
+                ea.day === dayName && 
+                ea.shift === activeShift &&
+                ea.user_type === "caregiver"
+              );
+              
+              console.log(`ROW RENDER - ${caregiverName(a.user_id, caregivers)} (Assignment ID: ${a.id}): className="${rowClassName}", isAbsent=${isAbsent}, isEmergency=${isEmergency}, Elderly Assignment ID: ${elderlyAssignment?.id || 'N/A'}`);
               
               return (
                 <tr key={a.id} className={rowClassName}>
@@ -1491,6 +1892,107 @@ export default function Schedule() {
         message={customAlertMessage}
         onClose={closeCustomAlert}
       />
+
+      {/* Cannot Mark Absent Validation Modal */}
+      <CustomAlertModal
+        isOpen={showCannotMarkAbsentModal}
+        title="❌ Cannot Mark Absent"
+        message={cannotMarkAbsentMessage}
+        onClose={() => {
+          setShowCannotMarkAbsentModal(false);
+          setCannotMarkAbsentMessage("");
+        }}
+        customClass="validation-error-modal"
+      />
+
+      {/* Auto-Regeneration Notification Modal */}
+      {showAutoRegenModal && (
+        <div className="popup-overlay">
+          <div className="popup-content" style={{ maxWidth: '500px' }}>
+            <div className="popup-title" style={{ 
+              fontSize: '20px', 
+              marginBottom: '20px',
+              color: '#2ecc71',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}>
+              <span style={{ fontSize: '32px' }}>🔄</span>
+              <span>Schedule Automatically Updated!</span>
+            </div>
+            <div style={{ 
+              textAlign: 'left', 
+              lineHeight: '1.8',
+              fontSize: '15px',
+              color: '#34495e',
+              marginBottom: '20px'
+            }}>
+              <p style={{ marginBottom: '15px' }}>
+                The previous schedule period has expired, and a new schedule has been automatically generated.
+              </p>
+              
+              <div style={{ 
+                backgroundColor: '#ecf0f1', 
+                padding: '15px', 
+                borderRadius: '8px',
+                marginBottom: '15px'
+              }}>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>📅 New Schedule Period:</strong>
+                </div>
+                <div style={{ paddingLeft: '10px' }}>
+                  {autoRegenInfo.start?.toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                  <br />
+                  <span style={{ color: '#95a5a6' }}>→</span>
+                  <br />
+                  {autoRegenInfo.end?.toLocaleDateString('en-US', { 
+                    weekday: 'long', 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </div>
+              </div>
+
+              <div style={{ 
+                backgroundColor: '#e8f5e9', 
+                padding: '12px', 
+                borderRadius: '8px',
+                fontSize: '14px'
+              }}>
+                <strong>✅ Version:</strong> {autoRegenInfo.version}
+                <br />
+                <strong>✅ Status:</strong> All caregivers have been reassigned
+                <br />
+                <strong>✅ Coverage:</strong> Complete daily coverage maintained
+              </div>
+            </div>
+            <div className="popup-buttons">
+              <button 
+                className="popup-btn yes" 
+                onClick={() => {
+                  setShowAutoRegenModal(false);
+                  setAutoRegenInfo({ start: null, end: null, version: 0 });
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '16px',
+                  backgroundColor: '#2ecc71',
+                  border: 'none'
+                }}
+              >
+                Got it, thanks!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

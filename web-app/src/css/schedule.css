@@ -7,13 +7,15 @@
 }
 
 .page-title {
+  color: #00588E;
+  font-family: 'Poppins', sans-serif;
   text-align: center;
   margin-bottom: 20px;
-  font-size: 28px;
-  font-weight: bold;
+  font-weight: 700;
+  font-size: 40px;
 }
 
-.control-panel {
+.control-panel {  
   display: flex;
   justify-content: center;
   align-items: center;
@@ -47,6 +49,43 @@
   font-weight: bold;
 }
 
+.control-panel button:disabled {
+  background-color: #cccccc !important;
+  color: #666666 !important;
+  cursor: not-allowed !important;
+  opacity: 0.6;
+}
+
+/* Notification Badge for Buttons */
+.notification-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background-color: #dc3545;
+  color: white;
+  border-radius: 50%;
+  padding: 0;
+  font-size: 11px;
+  font-weight: bold;
+  min-width: 16px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  animation: pulse-badge 2s infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
 .house-tabs {
   display: flex;
   justify-content: flex-start; /* Align to left */
@@ -73,6 +112,15 @@
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
   transition: all 0.2s;
+}
+
+.shift-tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background-color: #e0e0e0 !important;
+  color: #999 !important;
+  pointer-events: none;
+  box-shadow: none;
 }
 
 .house-tab.active,
@@ -148,9 +196,17 @@
   font-weight: bold;
 }
 
-.day-tab:hover:not(.active-day) {
+.day-tab:hover:not(.active-day):not(:disabled) {
   background-color: #e9ecef;
   transform: translateY(-1px);
+}
+
+.day-tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background-color: #e0e0e0 !important;
+  color: #999 !important;
+  pointer-events: none;
 }
 /* ========== END DAYS OF WEEK TABS SECTION ========== */
 
@@ -551,6 +607,28 @@
   cursor: not-allowed;
 }
 
+/* Styling for the Clear All button (matches Save button design) */
+.clear-btn {
+  padding: 6px 18px;
+  font-size: 15px;
+  font-weight: bold;
+  background-color: #007bff; /* blue primary color */
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.clear-btn:hover:not(:disabled) {
+  background-color: #0056b3; /* darker blue on hover */
+}
+
+.clear-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
 .schedule-table select {
   width: auto;       /* shrink to fit content */
   min-width: 120px;  /* but keep a decent size */
@@ -778,7 +856,10 @@
   flex-wrap: wrap;
   gap: 16px;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  max-width: fit-content;
+  margin-left: auto;
+  margin-right: 0;
 }
 
 .schedule-inline strong {
@@ -1355,6 +1436,53 @@
   text-align: center;
   margin-right: 30em;
   margin-top: 20em;
+}
+
+/* Nurse Absence Confirmation Modal - Dedicated styling for long warning messages */
+.nurse-absence-modal {
+  max-width: 600px !important; /* Wider to accommodate warning text */
+  width: 90%;
+  text-align: center;
+  margin: 0 auto;
+  margin-right: 25em;
+  margin-top: 10em;
+  max-height: 85vh; /* Prevent modal from being too tall */
+  overflow-y: auto; /* Enable scrolling if content is too long */
+  padding: 24px 32px;
+}
+
+.nurse-absence-modal .popup-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #dc3545; /* Red for warning */
+  margin-bottom: 20px;
+  line-height: 1.4;
+}
+
+.nurse-absence-modal .alert-message {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #333;
+  margin: 20px 0;
+  white-space: pre-line;
+  text-align: left; /* Left-align for better readability of long text */
+  max-height: 400px; /* Limit height */
+  overflow-y: auto; /* Scroll if too long */
+  padding: 12px;
+  background: #fff5f5; /* Light red background for warning */
+  border-left: 4px solid #dc3545; /* Red accent border */
+  border-radius: 4px;
+}
+
+.nurse-absence-modal .popup-buttons {
+  margin-top: 24px;
+  gap: 16px;
+}
+
+.nurse-absence-modal .popup-btn {
+  padding: 10px 24px;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .alert-message {

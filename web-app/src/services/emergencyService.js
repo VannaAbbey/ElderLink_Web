@@ -322,6 +322,7 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
         from_user_id: "EMERGENCY_ABSENT", // Special marker
         to_user_id: caregiverId,
         elderly_ids: uniqueEmergencyElderlyIds, // Array of elderly IDs instead of single elderly_id
+        user_type: "caregiver", // NEW: Track user type for consistency
         assignment_type: "emergency_coverage",
         day: dayName,
         shift: emergencyShift,
@@ -393,6 +394,7 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
             from_user_id: caregiverId,
             to_user_id: recipientId,
             elderly_ids: elderlyIds, // Array of elderly IDs instead of single elderly_id
+            user_type: "caregiver", // NEW: Track user type for consistency
             assignment_type: "emergency_redistribution", // Changed to differentiate from emergency coverage
             day: dayName,
             shift: emergencyShift,
@@ -616,6 +618,7 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
         from_user_id: "EMERGENCY_ABSENT", // Special marker
         to_user_id: donorCaregiver.caregiverId,
         elderly_ids: uniqueEmergencyElderlyIds, // Array of elderly IDs instead of single elderly_id
+        user_type: "caregiver", // NEW: Track user type for consistency
         assignment_type: "emergency_coverage",
         day: dayName,
         shift: need.shift,
@@ -664,6 +667,7 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
             from_user_id: donorCaregiver.caregiverId,
             to_user_id: recipientId,
             elderly_ids: elderlyIds, // Array of elderly IDs instead of single elderly_id
+            user_type: "caregiver", // NEW: Track user type for consistency
             assignment_type: "emergency_coverage",
             day: dayName,
             shift: need.shift,

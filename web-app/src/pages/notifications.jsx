@@ -508,7 +508,7 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
             return (
               <div className="notif-modal-card elderly-notification" key={`elderly-${notif.id}`}>
                 <img
-                  src={notif.elderly_profilePic || "https://via.placeholder.com/60"}
+                  src={notif.elderly_profilePic || "/images/people_icon.png"}
                   alt={notif.elderly_name}
                   className="notif-modal-img"
                 />
@@ -635,9 +635,11 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
           data: userRegistrations,
           renderCard: (user) => (
             <div className="notif-modal-card user-notification" key={`user-${user.id}`}>
-              <div className="user-modal-icon">
-                <span style={{ fontSize: "36px" }}>👤</span>
-              </div>
+              <img
+                src={user.user_profilePic || "/images/people_icon.png"}
+                alt={`${user.user_fname} ${user.user_lname}`}
+                className="notif-modal-img"
+              />
               <div className="notif-modal-details">
                 <div className="notification-type-badge user-badge">User Registration</div>
                 <h4>{user.user_fname} {user.user_lname}</h4>

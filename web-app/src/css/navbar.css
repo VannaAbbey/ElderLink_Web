@@ -711,6 +711,11 @@
   color: #1976d2;
 }
 
+/* ✅ Fix email capitalization issue - reset text-transform for email */
+.user-type .notif-meta {
+  text-transform: none;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .notif-content-unified {

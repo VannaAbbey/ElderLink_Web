@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { onSnapshot, collection, query, where } from "firebase/firestore";
+import { onSnapshot, collection, query, where, writeBatch, doc, getDocs, Timestamp } from "firebase/firestore";
 import "../css/schedule.css";
 import Navbar from "./navbar";
 import { NurseScheduleService } from "../services/nurseScheduleService";
 import { markNurseAbsent, getTempReassignments, hasAbsenceForDate, batchCheckAbsencesForDate } from "../services/nurseAbsenceService";
+import CustomAlertModal from "./customAlertModal";
 
 export default function NurseSchedule() {
   const [nurses, setNurses] = useState([]);
@@ -33,6 +34,16 @@ export default function NurseSchedule() {
   const [newNurses, setNewNurses] = useState([]); // Track new nurses not in current schedule
   const [nurseAbsences, setNurseAbsences] = useState({}); // Track absence status by nurse-date-shift
   const SHOW_ALL_DAYS = "__ALL_DAYS__";
+  
+  // Modal state for custom alerts and confirmations
+  const [modal, setModal] = useState({
+    isOpen: false,
+    type: "alert", // "alert" or "confirm"
+    title: "",
+    message: "",
+    onConfirm: null,
+    customClass: "" // For special modal styling (e.g., nurse absence warnings)
+  });
 
   // Initialize service instance
   const nurseScheduleService = new NurseScheduleService(db);
@@ -40,25 +51,29 @@ export default function NurseSchedule() {
   const shiftDefs = NurseScheduleService.SHIFT_DEFS;
   const daysOfWeek = NurseScheduleService.DAYS_OF_WEEK;
 
-  // Load nurses, houses, and elderly
+  // ✅ PERFORMANCE FIX: Single effect to load and subscribe to data
+  // Combines initial load with real-time listener to avoid duplicate queries
   useEffect(() => {
+    // Load houses and elderly once (they don't change frequently)
     (async () => {
-      const { nurses, houses, elderly } = await nurseScheduleService.loadAllData();
-      setNurses(nurses);
+      const { houses, elderly } = await nurseScheduleService.loadAllData();
       setHouses(houses);
       setElderlyList(elderly);
     })();
-  }, []);
 
-  // Real-time listener for nurses to detect new nurses immediately
-  useEffect(() => {
+    // Set up real-time listener for nurses only (they change more frequently with new registrations)
     const unsubscribe = onSnapshot(
-      query(collection(db, "users"), where("user_type", "==", "nurse")), 
+      query(
+        collection(db, "users"), 
+        where("user_type", "==", "nurse")
+        // Note: user_activation filtering done in-memory to avoid index issues
+      ), 
       (snapshot) => {
         const nursesData = snapshot.docs
           .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter(nurse => nurse.scheduleStatus !== "inactive");
+          .filter(nurse => nurse.scheduleStatus !== "inactive" && nurse.user_activation !== false);
         setNurses(nursesData);
+        console.log(`✅ Loaded ${nursesData.length} nurses:`, nursesData);
       }
     );
     
@@ -91,42 +106,54 @@ export default function NurseSchedule() {
     loadTempReassignments();
   }, [selectedDate, activeShift]);
 
-  // Load comprehensive absence data for current context (batch optimized)
+  // ✅ PERFORMANCE FIX: Load absence data with better caching and debouncing
   useEffect(() => {
+    let isMounted = true; // Prevent state updates after unmount
+    
     const loadAbsenceData = async () => {
       if (nurses.length > 0 && selectedDate && activeShift) {
         const dateStr = formatDateString(selectedDate);
         
-        // Check which nurses need absence data loading
+        // Check which nurses need absence data loading (not in cache)
         const nursesNeedingData = nurses.filter(nurse => {
           const key = `${nurse.id}-${dateStr}-${activeShift}`;
           return nurseAbsences[key] === undefined;
         });
         
-        if (nursesNeedingData.length > 0) {
-          console.log(`📊 Batch loading absence data for ${nursesNeedingData.length} nurses on ${dateStr} - ${activeShift}`);
-          
-          // Use batch function for better performance
+        if (nursesNeedingData.length > 0 && isMounted) {
+          // Use batch function for better performance (single query for all nurses)
           const nurseIds = nursesNeedingData.map(n => n.id);
           const batchResults = await batchCheckAbsencesForDate(nurseIds, dateStr, activeShift);
           
-          // Update state with batch results while preserving existing data
-          setNurseAbsences(prev => {
-            const updated = { ...prev };
-            nursesNeedingData.forEach(nurse => {
-              const key = `${nurse.id}-${dateStr}-${activeShift}`;
-              const batchKey = `${nurse.id}-${dateStr}-${activeShift}`;
-              updated[key] = batchResults[batchKey] || false;
+          // Only update state if component is still mounted
+          if (isMounted) {
+            setNurseAbsences(prev => {
+              const updated = { ...prev };
+              nursesNeedingData.forEach(nurse => {
+                const key = `${nurse.id}-${dateStr}-${activeShift}`;
+                updated[key] = batchResults[key] || false;
+              });
+              return updated;
             });
-            return updated;
-          });
-          
-          console.log(`✅ Batch loaded absence data for ${nursesNeedingData.length} nurses`);
+          }
         }
       }
     };
-    loadAbsenceData();
+    
+    // Debounce to avoid rapid consecutive calls
+    const timeoutId = setTimeout(loadAbsenceData, 100);
+    
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+    };
   }, [nurses.length, selectedDate, activeShift]); // Optimized dependencies
+
+  // 🔄 Clear absence cache when date or shift changes to prevent stale data
+  useEffect(() => {
+    console.log(`🔄 Date or shift changed (${formatDateString(selectedDate)} - ${activeShift}), clearing absence cache...`);
+    setNurseAbsences({});
+  }, [selectedDate, activeShift]);
 
   // Initialize pending assignments when entering edit mode
   useEffect(() => {
@@ -204,6 +231,40 @@ export default function NurseSchedule() {
   const houseName = (houseId) => nurseScheduleService.getHouseName(houseId, houses);
   const elderlyName = (elderlyId) => nurseScheduleService.getElderlyName(elderlyId, elderlyList);
 
+  // Helper functions for modal
+  const showAlert = (title, message, customClass = "") => {
+    setModal({
+      isOpen: true,
+      type: "alert",
+      title,
+      message,
+      onConfirm: null,
+      customClass
+    });
+  };
+
+  const showConfirm = (title, message, onConfirm, customClass = "") => {
+    setModal({
+      isOpen: true,
+      type: "confirm",
+      title,
+      message,
+      onConfirm,
+      customClass
+    });
+  };
+
+  const closeModal = () => {
+    setModal({
+      isOpen: false,
+      type: "alert",
+      title: "",
+      message: "",
+      onConfirm: null,
+      customClass: ""
+    });
+  };
+
   // Date formatting function
   const formatDateString = (date) => {
     const year = date.getFullYear();
@@ -219,6 +280,40 @@ export default function NurseSchedule() {
   // Get house for elderly (group elderly by house)
   const getHouseForElderly = (elderlyId) => 
     nurseScheduleService.getHouseForElderly(elderlyId, elderlyList);
+
+  // Helper function to check if a day tab should be disabled
+  const isDayDisabled = (dayName) => {
+    // If no schedule info, don't disable any days
+    if (!scheduleInfo?.start || !scheduleInfo?.end) {
+      return false;
+    }
+
+    // Map day names to JavaScript's getDay() values
+    const dayToIndex = {
+      "Sunday": 0,
+      "Monday": 1,
+      "Tuesday": 2,
+      "Wednesday": 3,
+      "Thursday": 4,
+      "Friday": 5,
+      "Saturday": 6
+    };
+
+    const targetDayIndex = dayToIndex[dayName];
+    if (targetDayIndex === undefined) return false;
+
+    // Calculate the date for this day in the current week of selectedDate
+    const currentDate = new Date(selectedDate);
+    const currentDayOfWeek = currentDate.getDay();
+    const dayDifference = targetDayIndex - currentDayOfWeek;
+    const targetDate = new Date(currentDate);
+    targetDate.setDate(currentDate.getDate() + dayDifference);
+
+    // Check if target date falls within schedule bounds
+    const isWithinBounds = targetDate >= scheduleInfo.start && targetDate <= scheduleInfo.end;
+    
+    return !isWithinBounds;
+  };
 
   // Helper function to refresh absence data for a specific nurse
   const refreshNurseAbsenceData = async (nurseId, dateStr, shift) => {
@@ -284,10 +379,6 @@ export default function NurseSchedule() {
 
   // Create accordion content for elderly assignments within schedule-page
   const createAccordionContent = (elderlyAssignments, activeShift, activeDay, nurseId) => {
-    if (activeShift === "3rd") {
-      return <em style={{ color: "#888" }}>No elderly assigned for 3rd shift</em>;
-    }
-
     // Get temporary reassignments TO this nurse for the current date
     const dateStr = formatDateString(selectedDate);
     const indexToDayName = {
@@ -470,7 +561,46 @@ export default function NurseSchedule() {
       // Check if nurse is already marked absent for this specific date and day using comprehensive check
       const isAlreadyAbsent = isNurseAbsentForDay(nurseId, selectedDate, activeShift);
       if (isAlreadyAbsent) {
-        alert(`${nurseFullName} is already marked as PERMANENTLY ABSENT for ${dayName}, ${selectedDate.toLocaleDateString()}`);
+        showAlert(
+          "Already Marked Absent",
+          `${nurseFullName} is already marked as PERMANENTLY ABSENT for ${dayName}, ${selectedDate.toLocaleDateString()}`
+        );
+        return;
+      }
+
+      // ✅ NEW VALIDATION: Check if this is the only nurse working on this day and shift
+      // Get all nurses assigned to this shift and day
+      const nursesOnThisShift = assignments.filter(a => 
+        a.shift === activeShift &&
+        a.is_current &&
+        Array.isArray(a.days_assigned) &&
+        a.days_assigned.map(d => d.toLowerCase()).includes(dayName.toLowerCase())
+      );
+
+      // Count how many are NOT already absent (excluding the nurse we're trying to mark)
+      let availableNurseCount = 0;
+      for (const assignment of nursesOnThisShift) {
+        // Skip the nurse we're trying to mark absent
+        if (assignment.user_id === nurseId) continue;
+        
+        // Check if this nurse is already absent
+        const isAbsent = isNurseAbsentForDay(assignment.user_id, selectedDate, activeShift);
+        if (!isAbsent) {
+          availableNurseCount++;
+        }
+      }
+
+      console.log(`🔍 Coverage check for ${dayName} ${activeShift} shift:`);
+      console.log(`   Total nurses assigned: ${nursesOnThisShift.length}`);
+      console.log(`   Available nurses (excluding ${nurseFullName}): ${availableNurseCount}`);
+
+      // Prevent marking if this nurse is the last one available
+      if (availableNurseCount === 0) {
+        showAlert(
+          "❌ Cannot Mark Absent",
+          `${nurseFullName} cannot be marked as absent because they are the ONLY nurse available for ${dayName} during the ${activeShift} shift.\n\n` +
+          `At least one nurse must be present to care for the elderly. Please ensure there are at least 2 nurses assigned to this shift before marking anyone absent.`
+        );
         return;
       }
       
@@ -480,32 +610,33 @@ export default function NurseSchedule() {
         // Data is still loading, refresh and check again
         const currentStatus = await refreshNurseAbsenceData(nurseId, targetDateStr, activeShift);
         if (currentStatus) {
-          alert(`${nurseFullName} is already marked as PERMANENTLY ABSENT for ${dayName}, ${selectedDate.toLocaleDateString()}`);
+          showAlert(
+            "Already Marked Absent",
+            `${nurseFullName} is already marked as PERMANENTLY ABSENT for ${dayName}, ${selectedDate.toLocaleDateString()}`
+          );
           return;
         }
       }
 
       // Enhanced confirmation dialog with permanent warning
-      const confirmed = window.confirm(
-        `⚠️ PERMANENT ACTION - CANNOT BE UNDONE ⚠️\n\n` +
-        `Mark ${nurseFullName} as ABSENT for:\n` +
+      showConfirm(
+        "⚠️ PERMANENT ACTION - CANNOT BE UNDONE ⚠️",
+        `Mark ${nurseFullName} as ABSENT for:\n\n` +
         `• Date: ${selectedDate.toLocaleDateString()}\n` +
         `• Day: ${dayName}\n` +
         `• Shift: ${activeShift}\n\n` +
         `⚠️ WARNING: This action is PERMANENT and CANNOT be reversed!\n\n` +
-        `The nurse will remain marked as absent for this specific date and shift permanently.\n` +
+        `The nurse will remain marked as absent for this specific date and shift permanently. ` +
         `Their elderly assignments will be redistributed to other available nurses.\n\n` +
-        `Are you absolutely sure you want to proceed?`
-      );
-      
-      if (!confirmed) return;
-
-      setSaving(true);
-      
-      console.log(`🚨 PERMANENTLY marking nurse ${nurseFullName} as absent for ${targetDateStr} (${dayName})`);
-      console.log(`Current absence state:`, nurseAbsences[absenceKey]);
-      
-      const markResult = await markNurseAbsent(
+        `Are you absolutely sure you want to proceed?`,
+        async () => {
+          setSaving(true);
+          
+          try {
+            console.log(`🚨 PERMANENTLY marking nurse ${nurseFullName} as absent for ${targetDateStr} (${dayName})`);
+            console.log(`Current absence state:`, nurseAbsences[absenceKey]);
+            
+            const markResult = await markNurseAbsent(
         assignmentId,
         assignments,
         nurseElderlyAssignments,
@@ -517,16 +648,26 @@ export default function NurseSchedule() {
         'supervisor' // marked by
       );
 
-      // Refresh temporary reassignments
+      // Refresh temporary reassignments for the specific day
+      console.log(`🔄 Refreshing temporary reassignments for ${targetDateStr}...`);
       const updatedTempAssigns = await getTempReassignments(targetDateStr, activeShift);
       setTempReassignments(updatedTempAssigns);
+      console.log(`✅ Temporary reassignments refreshed: ${updatedTempAssigns.length} assignments`);
 
       // Immediately update absence state to reflect the new absence (optimistic update)
       const stateKey = `${nurseId}-${targetDateStr}-${activeShift}`;
-      setNurseAbsences(prev => ({
-        ...prev,
-        [stateKey]: true // We know it's absent since we just marked it
-      }));
+      console.log(`\n%c🔄 UPDATING ABSENCE STATE`, 'color: #FF6B6B; font-weight: bold; font-size: 14px');
+      console.log(`%c   Key: ${stateKey}`, 'color: #4ECDC4');
+      console.log(`%c   Setting to: true (ABSENT)`, 'color: #4ECDC4');
+      
+      setNurseAbsences(prev => {
+        const updated = {
+          ...prev,
+          [stateKey]: true // We know it's absent since we just marked it
+        };
+        console.log(`%c   Updated absence state:`, 'color: #95E1D3', updated);
+        return updated;
+      });
       
       console.log(`✅ Updated absence state for ${nurseId} on ${targetDateStr}`);
 
@@ -543,82 +684,102 @@ export default function NurseSchedule() {
         }
       }, 1000);
 
-      setNotification(`🔒 ${nurseFullName} PERMANENTLY marked as absent. This action cannot be undone. Elderly assignments redistributed.`);
-      setTimeout(() => setNotification(""), 7000);
+            setNotification(`🔒 ${nurseFullName} PERMANENTLY marked as absent. Elderly assignments have been permanently redistributed.`);
+            setTimeout(() => setNotification(""), 7000);
+
+          } catch (error) {
+            console.error("Error marking nurse absent:", error);
+            setNotification(`❌ Failed to mark nurse as absent: ${error.message}`);
+            setTimeout(() => setNotification(""), 5000);
+          } finally {
+            setSaving(false);
+          }
+        },
+        "nurse-absence-modal" // Custom class for proper centering and styling
+      );
 
     } catch (error) {
-      console.error("Error marking nurse absent:", error);
-      setNotification(`❌ Failed to mark nurse as absent: ${error.message}`);
-      setTimeout(() => setNotification(""), 5000);
-    } finally {
-      setSaving(false);
+      console.error("Error in handleMarkAbsent:", error);
     }
   };
 
   // Clear all nurse schedules from Firestore
   const handleClearAll = async () => {
-    if (!window.confirm("Are you sure you want to clear all nurse schedules and elderly assignments? This cannot be undone.")) return;
-    setSaving(true);
-    
-    try {
-      console.log("🎯 Clear All button clicked - starting operation...");
-      const result = await nurseScheduleService.clearAllSchedules(assignments, nurseElderlyAssignments, nurses);
-      
-      console.log("🎉 Clear operation completed:", result);
-      
-      setPendingAssignments({});
-      setEditing(false);
-      
-      // Show success notification
-      setNotification(`✅ Cleared ${result.shiftDeleteCount} shift assignments and ${result.elderlyDeleteCount} elderly assignments!`);
-      setTimeout(() => setNotification(""), 5000);
-      
-    } catch (e) {
-      console.error("💥 Clear operation failed:", e);
-      alert("Failed to clear schedules: " + e.message);
-    }
-    setSaving(false);
+    showConfirm(
+      "Clear All Schedules",
+      "Are you sure you want to clear all nurse schedules and elderly assignments? This cannot be undone.",
+      async () => {
+        setSaving(true);
+        
+        try {
+          console.log("🎯 Clear All button clicked - starting operation...");
+          const result = await nurseScheduleService.clearAllSchedules(assignments, nurseElderlyAssignments, nurses);
+          
+          console.log("🎉 Clear operation completed:", result);
+          
+          setPendingAssignments({});
+          setEditing(false);
+          
+          // Show success notification
+          showAlert(
+            "Success",
+            `Cleared ${result.shiftDeleteCount} shift assignments and ${result.elderlyDeleteCount} elderly assignments!`
+          );
+          
+        } catch (e) {
+          console.error("💥 Clear operation failed:", e);
+          showAlert("Error", `Failed to clear schedules: ${e.message}`);
+        }
+        setSaving(false);
+      }
+    );
   };
 
   // Handle automatic schedule generation
   const handleGenerateSchedule = async () => {
-    if (!window.confirm("This will generate a new 1-month schedule with rotating shifts and work-rest patterns. Continue?")) return;
-    
-    setScheduleGeneration(prev => ({ ...prev, isGenerating: true }));
-    setSaving(true);
-    
-    try {
-      const result = await nurseScheduleService.generateAndSaveSchedule(
-        nurses, 
-        assignments, 
-        nurseElderlyAssignments, 
-        scheduleGeneration.lastShiftRotation, 
-        elderlyList, 
-        houses,
-        scheduleGeneration.periodDuration
-      );
-      
-      setPendingAssignments(result.monthlyAssignments);
-      setScheduleGeneration(prev => ({
-        ...prev,
-        lastShiftRotation: result.updatedShiftRotation
-      }));
-      
-      // Refresh nurses data to update scheduleStatus and trigger real-time re-detection
-      const { nurses: updatedNurses } = await nurseScheduleService.loadAllData();
-      setNurses(updatedNurses);
-      
-      const { shiftCounts, minDaily, maxDaily, minRest, maxRest } = result.statistics;
-      
-      setNotification(`✅ Schedule generated! Shifts: 1st (${shiftCounts["1st"]}), 2nd (${shiftCounts["2nd"]}), 3rd (${shiftCounts["3rd"]}) nurses. Working: ${minDaily}-${maxDaily}/day, Resting: ${minRest}-${maxRest}/day. All nurses integrated!`);
-      setTimeout(() => setNotification(""), 7000);
-      
-    } catch (e) {
-      alert("Failed to generate schedule: " + e.message);
-    } finally {
-      setSaving(false);
-      setScheduleGeneration(prev => ({ ...prev, isGenerating: false }));
-    }
+    showConfirm(
+      "Generate Schedule",
+      "This will generate a new schedule with rotating shifts and work-rest patterns. Continue?",
+      async () => {
+        setScheduleGeneration(prev => ({ ...prev, isGenerating: true }));
+        setSaving(true);
+        
+        try {
+          const result = await nurseScheduleService.generateAndSaveSchedule(
+            nurses, 
+            assignments, 
+            nurseElderlyAssignments, 
+            scheduleGeneration.lastShiftRotation, 
+            elderlyList, 
+            houses,
+            scheduleGeneration.periodDuration
+          );
+          
+          setPendingAssignments(result.monthlyAssignments);
+          setScheduleGeneration(prev => ({
+            ...prev,
+            lastShiftRotation: result.updatedShiftRotation
+          }));
+          
+          // Refresh nurses data to update scheduleStatus and trigger real-time re-detection
+          const { nurses: updatedNurses } = await nurseScheduleService.loadAllData();
+          setNurses(updatedNurses);
+          
+          const { shiftCounts, minDaily, maxDaily, minRest, maxRest } = result.statistics;
+          
+          showAlert(
+            "Schedule Generated Successfully!",
+            `Shifts: 1st (${shiftCounts["1st"]}), 2nd (${shiftCounts["2nd"]}), 3rd (${shiftCounts["3rd"]}) nurses. Working: ${minDaily}-${maxDaily}/day, Resting: ${minRest}-${maxRest}/day. All nurses integrated!`
+          );
+          
+        } catch (e) {
+          showAlert("Error", `Failed to generate schedule: ${e.message}`);
+        } finally {
+          setSaving(false);
+          setScheduleGeneration(prev => ({ ...prev, isGenerating: false }));
+        }
+      }
+    );
   };
 
   const handleSaveAll = async () => {
@@ -639,14 +800,15 @@ export default function NurseSchedule() {
       const { nurses: updatedNurses } = await nurseScheduleService.loadAllData();
       setNurses(updatedNurses);
       
-      setNotification("✅ Nurse schedules saved successfully! Elderly assignments redistributed considering temporary reassignments.");
+      showAlert(
+        "Success",
+        "Nurse schedules saved successfully!"
+      );
     } catch (e) {
       console.error("Save all error:", e);
-      alert("Failed to save all: " + e.message);
+      showAlert("Error", `Failed to save all: ${e.message}`);
     }
     setSaving(false);
-    // Hide notification after 3 seconds
-    setTimeout(() => setNotification(""), 3000);
   };
 
   // Handle copying schedule from existing nurse to new nurse
@@ -677,15 +839,22 @@ export default function NurseSchedule() {
       <main className="schedule-container">
         <h2 className="page-title" style={{ marginBottom: 8 }}>Nurse Scheduling</h2>
 
-        {/* Schedule Info Display */}
-        {scheduleInfo && (
+        {/* Schedule Info Display - Only show in View by Shift mode */}
+        {viewMode === "summary" && scheduleInfo && (
           <div className="schedule-inline" style={{ marginBottom: 16 }}>
             <span>
               <strong>Schedule Period:</strong>{" "}
               {scheduleInfo.start?.toLocaleDateString()} → {scheduleInfo.end?.toLocaleDateString()}
             </span>
             <span>
-              <strong>Selected Date:</strong> {selectedDate.toLocaleDateString()}
+              <strong>Days Left:</strong>{" "}
+              {(() => {
+                const today = new Date();
+                const endDate = scheduleInfo.end;
+                const diffTime = endDate - today;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                return diffDays > 0 ? `${diffDays} day${diffDays !== 1 ? 's' : ''}` : 'Expired';
+              })()}
             </span>
           </div>
         )}
@@ -1039,17 +1208,81 @@ export default function NurseSchedule() {
               >
                 Show All Days
               </button>
-              {daysOfWeek.map((day) => (
+              {daysOfWeek.map((day) => {
+                const isDisabled = isDayDisabled(day);
+                return (
                 <button
                   key={day}
                   className={`shift-tab ${activeDay === day ? "active-shift" : ""}`}
+                  disabled={isDisabled}
+                  style={{
+                    opacity: isDisabled ? 0.5 : 1,
+                    cursor: isDisabled ? 'not-allowed' : 'pointer',
+                    backgroundColor: isDisabled ? '#e0e0e0' : undefined
+                  }}
                   onClick={() => {
+                    if (isDisabled) return;
+                    console.log(`\n%c🔍 DAY CLICK DEBUG - ${day}`, 'color: #FF6B6B; font-weight: bold; font-size: 16px');
+                    console.log(`%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'color: #FF6B6B; font-weight: bold');
+                    
+                    // Log current state
+                    console.log(`%c📅 Selected Day: ${day}`, 'color: #4ECDC4; font-weight: bold');
+                    console.log(`%c⏰ Active Shift: ${activeShift}`, 'color: #4ECDC4; font-weight: bold');
+                    console.log(`%c📆 Selected Date: ${selectedDate.toISOString().slice(0, 10)}`, 'color: #4ECDC4; font-weight: bold');
+                    
+                    // Log all assignments
+                    console.log(`%c\n📋 Total Assignments in System: ${assignments.length}`, 'color: #FFD93D; font-weight: bold');
+                    
+                    // Filter and log assignments for this shift
+                    const shiftAssignments = assignments.filter(a => 
+                      a.shift === activeShift && 
+                      a.is_current &&
+                      Array.isArray(a.days_assigned) &&
+                      a.days_assigned.map(d => d.toLowerCase()).includes(day.toLowerCase())
+                    );
+                    
+                    console.log(`%c📊 Assignments for ${activeShift} shift on ${day}: ${shiftAssignments.length}`, 'color: #95E1D3; font-weight: bold');
+                    shiftAssignments.forEach((a, idx) => {
+                      console.log(`%c  ${idx + 1}. Nurse: ${nurseName(a.user_id)} | Days: ${a.days_assigned?.join(', ')}`, 'color: #95E1D3');
+                    });
+                    
+                    // Log elderly assignments
+                    console.log(`%c\n👴 Total Elderly Assignments in System: ${nurseElderlyAssignments.length}`, 'color: #FFD93D; font-weight: bold');
+                    
+                    // Filter elderly assignments for this day and shift
+                    const elderlyForDayShift = nurseElderlyAssignments.filter(ea => 
+                      ea.day?.toLowerCase() === day.toLowerCase() && 
+                      ea.shift === activeShift
+                    );
+                    
+                    console.log(`%c🏥 Elderly Assignments for ${activeShift} shift on ${day}: ${elderlyForDayShift.length}`, 'color: #95E1D3; font-weight: bold');
+                    elderlyForDayShift.forEach((ea, idx) => {
+                      console.log(`%c  ${idx + 1}. Nurse: ${nurseName(ea.user_id)} | Elderly Count: ${ea.elderly_ids?.length || 0} | Elderly: ${ea.elderly_ids?.map(eid => elderlyName(eid)).join(', ')}`, 'color: #95E1D3');
+                    });
+                    
+                    // Log temporary reassignments
+                    console.log(`%c\n🔄 Temporary Reassignments: ${tempReassignments.length}`, 'color: #FFD93D; font-weight: bold');
+                    const tempForDayShift = tempReassignments.filter(t => 
+                      t.day?.toLowerCase() === day.toLowerCase() && 
+                      t.shift === activeShift
+                    );
+                    console.log(`%c   For ${activeShift} shift on ${day}: ${tempForDayShift.length}`, 'color: #95E1D3');
+                    tempForDayShift.forEach((t, idx) => {
+                      console.log(`%c  ${idx + 1}. From: ${nurseName(t.from_user_id)} → To: ${nurseName(t.to_user_id)} | Elderly: ${t.elderly_ids?.length || 0}`, 'color: #95E1D3');
+                    });
+                    
+                    console.log(`%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`, 'color: #FF6B6B; font-weight: bold');
+                    
                     setActiveDay(day);
                     
                     // Update the date picker to match the selected day
                     if (day !== SHOW_ALL_DAYS) {
                       const currentDate = new Date(selectedDate);
                       const currentDayOfWeek = currentDate.getDay(); // 0=Sunday, 1=Monday, etc.
+                      
+                      console.log(`%c🔧 DATE UPDATE LOGIC:`, 'color: #FFA500; font-weight: bold');
+                      console.log(`   Current Date: ${currentDate.toISOString().slice(0, 10)} (${daysOfWeek[currentDayOfWeek]})`);
+                      console.log(`   Target Day: ${day}`);
                       
                       // Map day names to JavaScript's getDay() values
                       const dayToIndex = {
@@ -1067,17 +1300,30 @@ export default function NurseSchedule() {
                       if (targetDayIndex !== undefined) {
                         // Calculate the difference in days
                         const dayDifference = targetDayIndex - currentDayOfWeek;
+                        console.log(`   Day Difference: ${dayDifference} days`);
                         
                         // Create new date by adding the difference
                         const newDate = new Date(currentDate);
                         newDate.setDate(currentDate.getDate() + dayDifference);
+                        console.log(`   New Date: ${newDate.toISOString().slice(0, 10)} (${daysOfWeek[newDate.getDay()]})`);
+                        
+                        // Check schedule bounds
+                        if (scheduleInfo) {
+                          console.log(`   Schedule Start: ${scheduleInfo.start?.toISOString().slice(0, 10)}`);
+                          console.log(`   Schedule End: ${scheduleInfo.end?.toISOString().slice(0, 10)}`);
+                        }
                         
                         // Only update if the new date is within schedule bounds (if they exist)
                         const isWithinBounds = !scheduleInfo || 
                           (newDate >= scheduleInfo.start && newDate <= scheduleInfo.end);
                         
+                        console.log(`   Is Within Bounds: ${isWithinBounds}`);
+                        
                         if (isWithinBounds) {
+                          console.log(`   ✅ Updating selectedDate to ${newDate.toISOString().slice(0, 10)}`);
                           setSelectedDate(newDate);
+                        } else {
+                          console.log(`   ❌ Date ${newDate.toISOString().slice(0, 10)} is outside schedule bounds - NOT updating`);
                         }
                       }
                     }
@@ -1085,7 +1331,8 @@ export default function NurseSchedule() {
                 >
                   {day}
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             <table className="schedule-table shift-summary nurse-schedule-table">
@@ -1223,6 +1470,17 @@ export default function NurseSchedule() {
           </div>
         )}
       </main>
+
+      {/* Custom Alert/Confirm Modal */}
+      <CustomAlertModal
+        isOpen={modal.isOpen}
+        onClose={closeModal}
+        onConfirm={modal.onConfirm}
+        title={modal.title}
+        message={modal.message}
+        type={modal.type}
+        customClass={modal.customClass}
+      />
     </div>
   );
 }
