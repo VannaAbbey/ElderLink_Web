@@ -1,0 +1,67 @@
+/* Summary of Vitals & Meds Page Styles */
+
+.summary-vitals-meds-page {
+  min-height: 100vh;
+  background-color: #f5f7fa;
+}
+
+.summary-vitals-meds-container {
+  margin-top: 70px;
+  margin-left: 0;
+  padding: 40px;
+  transition: margin-left 0.3s ease;
+  min-height: calc(100vh - 70px);
+}
+
+/* Adjust for open sidebar */
+@media (min-width: 769px) {
+  .sidebar.open ~ * .summary-vitals-meds-container {
+    margin-left: 280px;
+  }
+}
+
+.page-title {
+  font-family: 'Poppins', sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #00588E;
+  margin-bottom: 30px;
+  text-align: center;
+}
+
+.content-placeholder {
+  background: white;
+  border-radius: 12px;
+  padding: 60px 40px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  margin: 0 auto;
+  max-width: 800px;
+}
+
+.content-placeholder p {
+  font-family: 'Poppins', sans-serif;
+  font-size: 1.2rem;
+  color: #666;
+  margin: 0;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .summary-vitals-meds-container {
+    padding: 20px;
+  }
+
+  .page-title {
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+  }
+
+  .content-placeholder {
+    padding: 40px 20px;
+  }
+
+  .content-placeholder p {
+    font-size: 1rem;
+  }
+}

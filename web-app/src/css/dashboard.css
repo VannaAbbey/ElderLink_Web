@@ -6,6 +6,7 @@
   flex-direction: column;
   align-items: center;
   background-color: #F2FDFF;
+  padding-top: 70px;
 }
 
 /* --- Section Titles --- */
@@ -115,6 +116,7 @@
   overflow: visible;
   height: auto;
   min-height: 400px;
+  padding-bottom: 100px;
 }
 
 .carousel-wrapper {

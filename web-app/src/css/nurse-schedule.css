@@ -81,3 +81,40 @@
   position: relative;
   top: -5px; /* Para dikit sa tabs */
 }
+
+/* Nurse elderly list in accordion - vertical scrollable */
+.nurse-elderly-list {
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 8px;
+  margin-top: 8px;
+  background-color: #f9f9f9;
+  border-radius: 6px;
+}
+
+.nurse-elderly-list .elderly-name-item {
+  margin-bottom: 4px;
+}
+
+.nurse-elderly-list .elderly-name-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Custom scrollbar for nurse elderly list */
+.nurse-elderly-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.nurse-elderly-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.nurse-elderly-list::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.nurse-elderly-list::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}

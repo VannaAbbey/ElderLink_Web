@@ -15,6 +15,8 @@ import * as ScheduleService from "../services/scheduleService";
 import * as NewCaregiverService from "../services/newCaregiverService";
 import * as EmergencyService from "../services/emergencyService";
 import * as AbsenceService from "../services/absenceService";
+import * as AttendanceMonitorService from "../services/attendanceMonitorService";
+import * as AutoAbsenceMonitor from "../services/autoAbsenceMonitor";
 import { exportScheduleToPDF } from "../services/scheduleExportService";
 import {
   formatDateString,
@@ -57,6 +59,7 @@ export default function Schedule() {
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [emergencyOptions, setEmergencyOptions] = useState([]);
   const [selectedDonorChoices, setSelectedDonorChoices] = useState({});
+  const [emergencyCount, setEmergencyCount] = useState(0); // Badge count for emergency coverage
   
   // New caregiver integration modal states
   const [showNewCaregiverModal, setShowNewCaregiverModal] = useState(false);
@@ -72,8 +75,16 @@ export default function Schedule() {
   const [systemRecommendations, setSystemRecommendations] = useState([]);
   const [selectedRecommendation, setSelectedRecommendation] = useState(null);
   
+  // State for tracking which caregiver's elderly list is expanded
+  const [expandedElderlyLists, setExpandedElderlyLists] = useState(new Set());
+  
   // ========== DAYS OF WEEK TABS - COMMENT OUT BELOW LINES TO REMOVE ==========
-  const [activeDay, setActiveDay] = useState("Monday");
+  // Initialize activeDay based on current date
+  const getCurrentDayName = () => {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    return days[new Date().getDay()];
+  };
+  const [activeDay, setActiveDay] = useState(getCurrentDayName());
   // ========== END DAYS OF WEEK TABS SECTION ==========
 
   // Search functionality states
@@ -90,10 +101,6 @@ export default function Schedule() {
   const [showCustomAlert, setShowCustomAlert] = useState(false);
   const [customAlertMessage, setCustomAlertMessage] = useState("");
   const [customAlertTitle, setCustomAlertTitle] = useState("Notification");
-  
-  // Validation error modal for "cannot mark absent" (when only 1 caregiver)
-  const [showCannotMarkAbsentModal, setShowCannotMarkAbsentModal] = useState(false);
-  const [cannotMarkAbsentMessage, setCannotMarkAbsentMessage] = useState("");
 
   // Auto-regeneration notification modal
   const [showAutoRegenModal, setShowAutoRegenModal] = useState(false);
@@ -109,7 +116,7 @@ export default function Schedule() {
     { name: "2nd Shift (2:00 PM - 10:00 PM)", key: "2nd", time_range: { start: "14:00", end: "22:00" } },
     { name: "3rd Shift (10:00 PM - 6:00 AM)", key: "3rd", time_range: { start: "22:00", end: "06:00" } },
   ];
-  const [activeShift, setActiveShift] = useState(shiftDefs[0].key);
+  const [activeShift, setActiveShift] = useState(AutoAbsenceMonitor.getCurrentShift() || shiftDefs[0].key);
 
   const [currentVersion, setCurrentVersion] = useState(0);
 
@@ -455,9 +462,111 @@ export default function Schedule() {
     };
   }, []);
 
+  // 🔔 Real-time Attendance Monitor - Auto-marks users absent from mobile app
   useEffect(() => {
-    console.log(`🔄 Setting up real-time listener for nurse_cg_absence collection...`);
+    // Handle emergency coverage detection
+    const handleEmergencyDetected = (emergencyCheck) => {
+      console.log(`\n%c🚨🚨🚨 EMERGENCY COVERAGE TRIGGERED! 🚨🚨🚨`, 'color: #FF0000; font-weight: bold; font-size: 18px; background: #FFF3CD; padding: 10px;');
+      console.log(`%c${emergencyCheck.emergencyCount} house/shift(s) with ZERO coverage!`, 'color: #FF6B6B; font-weight: bold; font-size: 16px');
+      
+      // Set emergency options and show modal
+      setEmergencyOptions(emergencyCheck.emergencyOptions);
+      setEmergencyCount(emergencyCheck.emergencyCount); // Update badge count
+      setShowEmergencyModal(true);
+      
+      // Show alert to admin
+      showAlert(
+        `🚨 EMERGENCY: ${emergencyCheck.emergencyCount} house/shift(s) have NO caregivers available! Please assign emergency coverage immediately.`,
+        `🚨 Emergency Coverage Required`
+      );
+    };
     
+    // Process attendance record when new absence is detected
+    const handleAttendanceChange = async (attendanceRecord) => {
+      console.log(`\n🚨 ATTENDANCE CHANGE DETECTED - Processing...`);
+      
+      // Process the attendance record with emergency detection callback
+      const result = await AttendanceMonitorService.processAttendanceRecord(
+        attendanceRecord,
+        assignments,
+        elderlyAssigns,
+        tempReassigns,
+        handleEmergencyDetected // Pass emergency callback
+      );
+      
+      if (result.success && (result.action === 'marked_absent' || result.action === 'marked_absent_with_emergency')) {
+        // Data will automatically refresh via real-time listeners
+        console.log(`✅ Auto-marked ${result.userId} as absent - real-time listeners will update UI automatically`);
+        
+        // REMOVED: Manual data refresh calls - real-time listeners handle this
+        // await loadAllAssignments();
+        // await loadAllElderlyAssigns();
+        // await loadTempReassigns();
+        
+        // REMOVED: Auto-absence notification popup
+        // The UI will automatically update to show the absence (red row, Undo button)
+        // No need for additional popup notifications
+      }
+    };
+    
+    // Subscribe to real-time attendance changes
+    const unsubscribe = AttendanceMonitorService.subscribeToAttendanceChanges(handleAttendanceChange);
+    
+    // Batch process any pending attendance records on mount (catch up)
+    const processPendingAttendance = async () => {
+      if (assignments.length > 0 && elderlyAssigns.length > 0) {
+        console.log(`🔄 Checking for pending attendance records...`);
+        const result = await AttendanceMonitorService.batchProcessPendingAttendance(
+          assignments,
+          elderlyAssigns,
+          tempReassigns,
+          null, // dateStr (null = today)
+          handleEmergencyDetected // Pass emergency callback for batch processing too
+        );
+        
+        if (result.processed > 0) {
+          console.log(`✅ Batch processed ${result.processed} pending absences - real-time listeners will update UI`);
+          
+          if (result.emergenciesDetected > 0) {
+            console.log(`%c🚨 ${result.emergenciesDetected} emergency situation(s) detected during batch processing!`, 'color: #FF6B6B; font-weight: bold');
+          }
+          
+          // REMOVED: Manual data refresh - real-time listeners handle this
+          // await loadAllAssignments();
+          // await loadAllElderlyAssigns();
+          // await loadTempReassigns();
+        }
+      }
+    };
+    
+    processPendingAttendance();
+    
+    // Start automatic absence monitoring (checks every minute for users who haven't checked in)
+    console.log(`🔔 Starting automatic absence monitoring for caregivers...`);
+    const stopAutoMonitor = AutoAbsenceMonitor.startAutoAbsenceMonitoring(
+      () => ({
+        assignments,
+        elderlyAssigns,
+        tempReassigns,
+        onEmergencyDetected: handleEmergencyDetected
+      }),
+      async (result) => {
+        console.log(`⚠️ Auto-marked ${result.processed} user(s) absent - real-time listeners will update UI automatically`);
+        // REMOVED: Manual data refresh - real-time listeners handle this
+        // await loadAllAssignments();
+        // await loadAllElderlyAssigns();
+        // await loadTempReassigns();
+        // Alert removed - silent auto-absence marking
+      }
+    );
+    
+    return () => {
+      unsubscribe();
+      stopAutoMonitor();
+    };
+  }, [assignments.length, elderlyAssigns.length, tempReassigns.length]); // Re-run when data is available
+
+  useEffect(() => {
     // Debug: Query ALL absences to see what's in the database
     const debugQuery = async () => {
       const allAbsencesSnapshot = await getDocs(collection(db, "nurse_cg_absence"));
@@ -484,7 +593,7 @@ export default function Schedule() {
         snapshot.docChanges().forEach((change) => {
           const data = change.doc.data();
           if (change.type === "added") {
-            console.log(`🆕 NEW absence record created:`, {
+            console.log(`%c🆕 NEW absence record created:`, 'color: #00FF00; font-weight: bold', {
               id: change.doc.id,
               user_id: data.user_id,
               absence_date: data.absence_date,
@@ -493,18 +602,28 @@ export default function Schedule() {
             });
           }
           if (change.type === "modified") {
-            console.log(`✏️ MODIFIED absence record:`, {
+            console.log(`%c✏️ MODIFIED absence record:`, 'color: #FFA500; font-weight: bold; font-size: 14px', {
               id: change.doc.id,
               user_id: data.user_id,
               absence_date: data.absence_date,
-              OLD_status: '???', // We can't see old value, but if you see this log, something is modifying records
               NEW_status: data.status,
               absence_type: data.absence_type
             });
-            console.warn(`🚨 ALERT: Something just modified an absence record! Check what triggered this.`);
+            
+            // Special alert for status changes to "unmarked" - this is the UNDO action
+            if (data.status === "unmarked") {
+              console.log(`%c🔄 UNDO DETECTED IN LISTENER - Status changed to "UNMARKED"`, 'color: #00FFFF; font-weight: bold; font-size: 16px; background: #000; padding: 5px');
+              console.log(`%c   User: ${data.user_id}`, 'color: #00FFFF; font-weight: bold');
+              console.log(`%c   Date: ${data.absence_date}`, 'color: #00FFFF; font-weight: bold');
+              console.log(`%c   Shift: ${data.shift}`, 'color: #00FFFF; font-weight: bold');
+              console.log(`%c   Document ID: ${change.doc.id}`, 'color: #00FFFF; font-weight: bold');
+              console.log(`%c   ⚡ This should trigger the main listener to remove this record from absences array`, 'color: #00FFFF');
+            }
+            
+            console.warn(`%c🚨 ALERT: Absence record modified - Document ${change.doc.id}`, 'color: #FFA500; font-weight: bold');
           }
           if (change.type === "removed") {
-            console.log(`🗑️ DELETED absence record:`, {
+            console.log(`%c🗑️ DELETED absence record:`, 'color: #FF0000; font-weight: bold', {
               id: change.doc.id,
               user_id: data.user_id,
               absence_date: data.absence_date
@@ -520,8 +639,22 @@ export default function Schedule() {
         where("status", "==", "active")
       ),
       (snapshot) => {
+        // Log document changes specifically for the ACTIVE absences listener
+        snapshot.docChanges().forEach((change) => {
+          const data = change.doc.data();
+          if (change.type === "removed") {
+            console.log(`%c📤 REMOVED from active absences (listener detected status changed away from "active"):`, 
+              'color: #FF00FF; font-weight: bold; font-size: 15px; background: #000; padding: 5px');
+            console.log(`%c   User: ${data.user_id}`, 'color: #FF00FF; font-weight: bold');
+            console.log(`%c   Date: ${data.absence_date}`, 'color: #FF00FF; font-weight: bold');
+            console.log(`%c   Document ID: ${change.doc.id}`, 'color: #FF00FF; font-weight: bold');
+            console.log(`%c   ✅ This is GOOD - it means the undo worked!`, 'color: #00FF00; font-weight: bold; font-size: 14px');
+          }
+        });
+        
         const absencesData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        console.log(`✅ Loaded ${absencesData.length} active absences from database`);
+        console.log(`%c✅ ACTIVE ABSENCES LISTENER - Loaded ${absencesData.length} active absences`, 
+          'color: #00FF00; font-weight: bold');
         if (absencesData.length > 0) {
           console.log(`Sample absences:`, absencesData.slice(0, 3).map(a => ({
             user_id: a.user_id,
@@ -632,6 +765,39 @@ export default function Schedule() {
       }
     }
   }, [scheduleInfo]);
+
+  // Monitor for emergency coverage needs (real-time check)
+  // NOTE: Only updates the badge count - modal only shows when admin clicks Emergency Coverage button
+  useEffect(() => {
+    const checkEmergencies = async () => {
+      if (assignments.length === 0 || elderlyAssigns.length === 0) {
+        setEmergencyCount(0);
+        return;
+      }
+
+      try {
+        const selectedDateStr = formatDateString(selectedDate);
+        const emergencyCheck = await EmergencyService.checkEmergencyNeedsAndDonors(
+          selectedDateStr, 
+          assignments, 
+          elderlyAssigns, 
+          tempReassigns
+        );
+        
+        if (emergencyCheck.hasEmergency) {
+          setEmergencyCount(emergencyCheck.emergencyCount);
+          console.log(`🚨 Found ${emergencyCheck.emergencyCount} emergency situations for ${selectedDateStr} (badge updated - modal will not auto-show)`);
+        } else {
+          setEmergencyCount(0);
+        }
+      } catch (error) {
+        console.error("Error checking for emergencies:", error);
+        setEmergencyCount(0);
+      }
+    };
+
+    checkEmergencies();
+  }, [selectedDate, assignments, elderlyAssigns, tempReassigns, absences]); // Re-check when these change
 
   // --- Loaders ---
   const loadStaticData = async () => {
@@ -794,6 +960,7 @@ export default function Schedule() {
       
       if (!emergencyCheck.hasEmergency) {
         console.log("✅ No emergency coverage needed");
+        setEmergencyCount(0); // Update badge count to 0
         showAlert("✅ No emergency coverage needed for this date.", "Success");
         return;
       }
@@ -815,6 +982,7 @@ export default function Schedule() {
       console.log("💡 Initial donor choices:", initialChoices);
       
       setEmergencyOptions(emergencyCheck.emergencyOptions);
+      setEmergencyCount(emergencyCheck.emergencyCount); // Update badge count
       setSelectedDonorChoices(initialChoices);
       setShowEmergencyModal(true);
       
@@ -826,12 +994,12 @@ export default function Schedule() {
     }
   };
 
-  // Execute emergency coverage with selected donors
+  // Execute emergency coverage with selected donors (ONE at a time)
   const executeEmergencyCoverage = async () => {
     try {
       const selectedDateStr = formatDateString(selectedDate);
       
-      // Create donor choices array for the API
+      // Create donor choices array for the API (now only contains ONE emergency)
       const donorChoices = Object.entries(selectedDonorChoices).map(([key, choice]) => {
         const [house, shift] = key.split('_');
         return {
@@ -841,6 +1009,8 @@ export default function Schedule() {
           caregiverId: choice.caregiverId
         };
       });
+      
+      console.log(`🚨 Executing emergency coverage for ${donorChoices.length} emergency...`);
       
       const result = await EmergencyService.activateEmergencyCoverage(selectedDateStr, assignments, elderlyAssigns, tempReassigns, donorChoices);
       
@@ -853,12 +1023,58 @@ export default function Schedule() {
           await loadAllAssignments();
           await loadAllElderlyAssigns();
           await loadTempReassigns();
+          
+          // Close modal temporarily
+          setShowEmergencyModal(false);
+          setEmergencyOptions([]);
+          setSelectedDonorChoices({});
+          
+          // Re-check for remaining emergencies
+          console.log(`🔍 Checking for remaining emergencies after resolving one...`);
+          
+          // Wait a bit for data to sync
+          setTimeout(async () => {
+            try {
+              // Re-fetch latest data
+              const latestAssignments = await ScheduleService.fetchAssignments(true);
+              const latestElderlyAssigns = await ScheduleService.fetchElderlyAssignments();
+              const latestTempReassigns = await ScheduleService.fetchTempReassignments();
+              
+              const emergencyCheck = await EmergencyService.checkEmergencyNeedsAndDonors(
+                selectedDateStr, 
+                latestAssignments, 
+                latestElderlyAssigns, 
+                latestTempReassigns
+              );
+              
+              if (emergencyCheck.hasEmergency) {
+                console.log(`🆘 Found ${emergencyCheck.emergencyCount} more emergencies!`);
+                
+                // Re-open modal with remaining emergencies
+                setEmergencyOptions(emergencyCheck.emergencyOptions);
+                setEmergencyCount(emergencyCheck.emergencyCount); // Update badge count
+                setSelectedDonorChoices({});
+                setShowEmergencyModal(true);
+                
+                showAlert(
+                  `✅ First emergency resolved!\n\n🚨 However, ${emergencyCheck.emergencyCount} more emergency situation${emergencyCheck.emergencyCount > 1 ? 's remain' : ' remains'}. Please assign coverage.`,
+                  "More Emergencies Found"
+                );
+              } else {
+                console.log(`✅ All emergencies resolved!`);
+                setEmergencyCount(0); // Update badge count to 0
+                showAlert("✅ All emergencies have been resolved! No more critical coverage gaps.", "All Clear");
+              }
+            } catch (recheckError) {
+              console.error("Error re-checking emergencies:", recheckError);
+            }
+          }, 1500);
         } else {
           showAlert("✅ No emergency coverage activated.", "Information");
+          setShowEmergencyModal(false);
+          setEmergencyCount(0); // Update badge count to 0
         }
       }
-      
-      setShowEmergencyModal(false);
       
     } catch (error) {
       console.error("Error executing emergency coverage:", error);
@@ -1033,44 +1249,6 @@ export default function Schedule() {
     // Store the assignment and show confirmation popup
     const assignment = assignments.find(a => a.id === assignDocId);
     if (assignment) {
-      // VALIDATION: Check if this caregiver is the only one working on this day and shift
-      const selectedDateStr = formatDateString(selectedDate);
-      const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
-      
-      // Count how many caregivers are working on this day/shift in this house (excluding already absent ones)
-      const caregiversOnThisDayShift = assignments.filter(a => {
-        // Must be current, same house, same shift
-        if (!a.is_current) return false;
-        if (a.house_id !== assignment.house_id) return false;
-        if (a.shift !== assignment.shift) return false;
-        
-        // Must be assigned to work on this day
-        const workDays = (a.days_assigned || []).map(d => d.toLowerCase());
-        if (!workDays.includes(dayName.toLowerCase())) return false;
-        
-        // Exclude caregivers who are already marked absent for this date
-        const isAlreadyAbsent = isCaregiverAbsent(a.user_id, selectedDateStr, absences);
-        if (isAlreadyAbsent) return false;
-        
-        return true;
-      });
-      
-      console.log(`🔍 Caregivers working on ${dayName} ${assignment.shift} shift in ${assignment.house_id}:`, caregiversOnThisDayShift.length);
-      
-      // If there's only 1 caregiver (the one we're trying to mark absent), prevent it with modal
-      if (caregiversOnThisDayShift.length <= 1) {
-        const caregiverFullName = caregiverName(assignment.user_id, caregivers);
-        const houseName = houses.find(h => h.house_id === assignment.house_id)?.house_name || assignment.house_id;
-        
-        setCannotMarkAbsentMessage(
-          `Cannot mark ${caregiverFullName} as absent.\n\n` +
-          `They are the ONLY caregiver working on ${dayName} during the ${assignment.shift} shift in ${houseName}.\n\n` +
-          `At least one caregiver must be present to care for the elderly. Please ensure there are at least 2 caregivers assigned to this shift before marking anyone absent.`
-        );
-        setShowCannotMarkAbsentModal(true);
-        return; // Exit without showing confirmation modal
-      }
-      
       setPendingAbsentAssignment({ assignDocId, assignment });
       setShowAbsentConfirm(true);
     }
@@ -1101,27 +1279,18 @@ export default function Schedule() {
         await loadAllElderlyAssigns();
         await loadTempReassigns();
         
-        // Check if emergency coverage is needed and show modal
+        // Check if emergency coverage is needed and notify admin (but don't auto-show modal)
         if (result.emergencyCheck && result.emergencyCheck.hasEmergency) {
-          console.log(`🚨 Emergency coverage needed after marking absence! Showing modal...`);
+          console.log(`🚨 Emergency coverage needed after marking absence! Badge will be updated.`);
           
-          // Initialize selected donor choices with suggested donors
-          const initialChoices = {};
-          result.emergencyCheck.emergencyOptions.forEach(option => {
-            if (option.suggestedDonor) {
-              initialChoices[`${option.emergencyHouse}_${option.emergencyShift}`] = {
-                donorHouse: option.suggestedDonor.house,
-                caregiverId: option.suggestedDonor.presentCaregivers[0]?.caregiverId
-              };
-            }
-          });
+          // Update emergency count (badge notification)
+          setEmergencyCount(result.emergencyCheck.emergencyCount);
           
-          setEmergencyOptions(result.emergencyCheck.emergencyOptions);
-          setSelectedDonorChoices(initialChoices);
-          setShowEmergencyModal(true);
-          
-          // Show an alert about the emergency
-          showAlert(`🚨 Emergency coverage required!\n\nMarking this caregiver as absent has left ${result.emergencyCheck.emergencyCount} house/shift(s) with no coverage. Please select emergency coverage options.`, "Emergency Coverage Required");
+          // Show an alert about the emergency - admin can click Emergency Coverage button to handle it
+          showAlert(
+            `✅ Caregiver marked as absent successfully.\n\n🚨 NOTICE: Emergency coverage is now required for ${result.emergencyCheck.emergencyCount} house/shift(s).\n\nPlease click the "Emergency Coverage" button to assign coverage.`, 
+            "Absence Marked - Emergency Detected"
+          );
         } else {
           // No emergency coverage needed
           showAlert("✅ Caregiver marked as absent successfully.", "Success");
@@ -1139,6 +1308,88 @@ export default function Schedule() {
   const cancelMarkAbsent = () => {
     setShowAbsentConfirm(false);
     setPendingAbsentAssignment(null);
+  };
+
+  // --- Unmark absent (UNDO) ---
+  const unmarkAbsent = async (userId, shift, houseId, userType = "caregiver") => {
+    try {
+      const targetDateStr = formatDateString(selectedDate);
+      
+      console.log(`🔄 Unmarking ${userType} as absent:`, {
+        userId,
+        shift,
+        houseId,
+        date: targetDateStr
+      });
+
+      // Temporarily suppress emergency modal during undo operation
+      // This prevents the modal from showing when emergency count is recalculated
+      const previousEmergencyCount = emergencyCount;
+      setEmergencyCount(0);
+      setShowEmergencyModal(false);
+
+      const result = await AbsenceService.unmarkAbsent(
+        userId,
+        targetDateStr,
+        shift,
+        houseId,
+        userType
+      );
+
+      if (result.success) {
+        console.log(`\n%c━━━ RELOADING ASSIGNMENTS ━━━`, 'color: #00FFFF; font-weight: bold; font-size: 14px');
+        
+        // Construct detailed success message based on redistribution status
+        let message = `Successfully unmarked ${userType} as absent.`;
+        
+        if (result.stillAbsentCount > 0) {
+          message += `\n\n⚠️ ${result.stillAbsentCount} other caregiver(s) still absent in ${houseId} ${shift} shift.`;
+          message += `\n\n🔄 Elderly have been redistributed among available caregivers.`;
+        } else {
+          message += `\n\n✅ All caregivers are now present. Original assignments have been restored.`;
+        }
+        
+        if (result.emergencyCoverageRemoved) {
+          message += `\n\n🚨 Emergency coverage has been removed for ${houseId} ${shift} shift.`;
+        }
+        
+        if (result.deletedTempAssignments > 0) {
+          message += `\n\n📋 ${result.deletedTempAssignments} temporary assignment(s) have been removed.`;
+        }
+
+        // IMPORTANT: Reload ALL data BEFORE showing alert
+        // This ensures the UI reflects the changes and prevents emergency modal from showing
+        console.log(`\n%c━━━ RELOADING ASSIGNMENTS ━━━`, 'color: #00FF00; font-weight: bold; font-size: 14px');
+        await loadAllAssignments();
+        await loadAllElderlyAssigns();
+        await loadTempReassigns();
+        
+        // Success - real-time listener will automatically update absences array
+        console.log(`\n%c✅ UNDO COMPLETE - Assignments reloaded successfully`, 'color: #00FF00; font-weight: bold; font-size: 14px');
+
+        // Now show the success message
+        showAlert(message, "Absence Unmarked");
+        
+        // Re-enable emergency detection after a short delay
+        // The real-time listeners will recalculate the correct emergency count
+        setTimeout(() => {
+          console.log('🔄 Re-enabling emergency detection after undo');
+        }, 1000);
+      } else {
+        // If undo failed, restore previous emergency count
+        setEmergencyCount(previousEmergencyCount);
+        showAlert(result.message, "Error");
+      }
+
+    } catch (error) {
+      console.error("Error unmarking absent:", error);
+      // Restore previous emergency count on error
+      setEmergencyCount(previousEmergencyCount);
+      showAlert(
+        `Failed to unmark absence: ${error.message}`,
+        "Error"
+      );
+    }
   };
 
   // --- Reset outdated absences (from previous days only) on component mount ---
@@ -1481,7 +1732,7 @@ export default function Schedule() {
         <div className="toggle-buttons">
           {/* <button
             className={`toggle-btn ${viewMode === "current" ? "active" : ""}`}
-          >
+          > 
             Current Schedule
           </button>
           <button
@@ -1572,22 +1823,33 @@ export default function Schedule() {
           </>
         )}
         
-        <button onClick={handleGenerateClick}>Generate Schedule</button>
-        <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }}>Clear Schedule</button>
+        <button onClick={handleGenerateClick} title="Generate a new caregiver schedule for the selected period">Generate Schedule</button>
+        <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }} title="Delete all current caregiver schedules and assignments">Clear Schedule</button>
         {/* <button onClick={handleCleanupOrphanedAssignments} style={{ marginLeft: 8, background: '#dc3545', color: 'white' }}>🧹 Fix Unknown</button> */}
         {/* <button onClick={handleDatabaseMaintenance} style={{ marginLeft: 8, background: '#9b59b6', color: 'white' }}>🗑️ Database Cleanup</button> */}
-        {/* <button onClick={handleEmergencyCoverage} style={{ marginLeft: 8, background: '#f39c12', color: 'white' }}>🚨 Emergency Coverage</button> */}
+        <button 
+          onClick={handleEmergencyCoverage} 
+          style={{ marginLeft: 8, background: '#f39c12', color: 'white', position: 'relative' }}
+          disabled={!scheduleInfo}
+          title="Handle emergency situations by temporarily reassigning caregivers between houses"
+        >
+          🚨 Emergency Coverage
+          {scheduleInfo && emergencyCount > 0 && (
+            <span className="notification-badge" style={{ background: '#dc3545' }}>{emergencyCount}</span>
+          )}
+        </button>
         <button 
           onClick={handleNewCaregiverIntegration} 
           style={{ marginLeft: 8, background: '#28a745', color: 'white', position: 'relative' }}
           disabled={!scheduleInfo}
+          title="Integrate newly registered caregivers into the current schedule"
         >
-          👥 Add New Caregiver
+          👥 Add Caregiver
           {scheduleInfo && unassignedCount > 0 && (
             <span className="notification-badge">{unassignedCount}</span>
           )}
         </button>
-        <button onClick={handleExportPDF} style={{ marginLeft: 8, background: '#007bff', color: 'white' }} disabled={!scheduleInfo}>📄 Download Schedule PDF</button>
+        <button onClick={handleExportPDF} style={{ marginLeft: 8, background: '#007bff', color: 'white' }} disabled={!scheduleInfo} title="Export the current schedule to PDF for printing or sharing">📄 Download Schedule</button>
       </div>
 
       {/* Search Bar */}
@@ -1601,7 +1863,7 @@ export default function Schedule() {
             className="caregiver-search-input"
           />
           {searchQuery && (
-            <button onClick={clearSearch} className="clear-search-btn">
+            <button onClick={clearSearch} className="clear-search-btn" title="Clear search query">
               ✕
             </button>
           )}
@@ -1619,8 +1881,8 @@ export default function Schedule() {
         <div className="overlay">
           <div className="overlay-content">
             <p>Are you sure you want to generate schedule for {pendingDuration} month(s)?</p>
-            <button onClick={confirmGenerate}>Yes, Generate</button>
-            <button onClick={cancelGenerate}>Cancel</button>
+            <button onClick={confirmGenerate} title="Confirm and proceed with schedule generation">Yes, Generate</button>
+            <button onClick={cancelGenerate} title="Cancel schedule generation">Cancel</button>
           </div>
         </div>
       )}
@@ -1638,14 +1900,14 @@ export default function Schedule() {
         <div className="overlay">
           <div className="overlay-content">
             <p>Generation of Schedule is <b>Successful!</b></p>
-            <button onClick={closeSuccess}>OK</button>
+            <button onClick={closeSuccess} title="Close this notification">OK</button>
           </div>
         </div>
       )}
 
       <div className="house-tabs">
         {sortedHouses.map((h) => (
-          <button key={h.house_id} className={`house-tab ${activeHouseId === h.house_id ? "active" : ""}`} onClick={() => setActiveHouseId(h.house_id)}>
+          <button key={h.house_id} className={`house-tab ${activeHouseId === h.house_id ? "active" : ""}`} onClick={() => setActiveHouseId(h.house_id)} title={`View caregivers assigned to ${h.house_name}`}>
             {h.house_name}
           </button>
         ))}
@@ -1655,7 +1917,7 @@ export default function Schedule() {
         <div className="table-header">
           <div className="shift-tabs">
             {shiftDefs.map((s) => (
-              <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)}>{s.name}</button>
+              <button key={s.key} className={`shift-tab ${activeShift === s.key ? "active-shift" : ""}`} onClick={() => setActiveShift(s.key)} title={`View caregivers working ${s.name}`}>{s.name}</button>
             ))}
           </div>
           
@@ -1807,7 +2069,43 @@ export default function Schedule() {
                     {caregiverName(a.user_id, caregivers)}
                   </td>
                   <td>{(a.days_assigned || []).slice().sort((d1, d2) => daysOfWeek.indexOf(d1) - daysOfWeek.indexOf(d2)).join(", ")}</td>
-                  <td>{elders.map((e) => `${e.elderly_fname} ${e.elderly_lname}`).join(", ")}</td>
+                  <td>
+                    {(() => {
+                      const isExpanded = expandedElderlyLists.has(a.id);
+                      const displayedElders = isExpanded ? elders : elders.slice(0, 3);
+                      const hasMore = elders.length > 3;
+                      
+                      return (
+                        <div className="elderly-list-container" style={{ maxHeight: isExpanded ? '120px' : 'none', overflowY: isExpanded ? 'auto' : 'visible' }}>
+                          {displayedElders.map((e, idx) => (
+                            <div key={idx} className="elderly-name-item">
+                              {`${e.elderly_fname} ${e.elderly_lname}`}
+                            </div>
+                          ))}
+                          {hasMore && !isExpanded && (
+                            <div 
+                              className="elderly-view-more-btn" 
+                              onClick={() => setExpandedElderlyLists(prev => new Set([...prev, a.id]))}
+                            >
+                              View More ({elders.length - 3} more)
+                            </div>
+                          )}
+                          {isExpanded && hasMore && (
+                            <div 
+                              className="elderly-view-more-btn" 
+                              onClick={() => setExpandedElderlyLists(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(a.id);
+                                return newSet;
+                              })}
+                            >
+                              View Less
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td>
                     {isOnLeave ? (
                       <span className="on-leave-text">
@@ -1819,9 +2117,13 @@ export default function Schedule() {
                         )}
                       </span>
                     ) : isAbsent ? (
-                      <span className="absent-text">
-                        ❌ Absent on {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
+                      <button 
+                        onClick={() => unmarkAbsent(a.user_id, a.shift, a.house_id, "caregiver")} 
+                        className="unabsent-btn"
+                        title="Undo this caregiver's absence and restore their original elderly assignments"
+                      >
+                        ↩️ Undo Absent
+                      </button>
                     ) : isEmergency ? (
                       <span style={{ color: '#f39c12', fontWeight: 'bold', fontSize: '12px' }}>
                         🚨 Emergency Coverage<br/>
@@ -1832,7 +2134,7 @@ export default function Schedule() {
                         </small>
                       </span>
                     ) : (
-                      <button onClick={() => markAbsent(a.id)} className="absent-btn">
+                      <button onClick={() => markAbsent(a.id)} className="absent-btn" title="Mark this caregiver as absent and redistribute their elderly to other caregivers">
                         Mark Absent for {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                       </button>
                     )}
@@ -1891,18 +2193,6 @@ export default function Schedule() {
         title={customAlertTitle}
         message={customAlertMessage}
         onClose={closeCustomAlert}
-      />
-
-      {/* Cannot Mark Absent Validation Modal */}
-      <CustomAlertModal
-        isOpen={showCannotMarkAbsentModal}
-        title="❌ Cannot Mark Absent"
-        message={cannotMarkAbsentMessage}
-        onClose={() => {
-          setShowCannotMarkAbsentModal(false);
-          setCannotMarkAbsentMessage("");
-        }}
-        customClass="validation-error-modal"
       />
 
       {/* Auto-Regeneration Notification Modal */}
@@ -1986,6 +2276,7 @@ export default function Schedule() {
                   backgroundColor: '#2ecc71',
                   border: 'none'
                 }}
+                title="Acknowledge the new schedule and close this notification"
               >
                 Got it, thanks!
               </button>

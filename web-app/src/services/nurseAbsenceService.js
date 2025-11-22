@@ -169,15 +169,6 @@ export const markNurseAbsent = async (
       console.log(`   [${idx + 1}] ${a.user_id} | Days: ${a.days_assigned?.join(', ')}`);
     });
 
-    // ✅ CRITICAL VALIDATION: Ensure we're not marking the last available nurse as absent
-    if (otherAssigns.length === 0) {
-      console.error(`%c❌ VALIDATION FAILED: Cannot mark nurse as absent - no coverage available!`, 'color: #FF6B6B; font-weight: bold; font-size: 16px');
-      throw new Error(
-        `Cannot mark this nurse as absent. They are the ONLY nurse available for ${dayName} during the ${assign.shift} shift. ` +
-        `At least one nurse must be present to care for the elderly.`
-      );
-    }
-
     // 5. Split ALL elderly (original + cascade temp) evenly among available nurses
     // ✅ NEW APPROACH: Redistribute both original and temp elderly to remaining nurses
     console.log(`\n%c━━━ STEP 4: Creating Temporary Reassignments ━━━`, 'color: #FFD93D; font-weight: bold; font-size: 14px');
@@ -277,6 +268,279 @@ export const resetDailyNurseAbsences = async () => {
   } catch (error) {
     console.error("Error resetting daily nurse absences:", error);
     throw new Error("Failed to reset daily nurse absences");
+  }
+};
+
+// Unmark nurse as absent (UNDO absence)
+export const unmarkNurseAbsent = async (
+  userId,
+  targetDateStr,
+  shift,
+  houseId,
+  userType = "nurse"
+) => {
+  try {
+    console.log(`\n%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'color: #4ECDC4; font-weight: bold');
+    console.log(`%c🔄 UNMARKING NURSE AS ABSENT (UNDO)`, 'color: #4ECDC4; font-weight: bold; font-size: 14px');
+    console.log(`%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'color: #4ECDC4; font-weight: bold');
+    console.log(`%c📍 User ID: ${userId}`, 'color: #FFD93D');
+    console.log(`%c📅 Date: ${targetDateStr}`, 'color: #FFD93D');
+    console.log(`%c⏰ Shift: ${shift}`, 'color: #FFD93D');
+    console.log(`%c🏠 House: ${houseId}`, 'color: #FFD93D');
+
+    // 1. Find and update the absence record to "unmarked" status
+    const absenceQuery = query(
+      collection(db, "nurse_cg_absence"),
+      where("user_id", "==", userId),
+      where("absence_date", "==", targetDateStr),
+      where("shift", "==", shift),
+      where("status", "==", "active")
+    );
+
+    const absenceSnap = await getDocs(absenceQuery);
+    
+    if (absenceSnap.empty) {
+      console.warn(`⚠️ No active absence record found for nurse ${userId} on ${targetDateStr}`);
+      return { success: false, message: "No active absence record found" };
+    }
+
+    // Update absence status to "unmarked"
+    const absenceDoc = absenceSnap.docs[0];
+    
+    await updateDoc(doc(db, "nurse_cg_absence", absenceDoc.id), {
+      status: "unmarked",
+      unmarked_at: Timestamp.now(),
+      unmarked_by: "admin"
+    });
+
+    console.log(`✅ Updated absence record to "unmarked" status`);
+
+    console.log(`\n%c━━━ STEP 2: Check for Other Absent Nurses ━━━`, 'color: #FFD93D; font-weight: bold; font-size: 14px');
+
+    // 2. Get all OTHER nurses who are STILL ABSENT in the same shift/date
+    const allAbsencesQuery = query(
+      collection(db, "nurse_cg_absence"),
+      where("absence_date", "==", targetDateStr),
+      where("shift", "==", shift),
+      where("status", "==", "active"),
+      where("user_type", "==", "nurse")
+    );
+
+    const allAbsencesSnap = await getDocs(allAbsencesQuery);
+    const stillAbsentNurseIds = allAbsencesSnap.docs.map(d => d.data().user_id);
+    
+    console.log(`👥 Other nurses still absent: ${stillAbsentNurseIds.length}`);
+    if (stillAbsentNurseIds.length > 0) {
+      console.log(`   Still absent:`, stillAbsentNurseIds);
+    }
+
+    console.log(`\n%c━━━ STEP 3: Delete Temporary Assignments ━━━`, 'color: #FFD93D; font-weight: bold; font-size: 14px');
+
+    // 3. Delete ALL temporary assignments for this shift/date
+    const tempReassignQuery = query(
+      collection(db, "temporary_assignments"),
+      where("date", "==", targetDateStr),
+      where("shift", "==", shift)
+    );
+
+    const tempSnap = await getDocs(tempReassignQuery);
+    const batch = writeBatch(db);
+    let deletedCount = 0;
+
+    console.log(`   Found ${tempSnap.docs.length} total temp assignments for ${targetDateStr} ${shift} shift`);
+
+    tempSnap.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      
+      console.log(`🗑️ Deleting temp assignment:`, {
+        id: docSnap.id,
+        from: data.from_user_id,
+        to: data.to_user_id,
+        elderly_count: (data.elderly_ids || []).length
+      });
+      
+      batch.delete(doc(db, "temporary_assignments", docSnap.id));
+      deletedCount++;
+    });
+
+    if (deletedCount > 0) {
+      await batch.commit();
+      console.log(`✅ Deleted ${deletedCount} temporary assignment(s)`);
+    } else {
+      console.log(`ℹ️ No temporary assignments found to delete`);
+    }
+
+    console.log(`\n%c━━━ STEP 4: Redistribute Elderly (if needed) ━━━`, 'color: #FFD93D; font-weight: bold; font-size: 14px');
+
+    // 4. REDISTRIBUTE elderly if there are still absent nurses
+    if (stillAbsentNurseIds.length > 0) {
+      console.log(`🔄 Redistribution needed - ${stillAbsentNurseIds.length} nurse(s) still absent`);
+      
+      // Convert date to day name
+      const targetDate = new Date(targetDateStr + "T00:00:00");
+      const indexToDayName = {
+        0: "Sunday", 1: "Monday", 2: "Tuesday", 3: "Wednesday", 
+        4: "Thursday", 5: "Friday", 6: "Saturday"
+      };
+      const dayName = indexToDayName[targetDate.getDay()];
+      
+      console.log(`   Day: ${dayName}, Shift: ${shift}`);
+
+      // Get ALL nurse elderly assignments for this shift/day
+      const nurseElderlyQuery = query(
+        collection(db, "elderly_assignments"),
+        where("shift", "==", shift),
+        where("day", "==", dayName),
+        where("user_type", "==", "nurse")
+      );
+      
+      const nurseElderlySnap = await getDocs(nurseElderlyQuery);
+      console.log(`📊 Found ${nurseElderlySnap.docs.length} nurse elderly assignment documents`);
+      
+      // 🔧 FIX: Collect elderly ONLY from ABSENT nurses (not from present ones)
+      const elderlyFromAbsentNurses = new Set();
+      
+      nurseElderlySnap.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        const nurseUserId = data.user_id;
+        const elderlyIds = data.elderly_ids || [];
+        
+        // ✅ Only add if this nurse is STILL ABSENT
+        if (stillAbsentNurseIds.includes(nurseUserId)) {
+          elderlyIds.forEach(id => elderlyFromAbsentNurses.add(id));
+          console.log(`   📦 Collecting ${elderlyIds.length} elderly from ABSENT nurse: ${nurseUserId}`);
+        } else {
+          console.log(`   ⏭️  Skipping ${elderlyIds.length} elderly from PRESENT nurse: ${nurseUserId}`);
+        }
+      });
+      
+      const elderlyToRedistribute = Array.from(elderlyFromAbsentNurses);
+      console.log(`Total elderly to redistribute (from absent nurses only): ${elderlyToRedistribute.length}`);
+      
+      if (elderlyToRedistribute.length > 0) {
+        // Find ALL AVAILABLE nurses (not absent, including the one we just unmarked)
+        const nurseAssignmentsQuery = query(
+          collection(db, "house_shift_assignments"),
+          where("shift", "==", shift),
+          where("is_current", "==", true),
+          where("user_type", "==", "nurse")
+        );
+        
+        const nurseAssignmentsSnap = await getDocs(nurseAssignmentsQuery);
+        const availableNurses = nurseAssignmentsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(n => {
+            const isAbsent = stillAbsentNurseIds.includes(n.user_id);
+            const worksOnDay = (n.days_assigned || []).map(d => d.toLowerCase()).includes(dayName.toLowerCase());
+            return !isAbsent && worksOnDay;
+          });
+        
+        console.log(`👥 Available nurses: ${availableNurses.length} (including ${userId})`);
+        
+        if (availableNurses.length > 0) {
+          // Split elderly evenly among available nurses
+          const chunks = splitIntoChunks(elderlyToRedistribute, availableNurses.length);
+          const redistributeBatch = writeBatch(db);
+          
+          console.log(`\n%c🔄 Redistribution Plan:`, 'color: #4ECDC4; font-weight: bold');
+          for (let i = 0; i < availableNurses.length; i++) {
+            const nurse = availableNurses[i];
+            const elderlyChunk = chunks[i];
+            
+            if (elderlyChunk && elderlyChunk.length > 0) {
+              console.log(`   ${i + 1}. Nurse ${nurse.user_id}: +${elderlyChunk.length} temp elderly`);
+              
+              const tempAssignRef = doc(collection(db, "temporary_assignments"));
+              redistributeBatch.set(tempAssignRef, {
+                from_user_id: stillAbsentNurseIds[0], // Placeholder
+                to_user_id: nurse.user_id,
+                elderly_ids: elderlyChunk,
+                date: targetDateStr,
+                day: dayName,
+                shift: shift,
+                user_type: "nurse",
+                reason: `Redistribution after unmarking ${userId}`,
+                assignment_type: "redistribution",
+                created_at: Timestamp.now(),
+                assign_version: nurse.version || 1
+              });
+            }
+          }
+          
+          await redistributeBatch.commit();
+          console.log(`✅ Redistributed ${elderlyToRedistribute.length} elderly among ${availableNurses.length} nurses`);
+        } else {
+          console.log(`⚠️ No available nurses for redistribution`);
+        }
+      } else {
+        console.log(`ℹ️ No elderly to redistribute`);
+      }
+    } else {
+      console.log(`✅ No redistribution needed - all nurses present`);
+    }
+
+    console.log(`\n%c━━━ STEP 5: Update Attendance Record (if exists) ━━━`, 'color: #FFD93D; font-weight: bold; font-size: 14px');
+
+    // 5. Update attendance collection - set is_present back to true
+    // This is important for cases where the absence was auto-marked from the mobile app
+    try {
+      const attendanceQuery = query(
+        collection(db, "attendance"),
+        where("user_id", "==", userId),
+        where("date", "==", targetDateStr),
+        where("shift", "==", shift),
+        where("user_type", "==", "nurse")
+      );
+      
+      const attendanceSnap = await getDocs(attendanceQuery);
+      
+      if (!attendanceSnap.empty) {
+        const attendanceDoc = attendanceSnap.docs[0];
+        await updateDoc(doc(db, "attendance", attendanceDoc.id), {
+          is_present: true,
+          updated_at: Timestamp.now(),
+          updated_by: "admin",
+          update_reason: "Absence unmarked by admin"
+        });
+        console.log(`✅ Updated attendance record - set is_present = true`);
+      } else {
+        console.log(`ℹ️ No attendance record found to update (absence may have been manually marked)`);
+      }
+    } catch (attendanceError) {
+      console.warn(`⚠️ Could not update attendance record:`, attendanceError.message);
+      // Don't fail the entire operation if attendance update fails
+    }
+
+    // 6. Log the unmark action
+    await addDoc(collection(db, "activity_logs"), {
+      action: "Nurse Absence Unmarked (UNDO)",
+      user_id: userId,
+      date: targetDateStr,
+      shift: shift,
+      house_id: houseId,
+      user_type: "nurse",
+      unmarked_by: "admin",
+      temporary_assignments_deleted: deletedCount,
+      timestamp: Timestamp.now()
+    });
+
+    console.log(`%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`, 'color: #95E1D3; font-weight: bold');
+    console.log(`%c✅ UNMARK NURSE ABSENCE COMPLETE`, 'color: #95E1D3; font-weight: bold; font-size: 14px');
+    console.log(`%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`, 'color: #95E1D3; font-weight: bold');
+
+    return {
+      success: true,
+      message: `Successfully unmarked nurse as absent`,
+      deletedTempAssignments: deletedCount,
+      userId,
+      date: targetDateStr,
+      shift,
+      houseId
+    };
+
+  } catch (error) {
+    console.error("❌ Error unmarking nurse absence:", error);
+    throw new Error(`Failed to unmark nurse absence: ${error.message}`);
   }
 };
 

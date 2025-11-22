@@ -1459,6 +1459,43 @@ export const clearSchedule = async () => {
       console.log(`Successfully deleted ${totalDeleted} caregiver temporary assignments`);
     };
 
+    const deleteCaregiverAttendance = async () => {
+      // Query only caregiver attendance records
+      const snap = await getDocs(
+        query(collection(db, "attendance"), where("user_type", "==", "caregiver"))
+      );
+      
+      if (snap.empty) {
+        console.log(`No caregiver attendance records in attendance`);
+        return;
+      }
+
+      console.log(`Deleting ${snap.docs.length} caregiver attendance records`);
+      
+      const docs = snap.docs;
+      const chunkSize = 400;
+      let totalDeleted = 0;
+
+      for (let i = 0; i < docs.length; i += chunkSize) {
+        const chunk = docs.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+
+        chunk.forEach((docSnap) => {
+          batch.delete(doc(db, "attendance", docSnap.id));
+        });
+
+        await batch.commit();
+        totalDeleted += chunk.length;
+        console.log(`Deleted ${chunk.length} caregiver attendance records (${totalDeleted}/${docs.length})`);
+        
+        if (i + chunkSize < docs.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      console.log(`✅ Successfully deleted ${totalDeleted} caregiver attendance records`);
+    };
+
     // Clear only caregiver schedule-related documents sequentially
     console.log("Starting CAREGIVER schedule cleanup (nurse schedules will be preserved)...");
     
@@ -1466,6 +1503,7 @@ export const clearSchedule = async () => {
     await deleteCaregiverDocuments("elderly_assignments");
     await deleteCaregiverTempAssignments();
     await deleteCaregiverAbsences();
+    await deleteCaregiverAttendance();
 
     console.log("All CAREGIVER schedule collections cleared successfully (nurse schedules preserved)");
     return { success: true, message: "Caregiver schedule cleared successfully (nurse schedules preserved)" };

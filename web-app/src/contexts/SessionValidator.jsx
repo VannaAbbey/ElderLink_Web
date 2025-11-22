@@ -36,55 +36,66 @@ export default function SessionValidator() {
         console.log('📱 Local session token at init:', localStorage.getItem('session_token'));
 
         // 🔐 Listen to user document changes in real-time
-        const userDocRef = doc(db, 'users', userId);
-        const unsubscribeDoc = onSnapshot(userDocRef, (docSnapshot) => {
-          if (docSnapshot.exists()) {
-            const userData = docSnapshot.data();
-            const activeSessionToken = userData.active_session_token;
+        // 🚫 TEMPORARILY DISABLED FOR MULTI-USER TESTING
+        // Uncomment the code below to re-enable session validation
+        
+        // const userDocRef = doc(db, 'users', userId);
+        // const unsubscribeDoc = onSnapshot(userDocRef, (docSnapshot) => {
+        //   if (docSnapshot.exists()) {
+        //     const userData = docSnapshot.data();
+        //     const activeSessionToken = userData.active_session_token;
             
             // ✅ Get fresh token from localStorage on each check
-            const currentLocalToken = localStorage.getItem('session_token');
+        //     const currentLocalToken = localStorage.getItem('session_token');
 
-            console.log('🔄 Session check triggered at', new Date().toLocaleTimeString());
-            console.log('   Local token (current):', currentLocalToken);
-            console.log('   Active token (Firestore):', activeSessionToken);
-            console.log('   Match:', currentLocalToken === activeSessionToken);
-            // Check if session token matches
-            if (currentLocalToken && activeSessionToken && currentLocalToken !== activeSessionToken) {
-              console.warn('⚠️ SESSION MISMATCH DETECTED!');
-              console.warn('   This device token:', currentLocalToken);
-              console.warn('   Firestore token:', activeSessionToken);
-              console.warn('   Another device has logged in. Forcing logout...');
+        //     console.log('🔄 Session check triggered at', new Date().toLocaleTimeString());
+        //     console.log('   Local token (current):', currentLocalToken);
+        //     console.log('   Active token (Firestore):', activeSessionToken);
+        //     console.log('   Match:', currentLocalToken === activeSessionToken);
+        //     // Check if session token matches
+        //     if (currentLocalToken && activeSessionToken && currentLocalToken !== activeSessionToken) {
+        //       console.warn('⚠️ SESSION MISMATCH DETECTED!');
+        //       console.warn('   This device token:', currentLocalToken);
+        //       console.warn('   Firestore token:', activeSessionToken);
+        //       console.warn('   Another device has logged in. Forcing logout...');
               
-              // Force logout
-              signOut(auth).then(() => {
-                localStorage.removeItem('session_token');
-                localStorage.removeItem('user_id');
+        //       // Force logout
+        //       signOut(auth).then(() => {
+        //         localStorage.removeItem('session_token');
+        //         localStorage.removeItem('user_id');
                 
-                // Show modal and then navigate
-                setShowLogoutModal(true);
-              }).catch((error) => {
-                console.error('❌ Error during forced logout:', error);
-              });
-            } else if (!currentLocalToken) {
-              console.warn('⚠️ No local session token found - possible issue');
-            } else if (!activeSessionToken) {
-              console.warn('⚠️ No active session token in Firestore - possible issue');
-            } else {
-              console.log('✅ Session valid - tokens match');
-            }
-          } else {
-            console.error('❌ User document not found in Firestore');
-          }
-        }, (error) => {
-          console.error('❌ Session validation error:', error);
-        });
+        //         // Show modal and then navigate
+        //         setShowLogoutModal(true);
+        //       }).catch((error) => {
+        //         console.error('❌ Error during forced logout:', error);
+        //       });
+        //     } else if (!currentLocalToken) {
+        //       console.warn('⚠️ No local session token found - possible issue');
+        //     } else if (!activeSessionToken) {
+        //       console.warn('⚠️ No active session token in Firestore - possible issue');
+        //     } else {
+        //       console.log('✅ Session valid - tokens match');
+        //     }
+        //   } else {
+        //     console.error('❌ User document not found in Firestore');
+        //   }
+        // }, (error) => {
+        //   console.error('❌ Session validation error:', error);
+        // });
+        
+
+        console.log('⚠️ Session validation is currently DISABLED for multi-user testing');
+
+        console.log('⚠️ Session validation is currently DISABLED for multi-user testing');
 
         // Cleanup listener on unmount
-        return () => {
-          console.log('🛑 Cleaning up session listener for user:', userId);
-          unsubscribeDoc();
-        };
+        // 🚫 DISABLED: Uncomment when re-enabling session validation
+        
+        // return () => {
+        //   console.log('🛑 Cleaning up session listener for user:', userId);
+        //   unsubscribeDoc();
+        // };
+        
       } else {
         console.log('👤 No user authenticated - SessionValidator idle');
       }
