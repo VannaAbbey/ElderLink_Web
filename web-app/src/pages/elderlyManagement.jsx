@@ -80,6 +80,7 @@ export default function ElderlyManagement() {
                   : "folder-btn"
               }
               onClick={() => setActiveHouse(house.house_id)}
+              title={`View elderly residents and profiles in ${house.house_name}`}
             >
               {house.house_name}
             </button>

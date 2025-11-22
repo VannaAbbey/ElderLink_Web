@@ -4,6 +4,9 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase";
 
+// Security
+import SessionValidator from "./contexts/SessionValidator";
+
 // Pages
 import Navbar from "./pages/navbar";
 import Login from "./pages/login";
@@ -16,14 +19,17 @@ import Profile_Elderly from "./pages/profileElderly";
 import ProfileCaregiver from "./pages/profileCaregiver";
 import ProfileNurse from "./pages/profileNurse";
 import HouseView from "./pages/houseView";
-import Notifications from "./pages/Notifications";
-import Schedule from "./pages/Schedule";
+import Notifications from "./pages/notifications";
+import Schedule from "./pages/schedule";
 import Accounts from "./pages/accounts";
 import EditAdminProfile from "./pages/edit_admin_profile";
 import EditElderlyProfile from "./pages/edit_elderly_profile";
 import EditCaregiverOverlay from "./pages/edit_cg_overlay"; // ✅ added
 import EditNurseOverlay from "./pages/edit_nurse_overlay"; // ✅ added
 import NurseSchedule from "./pages/nurse-schedule";
+import IncidentReports from "./pages/incidentReports";
+import ShiftLogs from "./pages/shift-logs";
+import SummaryVitalsMeds from "./pages/summary-vitals-meds";
 
 // --- ProtectedRoute Component ---
 function ProtectedRoute({ user, children }) {
@@ -48,6 +54,8 @@ export default function App() {
 
   return (
     <Router>
+      {/* 🔐 Session Validator - Monitors for multiple simultaneous logins */}
+      {user && <SessionValidator />}
       {user && <Navbar />}
       <Routes>
         {/* Public Route */}
@@ -155,6 +163,30 @@ export default function App() {
           element={
             <ProtectedRoute user={user}>
               <NurseSchedule />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/incident-reports"
+          element={
+            <ProtectedRoute user={user}>
+              <IncidentReports />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/shift-logs"
+          element={
+            <ProtectedRoute user={user}>
+              <ShiftLogs />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/summary-vitals-meds"
+          element={
+            <ProtectedRoute user={user}>
+              <SummaryVitalsMeds />
             </ProtectedRoute>
           }
         />

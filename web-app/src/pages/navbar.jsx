@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../firebase";
-import { FaBell, FaBars, FaTimes } from "react-icons/fa";
+import { FaBell, FaBars, FaTimes, FaHome, FaUsers, FaCalendarAlt, FaUserMd, FaExclamationTriangle, FaUserCircle, FaClipboardList } from "react-icons/fa";
 import { collection, query, where, onSnapshot, updateDoc, doc, getDoc, getDocs } from "firebase/firestore";
 import { processApprovedLeave } from "../services/absenceService";
 import Notifications from "./notifications";
@@ -11,7 +11,7 @@ import "../css/navbar.css";
 export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [elderlyRecordRequests, setElderlyRecordRequests] = useState([]);
@@ -25,6 +25,7 @@ export default function Navbar() {
   const [focusedNotification, setFocusedNotification] = useState(null); // Track clicked notification
   const dropdownRef = useRef(null);
   const notifRef = useRef(null);
+  const sidebarRef = useRef(null);
 
   // Track screen resize
   useEffect(() => {
@@ -43,6 +44,10 @@ export default function Navbar() {
 
   const handleLogout = async () => {
     try {
+      // 🔐 Clear session token on logout
+      localStorage.removeItem('session_token');
+      localStorage.removeItem('user_id');
+      
       await signOut(auth);
       navigate("/login", { replace: true });
     } catch (error) {
@@ -484,139 +489,45 @@ export default function Navbar() {
         setDropdownOpen(false);
       if (notifRef.current && !notifRef.current.contains(event.target))
         setNotifOpen(false);
+      if (sidebarRef.current && !sidebarRef.current.contains(event.target) && !event.target.closest('.sidebar-toggle'))
+        setSidebarOpen(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Navigation items with icons
+  const navigationItems = [
+    { path: "/dashboard", label: "Home", icon: <FaHome /> },
+    { path: "/elderlyManagement", label: "Elderly Management", icon: <FaUsers /> },
+    { path: "/schedule", label: "Caregiver Schedule", icon: <FaCalendarAlt /> },
+    { path: "/nurse-schedule", label: "Nurse Schedule", icon: <FaUserMd /> },
+    { path: "/shift-logs", label: "Shift Logs", icon: <FaClipboardList /> },
+    { path: "/incident-reports", label: "Incident Reports", icon: <FaExclamationTriangle /> },
+    { path: "/summary-vitals-meds", label: "Summary of Vitals & Meds", icon: <FaClipboardList /> },
+    { path: "/accounts", label: "Accounts", icon: <FaUserCircle /> },
+  ];
+
   return (
-    <nav className="navbar">
-      <h1 className="nav-logo" onClick={() => navigate("/dashboard")}>
-        <img src="/images/Elderlink_Logo.png" alt="ElderLink Logo" />
-        ElderLink
-      </h1>
+    <>
+      {/* Top Navbar */}
+      <nav className="navbar">
+        <div className="navbar-left">
+          {/* Sidebar Toggle Button */}
+          <button
+            className="sidebar-toggle"
+            onClick={() => setSidebarOpen((prev) => !prev)}
+          >
+            {sidebarOpen ? <FaTimes /> : <FaBars />}
+          </button>
 
-      {/* ✅ Hamburger for mobile */}
-      <button
-        className="menu-toggle"
-        onClick={() => setMenuOpen((prev) => !prev)}
-      >
-        {menuOpen ? <FaTimes /> : <FaBars />}
-      </button>
+          <h1 className="nav-logo" onClick={() => navigate("/dashboard")}>
+            <img src="/images/Elderlink_Logo.png" alt="ElderLink Logo" />
+            ElderLink
+          </h1>
+        </div>
 
-      {/* ✅ Menu Links */}
-      <ul className={`nav-links ${menuOpen ? "open" : ""}`}>
-        <li
-          className={location.pathname === "/dashboard" ? "active" : ""}
-          onClick={() => { navigate("/dashboard"); setMenuOpen(false); }}
-        >
-          Home
-        </li>
-        <li
-          className={location.pathname.startsWith("/elderlyManagement") ? "active" : ""}
-          onClick={() => { navigate("/elderlyManagement"); setMenuOpen(false); }}
-        >
-          Elderly Management
-        </li>
-        <li
-          className={location.pathname.startsWith("/schedule") ? "active" : ""}
-          onClick={() => { navigate("/schedule"); setMenuOpen(false); }}
-        >
-          Caregiver Schedule
-        </li>
-        <li
-          className={location.pathname.startsWith("/nurse-schedule") ? "active" : ""}
-          onClick={() => { navigate("/nurse-schedule"); setMenuOpen(false); }}
-        >
-          Nurse Schedule
-        </li>
-        <li
-          className={location.pathname.startsWith("/incident-reports") ? "active" : ""}
-          onClick={() => { navigate("/incident-reports"); setMenuOpen(false); }}
-        >
-          Incident Reports
-        </li>
-        <li
-          className={location.pathname.startsWith("/accounts") ? "active" : ""}
-          onClick={() => { navigate("/accounts"); setMenuOpen(false); }}
-        >
-          Accounts
-        </li>
-
-        {/* ✅ Supervisor + Notifications inside burger (only mobile) */}
-        {isMobile && (
-          <li className="nav-actions-mobile">
-            <div className="nav-actions-row">
-              <div className="admin-dropdown" ref={dropdownRef}>
-                <button
-                  className="admin-btn"
-                  onClick={() => setDropdownOpen((prev) => !prev)}
-                >
-                  Supervisor
-                </button>
-                {dropdownOpen && (
-                  <ul className="dropdown-menu">
-                    <li
-                      onClick={() => {
-                        navigate("/edit_admin_profile");
-                        setMenuOpen(false);
-                      }}
-                    >
-                      Edit Profile
-                    </li>
-                    <li onClick={handleLogout} className="logout-item">
-                      Logout
-                    </li>
-                  </ul>
-                )}
-              </div>
-
-              <div className="notif-dropdown" ref={notifRef}>
-                <button
-                  className="notif-btn"
-                  onClick={() => setNotifOpen((prev) => !prev)}
-                >
-                  <FaBell size={20} />
-                  {(elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length) > 0 && (
-                    <span className="notif-badge">{elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length}</span>
-                  )}
-                </button>
-                {notifOpen && (
-                  <div className="notif-menu">
-                    <div className="notif-content">
-                      {(() => {
-                        const unifiedNotifications = getUnifiedNotifications();
-                        return unifiedNotifications.length === 0 ? (
-                          <li>No new notifications</li>
-                        ) : (
-                          unifiedNotifications.map(renderNotificationItem)
-                        );
-                      })()}
-                    </div>
-                    
-                    {/* Fixed Bottom - View All Notifications */}
-                    <div className="notif-bottom">
-                      <li 
-                        className="notif-item view-all-notif"
-                        onClick={() => {
-                          setShowNotifModal(true);
-                          setMenuOpen(false);
-                          setNotifOpen(false);
-                        }}
-                      >
-                        📋 View All Notifications
-                      </li>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </li>
-        )}
-      </ul>
-
-      {/* ✅ Desktop actions (hidden on mobile) */}
-      {!isMobile && (
+        {/* Right side actions */}
         <div className="nav-actions">
           <div className="admin-dropdown" ref={dropdownRef}>
             <button className="admin-btn" onClick={() => setDropdownOpen((prev) => !prev)}>
@@ -666,6 +577,30 @@ export default function Navbar() {
             )}
           </div>
         </div>
+      </nav>
+
+      {/* Sidebar */}
+      <aside ref={sidebarRef} className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+        <ul className="sidebar-menu">
+          {navigationItems.map((item) => (
+            <li
+              key={item.path}
+              className={location.pathname.startsWith(item.path) ? "active" : ""}
+              onClick={() => {
+                navigate(item.path);
+                if (isMobile) setSidebarOpen(false);
+              }}
+            >
+              <span className="sidebar-icon">{item.icon}</span>
+              <span className="sidebar-label">{item.label}</span>
+            </li>
+          ))}
+        </ul>
+      </aside>
+
+      {/* Sidebar Overlay for mobile */}
+      {sidebarOpen && isMobile && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>
       )}
 
       {/* ✅ Notifications Modal */}
@@ -784,6 +719,6 @@ export default function Navbar() {
           </div>
         </div>
       )}
-    </nav>
+    </>
   );
 }

@@ -6,6 +6,7 @@ import { FaUser, FaPhone, FaEnvelope } from "react-icons/fa";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { processCaregiverResignation } from "../services/resignationService";
 import "../css/profileNurse.css";
 
 export default function ProfileNurse() {
@@ -108,22 +109,53 @@ export default function ProfileNurse() {
 const handleMarkAsResigned = async () => {
   try {
     const nurseRef = doc(db, "users", nurse.id);
+    const resignationDate = new Date();
 
-    const resignationDate = new Date(); // or serverTimestamp() if you prefer server time
-
+    // 1. Mark nurse as resigned in users collection
     await updateDoc(nurseRef, { 
       user_activation: false,
       user_resignedDate: resignationDate
     });
 
+    // 2. Process resignation in schedule (remove from schedule, redistribute elderly if applicable)
+    console.log("Processing nurse resignation in schedule...");
+    const result = await processCaregiverResignation(nurse.id);
+    
+    if (result.success) {
+      console.log("✅ Resignation processed successfully:", result);
+      
+      if (result.assignmentsRemoved > 0) {
+        alert(
+          `✅ Nurse Resignation Processed Successfully!\n\n` +
+          `Schedule Updates:\n` +
+          `• ${result.assignmentsRemoved} assignments removed\n` +
+          `• ${result.elderlyRedistributed} elderly reassigned to other caregivers\n` +
+          `• ${result.housesAffected?.length || 0} houses affected\n\n` +
+          `⚠️ IMPORTANT: Please refresh the Schedule page to see the updated assignments.`
+        );
+      } else {
+        alert(`✅ Nurse marked as resigned.\n\nNo active schedule assignments found.`);
+      }
+    } else {
+      console.error("❌ Resignation processing failed:", result);
+      alert(
+        `⚠️ Nurse marked as resigned in the system.\n\n` +
+        `Warning: ${result.message}\n\n` +
+        `Please refresh the Schedule page and check if manual redistribution is needed.`
+      );
+    }
+
+    // 3. Update local state
     setNurse((prev) => ({ 
       ...prev, 
       user_activation: false, 
       user_resignedDate: resignationDate 
     }));
+    
     setShowResignConfirm(false);
   } catch (err) {
     console.error("Failed to mark as resigned:", err);
+    alert("Failed to process resignation. Please try again or contact support.");
   }
 };
 
@@ -143,7 +175,7 @@ const handleMarkAsResigned = async () => {
       <div className="nurse-profile-container">
         <div className="profile-left">
           <img
-            src={nurse.user_profilePic || "/images/user-placeholder.png"}
+            src={nurse.user_profilePic || "/images/people_icon.png"}
             alt={nurse.user_fname}
             className="profile-picture-large"
           />

@@ -2,6 +2,7 @@
 
 .elderly-profile-container {
   padding: 20px;
+  padding-top: 100px;
   font-family: 'Poppins', sans-serif;
   background-color: #F2FDFF;
 }
@@ -285,6 +286,18 @@
   font-size: 14px;
   font-weight: 500;
   color: #333;
+}
+
+.form-group label .required-asterisk {
+  color: red;
+  margin-left: 2px;
+}
+
+.form-group label .optional-label {
+  color: #888;
+  font-size: 12px;
+  font-weight: normal;
+  margin-left: 4px;
 }
 
 .form-group input,
@@ -1005,4 +1018,101 @@ input[type="file"] {
 .total-elderly {
   font-size: 0.85rem;
   color: #555;
+}
+
+/* =============================== */
+/* Integration Modal Styles */
+/* =============================== */
+
+.integration-modal-content {
+  max-width: 500px;
+}
+
+.integration-modal-header {
+  color: #4ECDC4;
+  margin-bottom: 16px;
+}
+
+/* Info box with schedule details */
+.integration-info-box {
+  background: #f8f9fa;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 2px solid #4ECDC4;
+}
+
+.integration-success-text {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.integration-house-text {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #555;
+}
+
+.integration-staff-list {
+  margin: 0 0 12px 20px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #555;
+  list-style-type: disc;
+}
+
+.integration-staff-list li {
+  margin-bottom: 4px;
+}
+
+.integration-question-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #555;
+}
+
+/* Details box with "What happens" info */
+.integration-details-box {
+  background: #d1ecf1;
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  border: 1px solid #bee5eb;
+}
+
+.integration-details-header {
+  margin: 0;
+  font-size: 13px;
+  color: #0c5460;
+  line-height: 1.5;
+}
+
+.integration-details-list {
+  margin: 8px 0 0 20px;
+  padding: 0;
+  font-size: 13px;
+  color: #0c5460;
+  list-style-type: disc;
+}
+
+.integration-details-list li {
+  margin-bottom: 4px;
+}
+
+/* Button styling */
+.integration-confirm-btn,
+.integration-skip-btn {
+  min-width: 140px;
+}
+
+/* Footer text */
+.integration-footer-text {
+  margin: 16px 0 0 0;
+  font-size: 12px;
+  color: #888;
+  text-align: center;
+  font-style: italic;
 }

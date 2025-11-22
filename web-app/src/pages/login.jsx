@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc, Timestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { MdVisibility, MdVisibilityOff } from "react-icons/md";
 import "../css/login.css";
@@ -10,6 +10,8 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -26,7 +28,8 @@ export default function Login() {
       const userDoc = await getDoc(userDocRef);
 
       if (!userDoc.exists()) {
-        alert("No user data found in Firestore");
+        setErrorMessage("No user data found in Firestore");
+        setShowErrorModal(true);
         return;
       }
 
@@ -34,18 +37,63 @@ export default function Login() {
 
       // 3️⃣ Optional: Verify email consistency
       if (userData.user_email !== userEmail) {
-        alert("Email mismatch detected. Please contact support.");
+        setErrorMessage("Email mismatch detected. Please contact support.");
+        setShowErrorModal(true);
         return;
       }
 
       // 4️⃣ Check user type
       if (userData.user_type === "administrator") {
+        // 🔐 SECURITY: Generate unique session token and store in Firestore
+        // This will invalidate any previous sessions on other devices
+        const sessionToken = `${uid}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const deviceInfo = {
+          userAgent: navigator.userAgent,
+          platform: navigator.platform,
+          timestamp: Timestamp.now()
+        };
+
+        console.log('🔐 LOGIN: Generating new session token');
+        console.log('   User ID:', uid);
+        console.log('   New Token:', sessionToken);
+        console.log('   Device:', navigator.platform);
+
+        // Update user document with new session token
+        // This will automatically invalidate previous sessions
+        await updateDoc(userDocRef, {
+          active_session_token: sessionToken,
+          last_login: Timestamp.now(),
+          login_device: deviceInfo
+        });
+
+        console.log('✅ LOGIN: Session token saved to Firestore');
+
+        // Store session token in localStorage for session validation
+        localStorage.setItem('session_token', sessionToken);
+        localStorage.setItem('user_id', uid);
+
+        console.log('✅ LOGIN: Session token saved to localStorage');
+        console.log('🚀 Navigating to dashboard...');
+        
         navigate("/dashboard");
       } else {
-        alert("Access denied: Not an administrator");
+        setErrorMessage("Access denied: Not an administrator account");
+        setShowErrorModal(true);
       }
     } catch (error) {
-      alert("Login failed: " + error.message);
+      // Handle different Firebase error codes
+      let message = "Login failed";
+      if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/user-not-found") {
+        message = "Invalid email or password. Please try again.";
+      } else if (error.code === "auth/too-many-requests") {
+        message = "Too many failed attempts. Please try again later.";
+      } else if (error.code === "auth/network-request-failed") {
+        message = "Network error. Please check your connection.";
+      } else {
+        message = error.message;
+      }
+      setErrorMessage(message);
+      setShowErrorModal(true);
     }
   };
 
@@ -88,6 +136,17 @@ export default function Login() {
           <button type="submit">LOGIN</button>
         </form>
       </div>
+
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="modal-overlay" onClick={() => setShowErrorModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>❌ Login Failed</h3>
+            <p>{errorMessage}</p>
+            <button onClick={() => setShowErrorModal(false)}>OK</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

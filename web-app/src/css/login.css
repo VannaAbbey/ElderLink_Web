@@ -255,3 +255,28 @@ body {
     transform: scale(1);
   }
 }
+
+/* Session logout modal specific styling */
+.session-logout-modal h3 {
+  color: #d9534f; /* red for security alert */
+}
+
+.session-logout-modal p {
+  line-height: 1.6;
+}
+
+/* Responsive modal for mobile */
+@media (max-width: 480px) {
+  .modal-content {
+    width: 95%;
+    padding: 1.5rem;
+  }
+
+  .modal-content h3 {
+    font-size: 18px;
+  }
+
+  .modal-content p {
+    font-size: 13px;
+  }
+}

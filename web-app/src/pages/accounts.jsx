@@ -17,11 +17,13 @@ export default function Accounts() {
         {/* --- Tabs --- */}
         <div className="accounts-tabs">
           <button onClick={() => setActiveTab("caregiver")}
-            className={`accounts-tab ${activeTab === "caregiver" ? "active" : ""}`}> Caregivers
+            className={`accounts-tab ${activeTab === "caregiver" ? "active" : ""}`}
+            title="View and manage caregiver accounts"> Caregivers
           </button>
 
           <button onClick={() => setActiveTab("nurse")}
-            className={`accounts-tab ${activeTab === "nurse" ? "active" : ""}`}> Nurses
+            className={`accounts-tab ${activeTab === "nurse" ? "active" : ""}`}
+            title="View and manage nurse accounts"> Nurses
           </button>
         </div>
 

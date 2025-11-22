@@ -3,6 +3,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
+// Security
+import SessionValidator from "./contexts/SessionValidator";
+
 // Pages
 import App from "./App.jsx";
 import Login from "./pages/login.jsx";
@@ -22,10 +25,16 @@ import EditElderlyProfile from "./pages/edit_elderly_profile";
 import EditCaregiverOverlay from "./pages/edit_cg_overlay"; // ✅ added
 import EditNurseOverlay from "./pages/edit_nurse_overlay"; // ✅ added
 import NurseSchedule from "./pages/nurse-schedule.jsx";
+import IncidentReports from "./pages/incidentReports.jsx";
+import ShiftLogs from "./pages/shift-logs.jsx";
+import SummaryVitalsMeds from "./pages/summary-vitals-meds.jsx";
 
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <BrowserRouter>
+    {/* 🔐 Session Validator - Monitors for multiple simultaneous logins */}
+    <SessionValidator />
+    
     <Routes>
       {/* Default route redirects to login */}
       <Route path="/" element={<Navigate to="/login" replace />} />
@@ -48,8 +57,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <Route path="/edit_caregiver_overlay/:id" element={<EditCaregiverOverlay />} /> {/* ✅ added */}
       <Route path="/edit_nurse_overlay/:id" element={<EditNurseOverlay />} /> {/* ✅ added */}
       <Route path="/nurse-schedule" element={<NurseSchedule />} />
-
-      
+      <Route path="/incident-reports" element={<IncidentReports />} />
+      <Route path="/shift-logs" element={<ShiftLogs />} />
+      <Route path="/summary-vitals-meds" element={<SummaryVitalsMeds />} />
 
     </Routes>
   </BrowserRouter>

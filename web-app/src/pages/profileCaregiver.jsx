@@ -6,6 +6,7 @@ import { FaUser, FaPhone, FaEnvelope } from "react-icons/fa";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { processCaregiverResignation } from "../services/resignationService";
 import "../css/profileCaregiver.css";
 
 export default function ProfileCaregiver() {
@@ -108,22 +109,48 @@ export default function ProfileCaregiver() {
   const handleMarkAsResigned = async () => {
     try {
       const caregiverRef = doc(db, "users", caregiver.id);
-
       const resignationDate = new Date();
 
+      // 1. Mark caregiver as resigned in users collection
       await updateDoc(caregiverRef, {
         user_activation: false,
         user_resignedDate: resignationDate,
       });
 
+      // 2. Process resignation in schedule (remove from schedule, redistribute elderly)
+      console.log("Processing caregiver resignation in schedule...");
+      const result = await processCaregiverResignation(caregiver.id);
+      
+      if (result.success) {
+        console.log("✅ Resignation processed successfully:", result);
+        alert(
+          `✅ Caregiver Resignation Processed Successfully!\n\n` +
+          `Schedule Updates:\n` +
+          `• ${result.assignmentsRemoved} assignments removed\n` +
+          `• ${result.elderlyRedistributed} elderly reassigned to other caregivers\n` +
+          `• ${result.housesAffected?.length || 0} houses affected\n\n` +
+          `⚠️ IMPORTANT: Please refresh the Schedule page to see the updated assignments.`
+        );
+      } else {
+        console.error("❌ Resignation processing failed:", result);
+        alert(
+          `⚠️ Caregiver marked as resigned in the system.\n\n` +
+          `Warning: ${result.message}\n\n` +
+          `Please refresh the Schedule page and check if manual redistribution is needed.`
+        );
+      }
+
+      // 3. Update local state
       setCaregiver((prev) => ({
         ...prev,
         user_activation: false,
         user_resignedDate: resignationDate,
       }));
+      
       setShowResignConfirm(false);
     } catch (err) {
       console.error("Failed to mark as resigned:", err);
+      alert("Failed to process resignation. Please try again or contact support.");
     }
   };
 
@@ -145,7 +172,7 @@ export default function ProfileCaregiver() {
       <div className="caregiver-profile-container">
         <div className="profile-left">
           <img
-            src={caregiver.user_profilePic || "/images/user-placeholder.png"}
+            src={caregiver.user_profilePic || "/images/people_icon.png"}
             alt={caregiver.user_fname}
             className="profile-picture-large"
           />

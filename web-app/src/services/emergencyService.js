@@ -18,6 +18,42 @@ import {
 // Import absence checking functions
 import { getAbsencesForDate } from './absenceService';
 
+// Helper function to get current shift based on time
+const getCurrentShift = () => {
+  const now = new Date();
+  const hours = now.getHours();
+  
+  // 1st Shift: 6:00 AM - 2:00 PM (06:00 - 14:00)
+  // 2nd Shift: 2:00 PM - 10:00 PM (14:00 - 22:00)
+  // 3rd Shift: 10:00 PM - 6:00 AM (22:00 - 06:00)
+  
+  if (hours >= 6 && hours < 14) {
+    return "1st";
+  } else if (hours >= 14 && hours < 22) {
+    return "2nd";
+  } else {
+    return "3rd";
+  }
+};
+
+// Helper function to check if a shift is in the past (for today's date)
+const isShiftInPast = (targetDateStr, shift) => {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  
+  // If it's not today, don't filter by shift time
+  if (targetDateStr !== today) {
+    return false;
+  }
+  
+  // For today, check if the shift has already passed
+  const currentShift = getCurrentShift();
+  const shiftOrder = { "1st": 1, "2nd": 2, "3rd": 3 };
+  
+  // If current shift is later than the target shift, it's in the past
+  return shiftOrder[currentShift] > shiftOrder[shift];
+};
+
 // Check emergency coverage needs and get available donors
 export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, elderlyAssigns, tempReassigns) => {
   try {
@@ -31,7 +67,15 @@ export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, e
     const dayIndex = targetDate.getDay(); // 0=Sunday,1=Mon...
     const dayName = daysOfWeek[dayIndex === 0 ? 6 : dayIndex - 1];
     
+    // Get current shift for filtering
+    const currentShift = getCurrentShift();
+    const today = new Date().toISOString().slice(0, 10);
+    const isToday = targetDateStr === today;
+    
     console.log(`🚨 EMERGENCY CHECK for ${dayName} (${targetDateStr})`);
+    if (isToday) {
+      console.log(`⏰ Current time-based shift: ${currentShift} - Will only show current and future shifts`);
+    }
     
     // Group assignments by house/shift/day to find gaps
     const coverageMap = {};
@@ -147,6 +191,12 @@ export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, e
       for (const shift of shiftDefs) {
         const coverage = coverageMap[house][shift];
         
+        // Skip past shifts for today's date
+        if (isToday && isShiftInPast(targetDateStr, shift)) {
+          console.log(`⏭️ SKIPPING ${house} ${shift} - Shift has already passed`);
+          continue;
+        }
+        
         if (coverage.total > 0 && coverage.present === 0) {
           // EMERGENCY: No one present in this house/shift
           emergencyNeeds.push({
@@ -167,6 +217,17 @@ export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, e
           });
         }
       }
+    }
+    
+    // Log summary
+    if (isToday) {
+      console.log(`📊 Emergency coverage summary for TODAY (${currentShift} shift and later):`);
+      console.log(`   - Emergency needs found: ${emergencyNeeds.length}`);
+      console.log(`   - Available donors found: ${availableDonors.length}`);
+    } else {
+      console.log(`📊 Emergency coverage summary for ${targetDateStr}:`);
+      console.log(`   - Emergency needs found: ${emergencyNeeds.length}`);
+      console.log(`   - Available donors found: ${availableDonors.length}`);
     }
     
     // Match emergency needs with potential donors in same shift
@@ -322,6 +383,7 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
         from_user_id: "EMERGENCY_ABSENT", // Special marker
         to_user_id: caregiverId,
         elderly_ids: uniqueEmergencyElderlyIds, // Array of elderly IDs instead of single elderly_id
+        user_type: "caregiver", // NEW: Track user type for consistency
         assignment_type: "emergency_coverage",
         day: dayName,
         shift: emergencyShift,
@@ -393,6 +455,7 @@ const executeSpecificDonorChoices = async (targetDateStr, dayName, assignments, 
             from_user_id: caregiverId,
             to_user_id: recipientId,
             elderly_ids: elderlyIds, // Array of elderly IDs instead of single elderly_id
+            user_type: "caregiver", // NEW: Track user type for consistency
             assignment_type: "emergency_redistribution", // Changed to differentiate from emergency coverage
             day: dayName,
             shift: emergencyShift,
@@ -616,6 +679,7 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
         from_user_id: "EMERGENCY_ABSENT", // Special marker
         to_user_id: donorCaregiver.caregiverId,
         elderly_ids: uniqueEmergencyElderlyIds, // Array of elderly IDs instead of single elderly_id
+        user_type: "caregiver", // NEW: Track user type for consistency
         assignment_type: "emergency_coverage",
         day: dayName,
         shift: need.shift,
@@ -664,6 +728,7 @@ const executeAutomaticEmergencyCoverage = async (targetDateStr, dayName, assignm
             from_user_id: donorCaregiver.caregiverId,
             to_user_id: recipientId,
             elderly_ids: elderlyIds, // Array of elderly IDs instead of single elderly_id
+            user_type: "caregiver", // NEW: Track user type for consistency
             assignment_type: "emergency_coverage",
             day: dayName,
             shift: need.shift,

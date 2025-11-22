@@ -13,6 +13,15 @@ import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import "../css/elderlyManagement.css";
 import EditElderlyOverlay from "./edit_elderly_profile";
+import CustomAlertModal from "./customAlertModal";
+import { 
+  checkActiveScheduleForHouse, 
+  integrateNewElderlyIntoSchedule 
+} from "../services/elderlyIntegrationService";
+import { 
+  checkActiveNurseScheduleForHouse,
+  integrateNewElderlyIntoNurseSchedule 
+} from "../services/nurseElderlyIntegrationService";
 
 export default function HouseView({ houseId: propHouseId }) {
   const { houseId: paramHouseId } = useParams();
@@ -70,6 +79,15 @@ export default function HouseView({ houseId: propHouseId }) {
 
 const [editElderlyId, setEditElderlyId] = useState(null);
 
+  // New states for schedule integration confirmation
+  const [showIntegrationModal, setShowIntegrationModal] = useState(false);
+  const [pendingElderlyId, setPendingElderlyId] = useState(null);
+  const [scheduleInfo, setScheduleInfo] = useState(null);
+  const [isIntegrating, setIsIntegrating] = useState(false);
+
+  // Success modal state
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
     const fetchElderly = async () => {
@@ -135,6 +153,32 @@ const filteredElderly = elderlyInHouse
 
   const handleSave = async () => {
     try {
+      // Validate required fields
+      if (!formData.elderly_fname.trim()) {
+        alert("First Name is required.");
+        return;
+      }
+      if (!formData.elderly_lname.trim()) {
+        alert("Last Name is required.");
+        return;
+      }
+      if (!formData.elderly_bday) {
+        alert("Date of Birth is required.");
+        return;
+      }
+      if (!formData.elderly_age || formData.elderly_age <= 0) {
+        alert("Age is required and must be greater than 0.");
+        return;
+      }
+      if (!formData.elderly_sex) {
+        alert("Sex is required.");
+        return;
+      }
+      if (!formData.elderly_mobilityStatus) {
+        alert("Mobility Status is required.");
+        return;
+      }
+
       let uploadedImageUrl = "";
       if (selectedImage) {
         const storageRef = ref(
@@ -163,27 +207,140 @@ const filteredElderly = elderlyInHouse
         user_id: "",
       };
 
-      await addDoc(collection(db, "elderly"), newElderly);
+      // Save elderly to database first
+      const docRef = await addDoc(collection(db, "elderly"), newElderly);
+      const newElderlyId = docRef.id;
+      
+      // Refresh elderly list
       const q = await getDocs(collection(db, "elderly"));
       setElderlyList(q.docs.map((d) => ({ id: d.id, ...d.data() })));
 
-      setShowOverlay(false);
-      setFormData({
-        elderly_fname: "",
-        elderly_lname: "",
-        elderly_bday: "",
-        elderly_age: "",
-        elderly_sex: "Male",
-        elderly_mobilityStatus: "Independent",
-        elderly_dietNotes: "",
-        elderly_condition: "",
-        newHouseId: "",
-      });
-      setSelectedImage(null);
-      setPreviewImage("");
-    } catch (err) {
-      console.error("Error saving elderly:", err);
+      // Check if there's an active schedule for this house
+      const caregiverScheduleCheck = await checkActiveScheduleForHouse(houseId);
+      const nurseScheduleCheck = await checkActiveNurseScheduleForHouse(houseId);
+      
+      // Combine schedule information
+      const hasAnyActiveSchedule = caregiverScheduleCheck.hasActiveSchedule || nurseScheduleCheck.hasActiveSchedule;
+      
+      if (hasAnyActiveSchedule) {
+        // Show confirmation modal for schedule integration
+        console.log('📊 Schedule Check Results:', {
+          caregiver: caregiverScheduleCheck,
+          nurse: nurseScheduleCheck,
+          combined: {
+            caregiverCount: caregiverScheduleCheck.caregiverCount || 0,
+            nurseCount: nurseScheduleCheck.nurseCount || 0,
+            hasNurseSchedule: nurseScheduleCheck.hasActiveSchedule
+          }
+        });
+        
+        setScheduleInfo({
+          ...caregiverScheduleCheck,
+          nurseCount: nurseScheduleCheck.nurseCount || 0,
+          hasNurseSchedule: nurseScheduleCheck.hasActiveSchedule
+        });
+        setPendingElderlyId(newElderlyId);
+        setShowIntegrationModal(true);
+      } else {
+        // No active schedule, just close and show success
+        setSuccessMessage(`Elderly profile saved successfully! They will be included in the next schedule generation.`);
+        setShowSuccessModal(true);
+        setShowOverlay(false);
+        resetForm();
+      }
+      
+    } catch (error) {
+      console.error("Error adding elderly:", error);
+      setSuccessMessage("Failed to add elderly profile. Please try again.");
+      setShowSuccessModal(true);
     }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      elderly_fname: "",
+      elderly_lname: "",
+      elderly_bday: "",
+      elderly_age: "",
+      elderly_sex: "Male",
+      elderly_mobilityStatus: "Independent",
+      elderly_dietNotes: "",
+      elderly_condition: "",
+      newHouseId: "",
+    });
+    setSelectedImage(null);
+    setPreviewImage("");
+  };
+
+  // Handle integration confirmation
+  const handleConfirmIntegration = async () => {
+    try {
+      setIsIntegrating(true);
+      
+      console.log(`\n%c🔄 INTEGRATING ELDERLY INTO ACTIVE SCHEDULES`, 'color: #4ECDC4; font-weight: bold; font-size: 16px');
+      console.log(`%c   House: ${houseId}`, 'color: #FFD93D');
+      console.log(`%c   Elderly ID: ${pendingElderlyId}`, 'color: #FFD93D');
+      
+      // Integrate into caregiver schedule
+      console.log(`\n%c👥 Integrating into CAREGIVER schedule...`, 'color: #95E1D3; font-weight: bold');
+      const caregiverResult = await integrateNewElderlyIntoSchedule(houseId, pendingElderlyId);
+      
+      // Integrate into nurse schedule
+      console.log(`\n%c🩺 Integrating into NURSE schedule...`, 'color: #95E1D3; font-weight: bold');
+      const nurseResult = await integrateNewElderlyIntoNurseSchedule(houseId, pendingElderlyId);
+      
+      // Prepare summary message
+      const messages = [];
+      
+      if (caregiverResult.integrated) {
+        messages.push(`✅ Caregiver: ${caregiverResult.updatedCount} assignments updated`);
+      } else if (caregiverResult.success) {
+        messages.push(`ℹ️ Caregiver: Will be included in next generation`);
+      } else {
+        messages.push(`⚠️ Caregiver: ${caregiverResult.message}`);
+      }
+      
+      if (nurseResult.integrated) {
+        messages.push(`✅ Nurse: ${nurseResult.updatedCount} assignments updated`);
+      } else if (nurseResult.success) {
+        messages.push(`ℹ️ Nurse: Will be included in next generation`);
+      } else {
+        messages.push(`⚠️ Nurse: ${nurseResult.message}`);
+      }
+      
+      const summaryMessage = `Elderly profile saved successfully!\n\n${messages.join('\n')}`;
+      
+      console.log(`\n%c✅ INTEGRATION COMPLETE`, 'color: #95E1D3; font-weight: bold; font-size: 16px');
+      console.log(summaryMessage);
+      
+      // Show success modal instead of alert
+      setSuccessMessage(summaryMessage);
+      setShowSuccessModal(true);
+      
+      setShowIntegrationModal(false);
+      setShowOverlay(false);
+      setPendingElderlyId(null);
+      setScheduleInfo(null);
+      resetForm();
+      
+    } catch (error) {
+      console.error("Error integrating elderly:", error);
+      setSuccessMessage("Failed to integrate elderly into schedule. Please try again.");
+      setShowSuccessModal(true);
+    } finally {
+      setIsIntegrating(false);
+    }
+  };
+
+  // Handle skip integration
+  const handleSkipIntegration = () => {
+    setSuccessMessage(`Elderly profile saved successfully! They will be included in the next schedule generation.`);
+    setShowSuccessModal(true);
+    setShowIntegrationModal(false);
+    setShowOverlay(false);
+    setPendingElderlyId(null);
+    setScheduleInfo(null);
+    resetForm();
   };
 
   const toggleSelect = (elderId) => {
@@ -424,51 +581,57 @@ const filteredElderly = elderlyInHouse
             </label>
 
             <div className="form-group">
-              <label>First Name</label>
+              <label>First Name<span className="required-asterisk">*</span></label>
               <input
                 type="text"
                 name="elderly_fname"
                 value={formData.elderly_fname}
                 onChange={handleChange}
+                required
               />
             </div>
 
             <div className="form-group">
-              <label>Last Name</label>
+              <label>Last Name<span className="required-asterisk">*</span></label>
               <input
                 type="text"
                 name="elderly_lname"
                 value={formData.elderly_lname}
                 onChange={handleChange}
+                required
               />
             </div>
 
             <div className="form-group">
-              <label>Date of Birth</label>
+              <label>Date of Birth<span className="required-asterisk">*</span></label>
               <input
                 type="date"
                 name="elderly_bday"
                 value={formData.elderly_bday}
                 onChange={handleChange}
+                required
               />
             </div>
 
             <div className="form-group">
-              <label>Age</label>
+              <label>Age<span className="required-asterisk">*</span></label>
               <input
                 type="number"
                 name="elderly_age"
                 value={formData.elderly_age}
                 onChange={handleChange}
+                min="1"
+                required
               />
             </div>
 
             <div className="form-group">
-              <label>Sex</label>
+              <label>Sex<span className="required-asterisk">*</span></label>
               <select
                 name="elderly_sex"
                 value={formData.elderly_sex}
                 onChange={handleChange}
+                required
               >
                 <option>Male</option>
                 <option>Female</option>
@@ -476,11 +639,12 @@ const filteredElderly = elderlyInHouse
             </div>
 
             <div className="form-group">
-              <label>Mobility Status</label>
+              <label>Mobility Status<span className="required-asterisk">*</span></label>
               <select
                 name="elderly_mobilityStatus"
                 value={formData.elderly_mobilityStatus}
                 onChange={handleChange}
+                required
               >
                 <option>Independent</option>
                 <option>Needs Assistance</option>
@@ -489,7 +653,7 @@ const filteredElderly = elderlyInHouse
             </div>
 
             <div className="form-group">
-              <label>Diet Notes</label>
+              <label>Diet Notes<span className="optional-label">(Optional)</span></label>
               <input
                 type="text"
                 name="elderly_dietNotes"
@@ -499,7 +663,7 @@ const filteredElderly = elderlyInHouse
             </div>
 
             <div className="form-group">
-              <label>Condition</label>
+              <label>Condition<span className="optional-label">(Optional)</span></label>
               <input
                 type="text"
                 name="elderly_condition"
@@ -622,6 +786,85 @@ const filteredElderly = elderlyInHouse
           </div>
         </div>
       )}
+
+      {/* Schedule Integration Confirmation Modal */}
+      {showIntegrationModal && (
+        <div className="overlay">
+          <div className="overlay-content integration-modal-content">
+            <span className="overlay-close" onClick={handleSkipIntegration}>
+              ✖
+            </span>
+            
+            <h2 className="overlay-header integration-modal-header">
+              🔄 Integrate Elderly into Schedule
+            </h2>
+
+            <div className="integration-info-box">
+              <p className="integration-success-text">
+                <strong>Elderly profile saved successfully!</strong>
+              </p>
+              <p className="integration-house-text">
+                Active schedules found for <strong>{houseNames[houseId]}</strong>:
+              </p>
+              <ul className="integration-staff-list">
+                <li><strong>Caregivers:</strong> {scheduleInfo?.caregiverCount || 0} assigned</li>
+                <li><strong>Nurses:</strong> {scheduleInfo?.nurseCount || 0} assigned</li>
+              </ul>
+              <p className="integration-question-text">
+                Would you like to <strong>automatically integrate</strong> the new elderly into {
+                  (scheduleInfo?.caregiverCount > 0) && (scheduleInfo?.nurseCount > 0)
+                    ? 'both schedules' 
+                    : (scheduleInfo?.caregiverCount > 0)
+                      ? 'the caregiver schedule' 
+                      : 'the nurse schedule'
+                } now?
+              </p>
+            </div>
+
+            <div className="integration-details-box">
+              <p className="integration-details-header">
+                ℹ️ <strong>What happens:</strong>
+              </p>
+              <ul className="integration-details-list">
+                <li><strong>Incremental Addition:</strong> New elderly assigned to staff with least load</li>
+                <li><strong>Minimal Disruption:</strong> Existing relationships remain unchanged</li>
+                <li><strong>Both Schedules:</strong> Integrated into caregiver AND nurse schedules</li>
+                <li><strong>Fair Distribution:</strong> Maintains balanced workload across all staff</li>
+              </ul>
+            </div>
+
+            <div className="overlay-buttons">
+              <button 
+                className="save-btn integration-confirm-btn" 
+                onClick={handleConfirmIntegration}
+                disabled={isIntegrating}
+              >
+                {isIntegrating ? 'Integrating...' : '✅ Yes, Redistribute'}
+              </button>
+              <button
+                className="cancel-btn integration-skip-btn"
+                onClick={handleSkipIntegration}
+                disabled={isIntegrating}
+              >
+                ⏭️ Skip for Now
+              </button>
+            </div>
+
+            <p className="integration-footer-text">
+              If you skip, the new elderly will be included in the next schedule generation.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Success Modal */}
+      <CustomAlertModal
+        isOpen={showSuccessModal}
+        onClose={() => setShowSuccessModal(false)}
+        title="Success"
+        message={successMessage}
+        type="alert"
+      />
     </div>
   );
 }
