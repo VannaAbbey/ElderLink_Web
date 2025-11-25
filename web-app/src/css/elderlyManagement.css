@@ -14,6 +14,7 @@
   justify-content: center; /* centers the content horizontally */
   gap: 20px; /* optional: spacing between items */
   padding: 10px;
+  position: relative;
 }
 
 /* HEADER IMAGE + TEXT CENTER */
@@ -60,6 +61,67 @@
   margin-bottom: 2px;
 }
 
+/* Header Action Buttons */
+.header-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 15px;
+  padding: 15px 20px;
+  max-width: 85%;
+  margin: -10px auto 20px auto;
+  font-family: 'Poppins', sans-serif;
+}
+
+.header-action-btn {
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.4;
+  min-width: 120px;
+  height: 38px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.infirmary-action-btn {
+  background: #FF6B35;
+}
+
+.infirmary-action-btn:hover {
+  background: #E85A2C;
+}
+
+.infirmary-action-btn.active {
+  background: #D14920;
+  box-shadow: 0 2px 8px rgba(255, 107, 53, 0.4);
+}
+
+.import-action-btn {
+  background: #4A90E2;
+}
+
+.import-action-btn:hover {
+  background: #357ABD;
+}
+
+.add-house-action-btn {
+  background: #50C878;
+}
+
+.add-house-action-btn:hover {
+  background: #3DB864;
+}
+
 
 .header-house-left {
   display: flex;
@@ -102,10 +164,11 @@
 
 .house-content {
   margin-top: 0; /* 🔹 remove extra gap below folder nav */
+  position: relative;
 }
 
 .elderly-folder-container {
-  margin: 0 auto 20px auto;  /* no top margin, 20px bottom, centered horizontally */
+  margin: 0px auto 20px auto;  /* 15px top margin for spacing, 20px bottom, centered horizontally */
   padding: 15px;             /* inner padding */
   max-width: 85%;            /* limit width */
   box-shadow: 0 4px 6px -2px rgba(0, 0, 0, 0.25);
@@ -301,7 +364,8 @@
 }
 
 .form-group input,
-.form-group select {
+.form-group select,
+.form-group textarea {
   width: 100%;
   padding: 10px;
   border: 1px solid #ccc;
@@ -309,6 +373,12 @@
   font-size: 14px;
   box-sizing: border-box;
   margin-bottom: 8px;
+  font-family: 'Poppins', sans-serif;
+}
+
+.form-group textarea {
+  min-height: 80px;
+  resize: vertical;
 }
 
 .overlay-header{
@@ -702,14 +772,46 @@ input[type="file"] {
 
 /* FOLDER NAVIGATION */
 
-.folder-nav {
+.folder-nav-container {
   display: flex;
+  align-items: center;
   justify-content: center;
-  margin: 0 auto;
+  margin: 15px auto 0 auto;
   max-width: 85%;
-  margin-bottom: -1px;   /* pulls tabs down into container */
+  margin-bottom: -1px;
   position: relative;
   z-index: 2;
+}
+
+.folder-nav {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  max-width: 1000px; /* Limits to approximately 5 house tabs */
+  margin-bottom: 0;
+  position: relative;
+  z-index: 2;
+  scrollbar-width: thin;
+  scrollbar-color: #00588E #ddd;
+}
+
+.folder-nav::-webkit-scrollbar {
+  height: 6px;
+}
+
+.folder-nav::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.folder-nav::-webkit-scrollbar-thumb {
+  background: #00588E;
+  border-radius: 3px;
+}
+
+.folder-nav::-webkit-scrollbar-thumb:hover {
+  background: #00406A;
 }
 
 .folder-btn {
@@ -724,6 +826,8 @@ input[type="file"] {
   color: #333;
   display: inline-block;
   min-width: 200px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .folder-btn:hover {
@@ -734,9 +838,68 @@ input[type="file"] {
   background: #00588E;
   color: white;
   border: 1px solid #00588E;
-  border-bottom: none;   /* connects directly to container */
+  border-bottom: none;
   position: relative;
-  z-index: 3;            /* ensures active tab overlaps container border */
+  z-index: 3;
+}
+
+.folder-btn.infirmary-btn {
+  background: #ff9800;
+  color: white;
+  font-weight: 700;
+}
+
+.folder-btn.infirmary-btn:hover {
+  background: #f57c00;
+}
+
+.folder-btn.infirmary-btn.active {
+  background: #e65100;
+  border: 1px solid #e65100;
+  border-bottom: none;
+}
+
+/* House Action Buttons in House Content */
+.house-action-buttons {
+  position: absolute;
+  top: 20px;
+  right: 10px;
+  display: flex;
+  gap: 10px;
+  z-index: 5;
+}
+
+.house-action-btn {
+  background: white;
+  border: 2px solid #00588E;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #00588E;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.house-action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.edit-house-btn:hover {
+  background: #4CAF50;
+  border-color: #4CAF50;
+  color: white;
+}
+
+.delete-house-btn:hover {
+  background: #dc3545;
+  border-color: #dc3545;
+  color: white;
 }
 
 /* =============================== */
@@ -1115,4 +1278,198 @@ input[type="file"] {
   color: #888;
   text-align: center;
   font-style: italic;
+}
+
+/* =============================== */
+/* Import Modal Styles */
+/* =============================== */
+
+.import-modal-content {
+  max-width: 600px;
+}
+
+.import-instructions {
+  background: #f0f7ff;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.import-instructions h3 {
+  margin-top: 0;
+  color: #00588E;
+  font-size: 16px;
+}
+
+.import-instructions ol {
+  margin: 10px 0;
+  padding-left: 20px;
+}
+
+.import-instructions li {
+  margin: 5px 0;
+  font-size: 14px;
+}
+
+.download-template-btn {
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.download-template-btn:hover {
+  background: #218838;
+}
+
+.download-template-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.file-upload-section {
+  margin: 20px 0;
+  text-align: center;
+}
+
+.file-input-label {
+  display: inline-block;
+  cursor: pointer;
+}
+
+.file-input-button {
+  background: #00588E;
+  color: white;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  display: inline-block;
+  transition: 0.2s;
+}
+
+.file-input-button:hover {
+  background: #00406A;
+}
+
+.selected-file-info {
+  margin-top: 10px;
+  padding: 10px;
+  background: #e8f5e9;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.import-progress {
+  margin: 20px 0;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 30px;
+  background: #e0e0e0;
+  border-radius: 15px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00588E, #0a7bc4);
+  transition: width 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+}
+
+.progress-text {
+  text-align: center;
+  font-weight: 600;
+  color: #333;
+}
+
+.import-results {
+  background: #f9f9f9;
+  padding: 15px;
+  border-radius: 8px;
+  margin: 20px 0;
+}
+
+.import-results h3 {
+  margin-top: 0;
+  color: #00588E;
+  font-size: 16px;
+}
+
+.results-summary {
+  display: flex;
+  gap: 15px;
+  margin: 15px 0;
+}
+
+.result-item {
+  flex: 1;
+  padding: 10px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.result-item.success {
+  background: #d4edda;
+  color: #155724;
+}
+
+.result-item.failed {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.error-details {
+  margin-top: 15px;
+}
+
+.error-details h4 {
+  color: #721c24;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.error-list {
+  max-height: 200px;
+  overflow-y: auto;
+  background: white;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #f8d7da;
+}
+
+.error-item {
+  margin-bottom: 10px;
+  padding: 8px;
+  background: #fff3cd;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.error-item ul {
+  margin: 5px 0 0 20px;
+  padding: 0;
+}
+
+.error-item li {
+  color: #856404;
+}
+
+.more-errors {
+  text-align: center;
+  color: #666;
+  font-style: italic;
+  margin-top: 10px;
 }

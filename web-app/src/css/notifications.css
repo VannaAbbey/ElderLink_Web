@@ -940,3 +940,81 @@
   background-color: #2196f3;
   color: white;
 }
+
+/* ======================
+   INFIRMARY TRANSFER STYLES
+   ====================== */
+
+/* Transfer Request Card */
+.transfer-request-card {
+  border-left: 4px solid #ff9800;
+  background: linear-gradient(135deg, #fff8e1 0%, #ffffff 100%);
+}
+
+.transfer-request-card .transfer-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 20px;
+  opacity: 0.7;
+}
+
+.transfer-request-card .status-pending {
+  color: #f57c00;
+  font-weight: 600;
+}
+
+.transfer-request-card .status-approved {
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.transfer-request-card .status-rejected {
+  color: #c62828;
+  font-weight: 600;
+}
+
+.transfer-request-card .transfer-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.transfer-request-card .approve-btn,
+.transfer-request-card .reject-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.transfer-request-card .approve-btn {
+  background-color: #4caf50;
+  color: white;
+}
+
+.transfer-request-card .approve-btn:hover {
+  background-color: #45a049;
+}
+
+.transfer-request-card .reject-btn {
+  background-color: #f44336;
+  color: white;
+}
+
+.transfer-request-card .reject-btn:hover {
+  background-color: #da190b;
+}
+
+/* Modal Transfer Notification Styles */
+.transfer-notification {
+  border-left: 4px solid #ff9800;
+  background: linear-gradient(135deg, #fff8e1 0%, #ffffff 100%);
+}
+
+.transfer-badge {
+  background-color: #ff9800;
+  color: white;
+}

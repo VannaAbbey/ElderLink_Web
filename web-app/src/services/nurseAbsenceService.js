@@ -169,6 +169,40 @@ export const markNurseAbsent = async (
       console.log(`   [${idx + 1}] ${a.user_id} | Days: ${a.days_assigned?.join(', ')}`);
     });
 
+    // ⚠️ CRITICAL CHECK: If NO nurses available, this is an EMERGENCY situation
+    if (otherAssigns.length === 0) {
+      console.log(`\n%c🆘 EMERGENCY: NO NURSES AVAILABLE FOR COVERAGE!`, 'color: #FF0000; font-weight: bold; font-size: 16px');
+      console.log(`%c   This shift (${assign.shift}) now has ZERO coverage for ${dayName}`, 'color: #FF6B6B; font-weight: bold');
+      console.log(`%c   Creating absence record WITHOUT redistribution...`, 'color: #FFD93D; font-weight: bold');
+      console.log(`%c   🚨 EMERGENCY COVERAGE WILL BE REQUIRED!`, 'color: #FF0000; font-weight: bold');
+      
+      // Create absence record even without redistribution
+      const absenceRecord = {
+        user_id: assign.user_id,
+        user_type: "nurse",
+        absence_date: useDateStr,
+        absence_type: "absent",
+        shift: assign.shift,
+        house_id: assign.house_id || null,
+        assignment_version: assign.version || 1,
+        status: "active",
+        marked_by: markedBy,
+        created_at: Timestamp.now()
+      };
+      
+      const absenceDocRef = await addDoc(collection(db, "nurse_cg_absence"), absenceRecord);
+      console.log(`%c✅ Absence record created (ID: ${absenceDocRef.id})`, 'color: #95E1D3; font-weight: bold');
+      console.log(`%c⚠️  WARNING: ${allElderlyToReassign.length} elderly have NO coverage!`, 'color: #FF6B6B; font-weight: bold');
+      
+      return {
+        success: true,
+        requiresEmergency: true,
+        message: `EMERGENCY: No nurses available! This shift now has ZERO coverage. Emergency coverage required.`,
+        absenceId: absenceDocRef.id,
+        elderlyWithoutCoverage: allElderlyToReassign.length
+      };
+    }
+
     // 5. Split ALL elderly (original + cascade temp) evenly among available nurses
     // ✅ NEW APPROACH: Redistribute both original and temp elderly to remaining nurses
     console.log(`\n%c━━━ STEP 4: Creating Temporary Reassignments ━━━`, 'color: #FFD93D; font-weight: bold; font-size: 14px');
@@ -504,7 +538,20 @@ export const unmarkNurseAbsent = async (
         });
         console.log(`✅ Updated attendance record - set is_present = true`);
       } else {
-        console.log(`ℹ️ No attendance record found to update (absence may have been manually marked)`);
+        // CRITICAL FIX: Create attendance record to prevent auto-absence from re-marking
+        console.log(`⚠️ No attendance record found - creating one to mark nurse as present`);
+        await addDoc(collection(db, "attendance"), {
+          user_id: userId,
+          user_type: "nurse",
+          date: targetDateStr,
+          shift: shift,
+          is_present: true,
+          reason: "Absence unmarked by admin",
+          created_at: Timestamp.now(),
+          created_by: "admin",
+          update_reason: "Absence unmarked - preventing auto-absence re-marking"
+        });
+        console.log(`✅ Created attendance record with is_present = true`);
       }
     } catch (attendanceError) {
       console.warn(`⚠️ Could not update attendance record:`, attendanceError.message);
@@ -545,20 +592,48 @@ export const unmarkNurseAbsent = async (
 };
 
 // Get temporary reassignments for a specific date and shift
+// For 3rd shift, also includes reassignments from the previous day
+// because 3rd shift runs from 10 PM to 6 AM (crosses midnight)
 export const getTempReassignments = async (dateStr = null, shift = null) => {
   try {
     const targetDate = dateStr || new Date().toISOString().slice(0, 10);
-    let q = query(
-      collection(db, "temporary_assignments"),
-      where("date", "==", targetDate)
-    );
-
-    if (shift) {
-      q = query(q, where("shift", "==", shift));
+    
+    // For 3rd shift, we need to check both current date and previous date
+    // because temp reassignments created at 10 PM yesterday are still valid until 6 AM today
+    const datesToCheck = [targetDate];
+    
+    if (shift === "3rd") {
+      const prevDate = new Date(targetDate);
+      prevDate.setDate(prevDate.getDate() - 1);
+      datesToCheck.push(prevDate.toISOString().slice(0, 10));
+      console.log(`🌙 3rd shift: Checking temp reassignments for both ${targetDate} and ${datesToCheck[1]}`);
     }
+    
+    // Query all relevant dates
+    const allReassignments = [];
+    
+    for (const date of datesToCheck) {
+      let q = query(
+        collection(db, "temporary_assignments"),
+        where("date", "==", date)
+      );
 
-    const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (shift) {
+        q = query(q, where("shift", "==", shift));
+      }
+
+      const snap = await getDocs(q);
+      const reassignments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      allReassignments.push(...reassignments);
+    }
+    
+    // Remove duplicates based on document ID
+    const uniqueReassignments = allReassignments.filter((item, index, self) =>
+      index === self.findIndex(t => t.id === item.id)
+    );
+    
+    console.log(`📋 Found ${uniqueReassignments.length} temp reassignments for ${targetDate} ${shift || 'all shifts'}`);
+    return uniqueReassignments;
 
   } catch (error) {
     console.error("Error getting temp reassignments:", error);

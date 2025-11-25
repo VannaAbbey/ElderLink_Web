@@ -323,7 +323,20 @@ export const unmarkAbsent = async (
         });
         console.log(`✅ Updated attendance record - set is_present = true`);
       } else {
-        console.log(`ℹ️ No attendance record found to update (absence may have been manually marked)`);
+        // CRITICAL FIX: Create attendance record to prevent auto-absence from re-marking
+        console.log(`⚠️ No attendance record found - creating one to mark user as present`);
+        await addDoc(collection(db, "attendance"), {
+          user_id: userId,
+          user_type: userType,
+          date: targetDateStr,
+          shift: shift,
+          is_present: true,
+          reason: "Absence unmarked by admin",
+          created_at: Timestamp.now(),
+          created_by: "admin",
+          update_reason: "Absence unmarked - preventing auto-absence re-marking"
+        });
+        console.log(`✅ Created attendance record with is_present = true`);
       }
     } catch (attendanceError) {
       console.warn(`⚠️ Could not update attendance record:`, attendanceError.message);

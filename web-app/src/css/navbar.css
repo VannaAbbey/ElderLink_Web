@@ -727,6 +727,12 @@
   border-left: 3px solid #9c27b0;
 }
 
+.transfer-indicator {
+  background: linear-gradient(135deg, #fff8e1 0%, #ffcc80 100%);
+  color: #e65100;
+  border-left: 3px solid #ff9800;
+}
+
 /* Unified notification content */
 .notif-content-unified {
   display: flex;

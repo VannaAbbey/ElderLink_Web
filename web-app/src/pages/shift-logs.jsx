@@ -9,9 +9,12 @@ export default function ShiftLogs() {
   const [filteredLogs, setFilteredLogs] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [activeShift, setActiveShift] = useState('all');
   const [activeLogType, setActiveLogType] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [users, setUsers] = useState([]);
+  const [elderly, setElderly] = useState([]);
 
   // Shift definitions
   const shifts = [
@@ -27,6 +30,84 @@ export default function ShiftLogs() {
     { key: 'incident_report', name: 'Incidents', icon: '⚠️', color: '#ffc107' },
     { key: 'emergency_alert', name: 'Emergencies', icon: '🚨', color: '#dc3545' }
   ];
+
+  // Fetch users and elderly data on mount
+  useEffect(() => {
+    const fetchUsersAndElderly = async () => {
+      try {
+        setDataLoading(true);
+        // Fetch all users (caregivers)
+        const usersSnapshot = await getDocs(collection(db, 'users'));
+        const usersData = usersSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setUsers(usersData);
+        console.log('✅ Loaded users:', usersData.length, usersData);
+
+        // Fetch all elderly
+        const elderlySnapshot = await getDocs(collection(db, 'elderly'));
+        const elderlyData = elderlySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setElderly(elderlyData);
+        console.log('✅ Loaded elderly:', elderlyData.length, elderlyData);
+
+        console.log('✅ Loaded users and elderly data');
+        setDataLoading(false);
+      } catch (error) {
+        console.error('Error fetching users/elderly:', error);
+        setDataLoading(false);
+      }
+    };
+
+    fetchUsersAndElderly();
+  }, []);
+
+  // Helper function to get caregiver full name
+  const getCaregiverFullName = (caregiverId) => {
+    if (!caregiverId) {
+      return 'Unknown';
+    }
+    const user = users.find(u => u.id === caregiverId);
+    if (!user) {
+      console.log('⚠️ Caregiver not found for ID:', caregiverId);
+      return 'Unknown';
+    }
+    return `${user.user_fname || ''} ${user.user_lname || ''}`.trim() || 'Unknown';
+  };
+
+  // Helper function to get elderly full name
+  const getElderlyFullName = (elderlyId) => {
+    if (!elderlyId) {
+      return 'Unknown';
+    }
+    const elderlyPerson = elderly.find(e => e.id === elderlyId);
+    if (!elderlyPerson) {
+      console.log('⚠️ Elderly not found for ID:', elderlyId);
+      return 'Unknown';
+    }
+    return `${elderlyPerson.elderly_fname || ''} ${elderlyPerson.elderly_lname || ''}`.trim() || 'Unknown';
+  };
+
+  // Helper function to determine shift based on time
+  // 1st Shift: 6:00 AM - 2:00 PM
+  // 2nd Shift: 2:00 PM - 10:00 PM
+  // 3rd Shift: 10:00 PM - 6:00 AM
+  const getShiftFromTime = (timestamp) => {
+    if (!timestamp) return null;
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const hour = date.getHours();
+    
+    if (hour >= 6 && hour < 14) {
+      return '1st';
+    } else if (hour >= 14 && hour < 22) {
+      return '2nd';
+    } else {
+      return '3rd';
+    }
+  };
 
   // Format date to YYYY-MM-DD
   const formatDateString = (date) => {
@@ -66,6 +147,9 @@ export default function ShiftLogs() {
           });
 
           console.log(`✅ Loaded ${logsData.length} logs for ${dateStr}`);
+          if (logsData.length > 0) {
+            console.log('📋 Sample log data:', logsData[0]);
+          }
           setLogs(logsData);
           setLoading(false);
         });
@@ -89,9 +173,12 @@ export default function ShiftLogs() {
   useEffect(() => {
     let filtered = [...logs];
 
-    // Filter by shift (if shift data is available in logs)
+    // Filter by shift (calculated from logged_at time)
     if (activeShift !== 'all') {
-      filtered = filtered.filter(log => log.shift === activeShift);
+      filtered = filtered.filter(log => {
+        const logShift = getShiftFromTime(log.logged_at);
+        return logShift === activeShift;
+      });
     }
 
     // Filter by log type
@@ -102,14 +189,15 @@ export default function ShiftLogs() {
     // Filter by search query (caregiver name or elderly name)
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(log => 
-        (log.caregiver_fname && log.caregiver_fname.toLowerCase().includes(query)) ||
-        (log.elderly_fname && log.elderly_fname.toLowerCase().includes(query))
-      );
+      filtered = filtered.filter(log => {
+        const caregiverFullName = getCaregiverFullName(log.caregiver_id).toLowerCase();
+        const elderlyFullName = getElderlyFullName(log.elderly_id).toLowerCase();
+        return caregiverFullName.includes(query) || elderlyFullName.includes(query);
+      });
     }
 
     setFilteredLogs(filtered);
-  }, [logs, activeShift, activeLogType, searchQuery]);
+  }, [logs, activeShift, activeLogType, searchQuery, users, elderly]);
 
   // Format timestamp to readable time
   const formatTime = (timestamp) => {
@@ -205,11 +293,11 @@ export default function ShiftLogs() {
               {/* Caregiver and Elderly Info */}
               <div className="log-participants">
                 <div className="participant">
-                  <strong>👤 Caregiver:</strong> {log.caregiver_fname || 'Unknown'}
+                  <strong>👤 Caregiver:</strong> {getCaregiverFullName(log.caregiver_id)}
                 </div>
-                {log.elderly_fname && (
+                {log.elderly_id && (
                   <div className="participant">
-                    <strong>👴 Elderly:</strong> {log.elderly_fname}
+                    <strong>👴 Elderly:</strong> {getElderlyFullName(log.elderly_id)}
                   </div>
                 )}
               </div>
@@ -430,10 +518,10 @@ export default function ShiftLogs() {
             </button>
           </div>
 
-          {loading ? (
+          {(loading || dataLoading) ? (
             <div className="loading-state">
               <div className="spinner"></div>
-              <p>Loading shift logs...</p>
+              <p>{dataLoading ? 'Loading data...' : 'Loading shift logs...'}</p>
             </div>
           ) : filteredLogs.length === 0 ? (
             <div className="empty-state">

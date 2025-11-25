@@ -31,7 +31,8 @@ const splitIntoChunks = (arr, n) => {
 };
 
 // Enhanced shift distribution with bedridden house priority for weekend coverage
-const distributeToShifts = (caregivers, shiftDefs, houseId = null) => {
+// Now also supports custom shift preferences
+const distributeToShifts = (caregivers, shiftDefs, houseId = null, shiftPreferences = null) => {
   if (!caregivers || caregivers.length === 0) {
     return Array.from({ length: shiftDefs.length }, () => []);
   }
@@ -42,7 +43,45 @@ const distributeToShifts = (caregivers, shiftDefs, houseId = null) => {
   // Shuffle caregivers for fair distribution
   const shuffled = [...caregivers].sort(() => Math.random() - 0.5);
   
-  if (isBedridden && caregivers.length >= 6) {
+  // Check if we have custom shift preferences for this house
+  const hasCustomPrefs = shiftPreferences && shiftPreferences[houseId];
+  
+  if (hasCustomPrefs) {
+    // Use custom shift distribution based on user preferences
+    const prefs = shiftPreferences[houseId];
+    const weights = {
+      '1st': prefs['1st'] === 'more' ? 1.3 : prefs['1st'] === 'less' ? 0.7 : 1,
+      '2nd': prefs['2nd'] === 'more' ? 1.3 : prefs['2nd'] === 'less' ? 0.7 : 1,
+      '3rd': prefs['3rd'] === 'more' ? 1.3 : prefs['3rd'] === 'less' ? 0.7 : 1,
+    };
+    const totalWeight = weights['1st'] + weights['2nd'] + weights['3rd'];
+    
+    // Calculate how many caregivers should go to each shift
+    const targetCounts = [
+      Math.max(1, Math.round(shuffled.length * (weights['1st'] / totalWeight))),
+      Math.max(1, Math.round(shuffled.length * (weights['2nd'] / totalWeight))),
+      Math.max(1, Math.round(shuffled.length * (weights['3rd'] / totalWeight)))
+    ];
+    
+    console.log(`🎨 ${houseId} custom shift distribution: 1st=${targetCounts[0]}, 2nd=${targetCounts[1]}, 3rd=${targetCounts[2]}`);
+    
+    // Assign caregivers based on targets
+    let assigned = 0;
+    for (let s = 0; s < 3; s++) {
+      for (let i = 0; i < targetCounts[s] && assigned < shuffled.length; i++) {
+        shiftCaregivers[s].push(shuffled[assigned]);
+        assigned++;
+      }
+    }
+    
+    // Distribute any remaining
+    while (assigned < shuffled.length) {
+      const minShift = shiftCaregivers.reduce((minIdx, shift, idx) => 
+        shift.length < shiftCaregivers[minIdx].length ? idx : minIdx, 0);
+      shiftCaregivers[minShift].push(shuffled[assigned]);
+      assigned++;
+    }
+  } else if (isBedridden && caregivers.length >= 6) {
     // For bedridden houses with sufficient caregivers: ensure minimum 2 per shift
     const minPerShift = 2;
     let assigned = 0;
@@ -86,29 +125,29 @@ const ensureDayCounts = (obj, key, daysOfWeek) => {
   return obj[key];
 };
 
-// Generate consecutive work day patterns (5 work days + 2 rest days)
-const generateConsecutiveWorkDays = (startDayIndex, daysOfWeek) => {
-  const workDays = [];
-  for (let i = 0; i < 5; i++) {
-    workDays.push(daysOfWeek[(startDayIndex + i) % 7]);
+// Generate consecutive work day patterns (customizable work days + rest days)
+const generateConsecutiveWorkDays = (startDayIndex, daysOfWeek, workDays = 5) => {
+  const workDays_ = [];
+  for (let i = 0; i < workDays; i++) {
+    workDays_.push(daysOfWeek[(startDayIndex + i) % 7]);
   }
-  return workDays;
+  return workDays_;
 };
 
-// Get all possible 5-consecutive-day patterns
-const getAllConsecutivePatterns = (daysOfWeek) => {
+// Get all possible consecutive-day patterns based on work days
+const getAllConsecutivePatterns = (daysOfWeek, workDays = 5) => {
   const patterns = [];
   for (let startIndex = 0; startIndex < 7; startIndex++) {
     patterns.push({
       startIndex,
-      days: generateConsecutiveWorkDays(startIndex, daysOfWeek)
+      days: generateConsecutiveWorkDays(startIndex, daysOfWeek, workDays)
     });
   }
   return patterns;
 };
 
 // Improved consecutive assignment that guarantees complete daily coverage with bedridden house priority
-const assignConsecutiveDaysWithCoverage = (caregivers, daysOfWeek, houseId = null) => {
+const assignConsecutiveDaysWithCoverage = (caregivers, daysOfWeek, houseId = null, workDays = 5) => {
   if (!caregivers || caregivers.length === 0) {
     return [];
   }
@@ -121,17 +160,30 @@ const assignConsecutiveDaysWithCoverage = (caregivers, daysOfWeek, houseId = nul
   
   if (isBedridden) {
     // Enhanced algorithm for bedridden houses prioritizing weekend coverage
-    console.log(`🏥 BEDRIDDEN HOUSE ${houseId}: Enhanced consecutive day assignment for ${caregivers.length} caregivers`);
+    console.log(`🏥 BEDRIDDEN HOUSE ${houseId}: Enhanced consecutive day assignment for ${caregivers.length} caregivers (${workDays} work days)`);
     
-    const priorityPatterns = [
-      { days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], priority: 3 },
-      { days: ["Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"], priority: 5 },
-      { days: ["Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], priority: 5 },
-      { days: ["Thursday", "Friday", "Saturday", "Sunday", "Monday"], priority: 4 },
-      { days: ["Friday", "Saturday", "Sunday", "Monday", "Tuesday"], priority: 4 },
-      { days: ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"], priority: 3 },
-      { days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"], priority: 2 }
-    ];
+    // Generate priority patterns based on workDays parameter
+    const priorityPatterns = [];
+    if (workDays === 5) {
+      priorityPatterns.push(
+        { days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], priority: 3 },
+        { days: ["Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"], priority: 5 },
+        { days: ["Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], priority: 5 },
+        { days: ["Thursday", "Friday", "Saturday", "Sunday", "Monday"], priority: 4 },
+        { days: ["Friday", "Saturday", "Sunday", "Monday", "Tuesday"], priority: 4 },
+        { days: ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"], priority: 3 },
+        { days: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"], priority: 2 }
+      );
+    } else {
+      // Generate patterns for custom work days
+      for (let startIndex = 0; startIndex < 7; startIndex++) {
+        const days = generateConsecutiveWorkDays(startIndex, daysOfWeek, workDays);
+        // Higher priority for patterns that include weekends
+        const hasWeekend = days.includes("Saturday") || days.includes("Sunday");
+        const priority = hasWeekend ? 5 : 3;
+        priorityPatterns.push({ days, priority });
+      }
+    }
     
     // Sort patterns by priority (weekend patterns first)
     priorityPatterns.sort((a, b) => b.priority - a.priority);
@@ -157,7 +209,7 @@ const assignConsecutiveDaysWithCoverage = (caregivers, daysOfWeek, houseId = nul
     }
   } else {
     // Standard algorithm for regular houses
-    const patterns = getAllConsecutivePatterns(daysOfWeek);
+    const patterns = getAllConsecutivePatterns(daysOfWeek, workDays);
     
     for (let i = 0; i < caregivers.length; i++) {
       const caregiver = caregivers[i];
@@ -179,7 +231,7 @@ const assignConsecutiveDaysWithCoverage = (caregivers, daysOfWeek, houseId = nul
   }
   
   // Verify coverage with comprehensive logging
-  console.log(`🏥 Schedule Coverage Analysis for ${isBedridden ? `BEDRIDDEN HOUSE ${houseId}` : `House ${houseId || 'Unknown'}`} (${caregivers.length} total caregivers):`);
+  console.log(`🏥 Schedule Coverage Analysis for ${isBedridden ? `BEDRIDDEN HOUSE ${houseId}` : `House ${houseId || 'Unknown'}`} (${caregivers.length} total caregivers, ${workDays} work days each):`);
   
   const uncoveredDays = dayCounts.map((count, idx) => count === 0 ? daysOfWeek[idx] : null).filter(Boolean);
   
@@ -328,8 +380,14 @@ const getLastHouseMap = async () => {
 };
 
 // Main schedule generation function
-export const generateSchedule = async (months, { caregivers, houses, elderly }) => {
+export const generateSchedule = async (months, { caregivers, houses, elderly, customization = null }) => {
   try {
+    console.log(`🚀 Generating schedule for ${months} months with ${caregivers.length} caregivers, ${houses.length} houses, ${elderly.length} elderly`);
+    
+    if (customization) {
+      console.log("🎨 Using custom schedule settings:", customization);
+    }
+    
     // 🔹 0. Validate caregivers exist in database (prevent orphaned assignments)
     console.log(`🔍 Validating ${caregivers.length} caregivers before schedule generation...`);
     const caregiverIdsFromDb = await getDocs(
@@ -535,15 +593,26 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
     const start_date = Timestamp.now();
     const end_date = Timestamp.fromDate(getEndDate(months));
 
-    // 🔹 3. House weights - H002 and H003 (bedridden) get priority
-    const weights = {
-      H002: 4, // Priority houses get 4x weight
-      H003: 4, // Priority houses get 4x weight
-      H001: 1,
-      H004: 1,
-      H005: 1,
-    };
+    // 🔹 3. House weights - Can be customized or use defaults (bedridden houses prioritized)
+    const weights = customization?.housePriorities ? 
+      // Use custom priorities from user
+      Object.keys(customization.housePriorities).reduce((acc, houseId) => {
+        const priority = customization.housePriorities[houseId];
+        acc[houseId] = priority === 'high' ? 4 : priority === 'low' ? 1 : 2;
+        console.log(`🎨 Custom priority for ${houseId}: ${priority} (weight: ${acc[houseId]})`);
+        return acc;
+      }, {}) :
+      // Use default weights (bedridden houses get priority)
+      {
+        H002: 4, // Bedridden house - Priority
+        H003: 4, // Bedridden house - Priority
+        H001: 1,
+        H004: 1,
+        H005: 1,
+      };
     const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+    
+    console.log(`📊 Final house weights:`, weights);
 
     // 🔹 4. Improved caregiver distribution per house (ensuring minimum coverage)
     const caregiversPerHouse = {};
@@ -705,8 +774,13 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
 
       console.log(`\n🏠 Processing ${house.house_name} (${house.house_id}) with ${assignedCGs.length} caregivers`);
 
-      // Enhanced shift distribution with bedridden house priority
-      const shiftCaregivers = distributeToShifts(assignedCGs, shiftDefs, house.house_id);
+      // Enhanced shift distribution with bedridden house priority and customization
+      const shiftCaregivers = distributeToShifts(
+        assignedCGs, 
+        shiftDefs, 
+        house.house_id, 
+        customization?.shiftDistributions || null
+      );
 
       // house elders (all elderly that belong to this house and are alive)
       const houseElders = elderly.filter((e) => e.house_id === house.house_id && e.elderly_status !== "Deceased") || [];
@@ -824,7 +898,8 @@ export const generateSchedule = async (months, { caregivers, houses, elderly }) 
           console.log(`🏥 Using coordinated assignments for bedridden house shift ${s + 1}`);
         } else {
           // For regular houses or fallback: assign consecutive work days with complete coverage
-          shiftAssignments = assignConsecutiveDaysWithCoverage(cgInShift, daysOfWeek, house.house_id);
+          const workDays = customization?.workPattern?.workDays || 5;
+          shiftAssignments = assignConsecutiveDaysWithCoverage(cgInShift, daysOfWeek, house.house_id, workDays);
         }
         
         for (let i = 0; i < shiftAssignments.length; i++) {

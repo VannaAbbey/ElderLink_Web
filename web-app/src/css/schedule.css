@@ -383,6 +383,17 @@
   background-color: rgba(255, 193, 7, 0.4) !important;
 }
 
+/* Row styling for donor nurses (covering another shift) */
+.schedule-table tr.donor-row {
+  background-color: rgba(255, 140, 0, 0.15) !important;
+  border-left: 4px solid #ff8c00 !important;
+  font-weight: bold;
+}
+
+.schedule-table tr.donor-row td {
+  background-color: rgba(255, 140, 0, 0.15) !important;
+}
+
 /* Emergency coverage badge */
 .emergency-badge {
   display: inline-block;
@@ -2005,5 +2016,182 @@
     padding: 8px 10px;
     font-size: 12px;
   }
+}
+
+/* Control Panel Button Styles */
+.schedule-history-btn,
+.clear-schedule-btn,
+.cleanup-btn,
+.db-maintenance-btn,
+.emergency-coverage-btn,
+.integration-btn,
+.export-pdf-btn {
+  margin-left: 8px;
+}
+
+.clear-schedule-btn {
+  background: #e74c3c !important;
+  color: white !important;
+}
+
+.cleanup-btn {
+  background: #dc3545 !important;
+  color: white !important;
+}
+
+.db-maintenance-btn {
+  background: #9b59b6 !important;
+  color: white !important;
+}
+
+.emergency-coverage-btn {
+  background: #f39c12 !important;
+  color: white !important;
+  position: relative;
+}
+
+.integration-btn {
+  background: #28a745 !important;
+  color: white !important;
+  position: relative;
+}
+
+.export-pdf-btn {
+  background: #007bff !important;
+  color: white !important;
+}
+
+/* Elderly List Expansion */
+.elderly-list-container.expanded-full {
+  max-height: none !important;
+  overflow-y: visible !important;
+}
+
+/* Leave Notice Styles */
+.leave-notice {
+  color: #4caf50;
+  font-style: italic;
+}
+
+.leave-warning {
+  color: #f39c12;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+/* Auto-Regeneration Popup Styles */
+.auto-regen-popup {
+  max-width: 500px;
+}
+
+.auto-regen-title {
+  font-size: 20px;
+  font-weight: bold;
+  color: #2563eb;
+  margin-bottom: 15px;
+}
+
+.auto-regen-icon {
+  font-size: 32px;
+}
+
+.auto-regen-info {
+  text-align: left;
+  padding: 10px 20px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.auto-regen-message {
+  margin-bottom: 15px;
+}
+
+.schedule-dates-info {
+  font-size: 14px;
+  color: #666;
+}
+
+.dates-label {
+  margin-bottom: 8px;
+}
+
+.dates-range {
+  padding-left: 10px;
+}
+
+.date-arrow {
+  color: #95a5a6;
+}
+
+.auto-regen-buttons {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* Auto-Regeneration Success Modal Styles */
+.auto-regen-success-popup {
+  max-width: 500px;
+}
+
+.auto-regen-success-title {
+  font-size: 20px;
+  margin-bottom: 20px;
+  color: #2ecc71;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auto-regen-success-icon {
+  font-size: 32px;
+}
+
+.auto-regen-success-content {
+  text-align: left;
+  line-height: 1.8;
+  font-size: 15px;
+  color: #34495e;
+  margin-bottom: 20px;
+}
+
+.auto-regen-success-content p {
+  margin-bottom: 15px;
+}
+
+.auto-regen-period-box {
+  background-color: #ecf0f1;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+}
+
+.auto-regen-period-box > div:first-child {
+  margin-bottom: 8px;
+}
+
+.auto-regen-period-box > div:last-child {
+  padding-left: 10px;
+}
+
+.auto-regen-period-separator {
+  color: #95a5a6;
+}
+
+.auto-regen-status-box {
+  background-color: #e8f5e9;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.auto-regen-confirm-btn {
+  width: 100%;
+  padding: 12px;
+  font-size: 16px;
+  background-color: #2ecc71;
+  border: none;
 }
 

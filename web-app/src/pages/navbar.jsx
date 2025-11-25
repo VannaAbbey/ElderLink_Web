@@ -17,6 +17,8 @@ export default function Navbar() {
   const [elderlyRecordRequests, setElderlyRecordRequests] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [userRegistrations, setUserRegistrations] = useState([]);
+  const [infirmaryTransfers, setInfirmaryTransfers] = useState([]);
+  const [houses, setHouses] = useState([]);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768); // ✅ track screen size
   const [showNotifModal, setShowNotifModal] = useState(false);
   const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false);
@@ -26,6 +28,23 @@ export default function Navbar() {
   const dropdownRef = useRef(null);
   const notifRef = useRef(null);
   const sidebarRef = useRef(null);
+
+  // Fetch houses data once on mount
+  useEffect(() => {
+    const fetchHouses = async () => {
+      try {
+        const housesSnapshot = await getDocs(collection(db, "house"));
+        const housesList = housesSnapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data()
+        }));
+        setHouses(housesList);
+      } catch (error) {
+        console.error("Error fetching houses:", error);
+      }
+    };
+    fetchHouses();
+  }, []);
 
   // Track screen resize
   useEffect(() => {
@@ -41,6 +60,13 @@ export default function Navbar() {
     });
     return () => unsubscribeAuth();
   }, [navigate]);
+
+  // Helper function to get house name from house ID
+  const getHouseName = (houseId) => {
+    if (!houseId) return "Unknown House";
+    const house = houses.find(h => h.house_id === houseId);
+    return house ? house.house_name : houseId;
+  };
 
   const handleLogout = async () => {
     try {
@@ -181,6 +207,61 @@ export default function Navbar() {
     }
   };
 
+  // Handle infirmary transfer approval (for dropdown only)
+  const handleApproveTransfer = async (transferId, event) => {
+    event.stopPropagation();
+    
+    try {
+      const transferRef = doc(db, "infirmary_transfers", transferId);
+      const transferDoc = await getDoc(transferRef);
+      
+      if (!transferDoc.exists()) {
+        alert("Transfer request not found.");
+        return;
+      }
+      
+      const transferData = transferDoc.data();
+      
+      // Update elderly location to Infirmary
+      await updateDoc(doc(db, "elderly", transferData.elderly_id), {
+        elderly_location: "Infirmary",
+        updated_at: new Date()
+      });
+      
+      // Update transfer status
+      await updateDoc(transferRef, {
+        transfer_status: "approved",
+        approved_at: new Date(),
+        updated_at: new Date()
+      });
+      
+      alert(`Transfer approved: ${transferData.elderly_name} moved to Infirmary`);
+    } catch (error) {
+      console.error("Error approving transfer:", error);
+      alert("Failed to approve transfer.");
+    }
+  };
+
+  // Handle infirmary transfer rejection (for dropdown only)
+  const handleRejectTransfer = async (transferId, event) => {
+    event.stopPropagation();
+    const reason = prompt("Enter reason for rejection:");
+    if (reason === null) return; // User cancelled
+    
+    try {
+      await updateDoc(doc(db, "infirmary_transfers", transferId), {
+        transfer_status: "rejected",
+        rejection_reason: reason || "No reason provided",
+        rejected_at: new Date(),
+        updated_at: new Date()
+      });
+      alert("Transfer request rejected.");
+    } catch (error) {
+      console.error("Error rejecting transfer:", error);
+      alert("Failed to reject transfer request.");
+    }
+  };
+
   // Real-time elderly record requests
   useEffect(() => {
     const q = query(
@@ -207,8 +288,7 @@ export default function Navbar() {
 
   // Real-time notifications for new user registrations (last 7 days)
   useEffect(() => {
-    // Simplified query to avoid composite index requirement
-    // We'll filter client-side instead
+    // Query all caregiver and nurse registrations
     const q = query(
       collection(db, "users"),
       where("user_type", "in", ["caregiver", "nurse"])
@@ -229,6 +309,25 @@ export default function Navbar() {
       
       setUserRegistrations(recentUsers);
     });
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time notifications for infirmary transfers
+  useEffect(() => {
+    const q = query(
+      collection(db, "infirmary_transfers"),
+      where("transfer_status", "==", "pending")
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const transfers = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        notification_type: "infirmary_transfer"
+      }));
+      setInfirmaryTransfers(transfers);
+    });
+    
     return () => unsubscribe();
   }, []);
 
@@ -372,6 +471,27 @@ export default function Navbar() {
       });
     });
 
+    // Add infirmary transfers with timestamp
+    infirmaryTransfers.forEach(transfer => {
+      let sortTimestamp;
+      
+      if (transfer.request_date) {
+        sortTimestamp = transfer.request_date.toDate ? transfer.request_date.toDate() : new Date(transfer.request_date);
+      } else if (transfer.created_at) {
+        sortTimestamp = transfer.created_at.toDate ? transfer.created_at.toDate() : new Date(transfer.created_at);
+      } else {
+        sortTimestamp = new Date();
+      }
+      
+      allNotifications.push({
+        id: `transfer-${transfer.id}`,
+        type: 'infirmary_transfer',
+        timestamp: transfer.request_date || transfer.created_at || new Date(),
+        data: transfer,
+        sortTimestamp: sortTimestamp
+      });
+    });
+
     // Sort by most recent first
     return allNotifications.sort((a, b) => b.sortTimestamp - a.sortTimestamp);
   };
@@ -477,6 +597,39 @@ export default function Navbar() {
           </li>
         );
 
+      case 'infirmary_transfer':
+        return (
+          <li key={notification.id} className="notif-item unified-notif transfer-type">
+            <div className="notif-type-indicator transfer-indicator">🏥 Infirmary Transfer</div>
+            <div 
+              className="notif-content-unified clickable-notif" 
+              onClick={() => handleNotificationClick(notification)}
+            >
+              <div className="notif-main-info">
+                <strong>{data.elderly_name}</strong>
+                <span className="notif-status">Transfer Request</span>
+                <span className="notif-meta">From {getHouseName(data.from_house_id)} • {data.nurse_name}</span>
+              </div>
+              <div className="notif-actions" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="approve-btn-small"
+                  onClick={(e) => handleApproveTransfer(data.id, e)}
+                  title="Approve"
+                >
+                  ✓
+                </button>
+                <button
+                  className="reject-btn-small"
+                  onClick={(e) => handleRejectTransfer(data.id, e)}
+                  title="Reject"
+                >
+                  ✗
+                </button>
+              </div>
+            </div>
+          </li>
+        );
+
       default:
         return null;
     }
@@ -544,8 +697,8 @@ export default function Navbar() {
           <div className="notif-dropdown" ref={notifRef}>
             <button className="notif-btn" onClick={() => setNotifOpen((prev) => !prev)}>
               <FaBell size={20} />
-              {(elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length) > 0 && (
-                <span className="notif-badge">{elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length}</span>
+              {(elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length + infirmaryTransfers.length) > 0 && (
+                <span className="notif-badge">{elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length + infirmaryTransfers.length}</span>
               )}
             </button>
             {notifOpen && (

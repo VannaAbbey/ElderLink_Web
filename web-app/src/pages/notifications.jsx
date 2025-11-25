@@ -19,19 +19,28 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
   const [elderlyRecordRequests, setElderlyRecordRequests] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [userRegistrations, setUserRegistrations] = useState([]);
+  const [infirmaryTransfers, setInfirmaryTransfers] = useState([]);
+  const [houses, setHouses] = useState([]);
   const [singleNotif, setSingleNotif] = useState(null);
-  const [activeTab, setActiveTab] = useState("elderly"); // "elderly", "leave", or "users"
+  const [activeTab, setActiveTab] = useState("elderly"); // "elderly", "leave", "users", or "transfers"
   const [customAlert, setCustomAlert] = useState({ show: false, message: "", type: "" });
   const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false);
   const [pendingLeaveRequest, setPendingLeaveRequest] = useState(null);
   const [isProcessingLeave, setIsProcessingLeave] = useState(false);
-  const [tabOrder, setTabOrder] = useState(["elderly", "leave", "users"]); // Dynamic tab ordering
+  const [tabOrder, setTabOrder] = useState(["elderly", "leave", "users", "transfers"]); // Dynamic tab ordering
   const location = useLocation();
   const navigate = useNavigate();
 
   // ✅ Extract ID from URL
   const searchParams = new URLSearchParams(location.search);
   const notifId = searchParams.get("id");
+
+  // Helper function to get house name from house ID
+  const getHouseName = (houseId) => {
+    if (!houseId) return "Unknown House";
+    const house = houses.find(h => h.house_id === houseId);
+    return house ? house.house_name : houseId;
+  };
 
   // ✅ Custom Alert Function
   const showCustomAlert = (message, type = "success") => {
@@ -40,6 +49,23 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
       setCustomAlert({ show: false, message: "", type: "" });
     }, 4000); // Hide after 4 seconds
   };
+
+  // Fetch houses data once on mount
+  useEffect(() => {
+    const fetchHouses = async () => {
+      try {
+        const housesSnapshot = await getDocs(collection(db, "house"));
+        const housesList = housesSnapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data()
+        }));
+        setHouses(housesList);
+      } catch (error) {
+        console.error("Error fetching houses:", error);
+      }
+    };
+    fetchHouses();
+  }, []);
 
   useEffect(() => {
     if (isModal && !isOpen) return; // Don't fetch data if modal is closed
@@ -101,16 +127,30 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
               const userCreatedAt = user.createdAt.toDate ? user.createdAt.toDate() : new Date(user.createdAt);
               return userCreatedAt >= sevenDaysAgo;
             }
-            return true; // For full page, show all users
+            return true; // For full page, show all
           });
         
         setUserRegistrations(data);
+      });
+
+      // ✅ Fetch infirmary transfers (filter for pending if modal, all if page)
+      const infirmaryTransfersQuery = isModal
+        ? query(collection(db, "infirmary_transfers"), where("transfer_status", "==", "pending"))
+        : collection(db, "infirmary_transfers");
+        
+      const unsubscribeInfirmaryTransfers = onSnapshot(infirmaryTransfersQuery, (snapshot) => {
+        const data = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setInfirmaryTransfers(data);
       });
 
       return () => {
         unsubscribeElderlyRecordRequests();
         unsubscribeLeaveRequests();
         unsubscribeUserRegistrations();
+        unsubscribeInfirmaryTransfers();
       };
     }
   }, [notifId, isModal, isOpen]);
@@ -368,6 +408,68 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
     setShowLeaveConfirmModal(false);
     setPendingLeaveRequest(null);
     setIsProcessingLeave(false);
+  };
+
+  // Handle infirmary transfer approval
+  const handleApproveTransfer = async (transferId) => {
+    if (!confirm("Are you sure you want to approve this transfer to the infirmary?")) {
+      return;
+    }
+    
+    try {
+      const transferRef = doc(db, "infirmary_transfers", transferId);
+      const transferSnap = await getDoc(transferRef);
+      
+      if (!transferSnap.exists()) {
+        showCustomAlert("Transfer request not found.", "error");
+        return;
+      }
+
+      const transferData = transferSnap.data();
+      
+      // Update elderly location to Infirmary
+      const elderlyRef = doc(db, "elderly", transferData.elderly_id);
+      await updateDoc(elderlyRef, {
+        elderly_location: "Infirmary",
+        updated_at: new Date()
+      });
+
+      // Update transfer status
+      await updateDoc(transferRef, {
+        transfer_status: "approved",
+        approved_at: new Date(),
+        updated_at: new Date()
+      });
+
+      showCustomAlert(`Transfer approved. ${transferData.elderly_name} has been moved to Infirmary.`, "success");
+    } catch (error) {
+      console.error("Error approving transfer:", error);
+      showCustomAlert("Failed to approve transfer request.", "error");
+    }
+  };
+
+  // Handle infirmary transfer rejection
+  const handleRejectTransfer = async (transferId) => {
+    if (!confirm("Are you sure you want to reject this transfer request?")) {
+      return;
+    }
+    
+    const reason = prompt("Please provide a reason for rejecting this transfer:");
+    if (!reason) return;
+
+    try {
+      const transferRef = doc(db, "infirmary_transfers", transferId);
+      await updateDoc(transferRef, {
+        transfer_status: "rejected",
+        rejected_at: new Date(),
+        rejection_reason: reason || "No reason provided",
+        updated_at: new Date()
+      });
+      showCustomAlert("Transfer request rejected.", "info");
+    } catch (error) {
+      console.error("Error rejecting transfer:", error);
+      showCustomAlert("Failed to reject transfer request.", "error");
+    }
   };
 
   // // ✅ UI Rendering for Elderly Notifications
@@ -653,6 +755,48 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
             </div>
           )
         };
+      case 'transfers':
+        return {
+          label: 'Infirmary Transfers',
+          count: infirmaryTransfers.length,
+          data: infirmaryTransfers,
+          renderCard: (transfer) => (
+            <div className="notif-modal-card transfer-notification" key={`transfer-${transfer.id}`}>
+              <div className="notif-modal-details" style={{ width: '100%' }}>
+                <div className="notification-type-badge transfer-badge">Infirmary Transfer</div>
+                <h4>{transfer.elderly_name}</h4>
+                <p><strong>From House:</strong> {getHouseName(transfer.from_house_id)}</p>
+                <p><strong>Requested By:</strong> {transfer.nurse_name}</p>
+                <p><strong>Reason:</strong> {transfer.transfer_reason}</p>
+                <p>
+                  <strong>Request Date:</strong>{" "}
+                  {transfer.request_date && transfer.request_date.toDate
+                    ? transfer.request_date.toDate().toLocaleDateString()
+                    : "N/A"}
+                </p>
+                <p><strong>Status:</strong> <span className={`status-${transfer.transfer_status}`}>{transfer.transfer_status}</span></p>
+              </div>
+              <div className="notif-modal-actions">
+                {transfer.transfer_status === "pending" && (
+                  <>
+                    <button 
+                      className="approve-btn"
+                      onClick={() => handleApproveTransfer(transfer.id)}
+                    >
+                      Approve
+                    </button>
+                    <button 
+                      className="reject-btn"
+                      onClick={() => handleRejectTransfer(transfer.id)}
+                    >
+                      Reject
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        };
       default:
         return { label: 'Unknown', count: 0, data: [], renderCard: () => null };
     }
@@ -666,7 +810,7 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
       <div className="notif-modal-overlay" onClick={onClose}>
         <div className="notif-modal-content" onClick={(e) => e.stopPropagation()}>
           <div className="notif-modal-header">
-            <h2>All Notifications ({elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length})</h2>
+            <h2>All Notifications ({elderlyRecordRequests.length + leaveRequests.length + userRegistrations.length + infirmaryTransfers.length})</h2>
             <button 
               className="notif-modal-close" 
               onClick={onClose}
@@ -764,6 +908,12 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
             >
               User Registrations ({userRegistrations.length})
             </button>
+            <button
+              className={`tab-btn ${activeTab === "transfers" ? "active" : ""}`}
+              onClick={() => setActiveTab("transfers")}
+            >
+              Infirmary Transfers ({infirmaryTransfers.filter(t => t.transfer_status === "pending").length})
+            </button>
           </div>
 
           {/* Content based on active tab */}
@@ -797,6 +947,47 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
                         <strong>Registered:</strong>{" "}
                         {user.createdAt ? new Date(user.createdAt.toDate()).toLocaleDateString() : 'N/A'}
                       </p>
+                    </div>
+                  </div>
+                ))
+              )
+            ) : activeTab === "transfers" ? (
+              infirmaryTransfers.length === 0 ? (
+                <p>No infirmary transfer requests available</p>
+              ) : (
+                infirmaryTransfers.map((transfer) => (
+                  <div className="notification-card transfer-request-card" key={transfer.id}>
+                    <div className="transfer-icon">
+                      <span style={{ fontSize: "48px" }}>🏥</span>
+                    </div>
+                    <div className="notif-details">
+                      <h3>{transfer.elderly_name}</h3>
+                      <p><strong>From House:</strong> {getHouseName(transfer.from_house_id)}</p>
+                      <p><strong>Requested By:</strong> {transfer.nurse_name}</p>
+                      <p><strong>Reason:</strong> {transfer.transfer_reason}</p>
+                      <p>
+                        <strong>Request Date:</strong>{" "}
+                        {transfer.request_date && transfer.request_date.toDate
+                          ? transfer.request_date.toDate().toLocaleDateString()
+                          : "N/A"}
+                      </p>
+                      <p><strong>Status:</strong> <span className={`status-${transfer.transfer_status}`}>{transfer.transfer_status}</span></p>
+                      {transfer.transfer_status === "pending" && (
+                        <div className="transfer-actions" style={{ marginTop: "10px" }}>
+                          <button 
+                            className="approve-btn"
+                            onClick={() => handleApproveTransfer(transfer.id)}
+                          >
+                            Approve Transfer
+                          </button>
+                          <button 
+                            className="reject-btn"
+                            onClick={() => handleRejectTransfer(transfer.id)}
+                          >
+                            Reject Transfer
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))

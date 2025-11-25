@@ -279,51 +279,77 @@ export class NurseScheduleService {
     return monthlyAssignments;
   }
 
-  // Validate and fix coverage gaps to ensure every day has at least one nurse working
+  // Validate and fix coverage gaps to ensure every day has at least one nurse working per shift
   validateAndFixCoverage(assignments) {
     const fixedAssignments = { ...assignments };
     
-    // Calculate daily coverage for each day
-    const dailyCoverage = {};
-    NurseScheduleService.DAYS_OF_WEEK.forEach(day => dailyCoverage[day] = 0);
+    // ✅ ENHANCED: Validate coverage PER SHIFT, not just overall
+    const shifts = ["1st", "2nd", "3rd"];
     
-    // Count nurses working each day
-    Object.values(assignments).forEach(nurseSchedule => {
-      Object.entries(nurseSchedule).forEach(([day, shift]) => {
-        if (shift !== "rest") {
-          dailyCoverage[day]++;
-        }
-      });
-    });
-    
-    // Find days with zero coverage
-    const zeroCoverageDays = NurseScheduleService.DAYS_OF_WEEK.filter(day => dailyCoverage[day] === 0);
-    
-    if (zeroCoverageDays.length > 0) {
-      console.log(`Fixing coverage gaps for days: ${zeroCoverageDays.join(", ")}`);
+    shifts.forEach(targetShift => {
+      // Calculate daily coverage for this specific shift
+      const dailyCoverageByShift = {};
+      NurseScheduleService.DAYS_OF_WEEK.forEach(day => dailyCoverageByShift[day] = 0);
       
-      // Find nurses with the most rest days to reassign
-      const nurseRestCounts = {};
-      Object.entries(assignments).forEach(([nurseId, schedule]) => {
-        nurseRestCounts[nurseId] = Object.values(schedule).filter(shift => shift === "rest").length;
-      });
-      
-      // Sort nurses by rest day count (descending)
-      const nursesByRestDays = Object.keys(nurseRestCounts)
-        .sort((a, b) => nurseRestCounts[b] - nurseRestCounts[a]);
-      
-      // For each zero coverage day, reassign a nurse from rest to work
-      zeroCoverageDays.forEach(day => {
-        for (const nurseId of nursesByRestDays) {
-          if (fixedAssignments[nurseId][day] === "rest") {
-            // Assign this nurse to 3rd shift on this day (overnight coverage)
-            fixedAssignments[nurseId][day] = "3rd";
-            console.log(`Assigned nurse ${nurseId} to 3rd shift on ${day} to fix coverage gap`);
-            break;
+      // Count nurses working each day on this shift
+      Object.values(fixedAssignments).forEach(nurseSchedule => {
+        Object.entries(nurseSchedule).forEach(([day, shift]) => {
+          if (shift === targetShift) {
+            dailyCoverageByShift[day]++;
           }
-        }
+        });
       });
-    }
+      
+      // Find days with zero coverage for this shift
+      const zeroCoverageDays = NurseScheduleService.DAYS_OF_WEEK.filter(day => dailyCoverageByShift[day] === 0);
+      
+      if (zeroCoverageDays.length > 0) {
+        console.log(`⚠️ Fixing ${targetShift} shift coverage gaps for days: ${zeroCoverageDays.join(", ")}`);
+        
+        // Find nurses assigned to this shift who have rest days
+        const nursesOnThisShift = Object.entries(fixedAssignments)
+          .filter(([nurseId, schedule]) => {
+            // Check if this nurse works this shift on any day
+            return Object.values(schedule).includes(targetShift);
+          })
+          .map(([nurseId, schedule]) => ({
+            nurseId,
+            restDays: Object.entries(schedule)
+              .filter(([day, shift]) => shift === "rest")
+              .map(([day]) => day)
+          }))
+          .filter(nurse => nurse.restDays.length > 0); // Only nurses with rest days
+        
+        // For each zero coverage day, reassign a nurse from rest to work
+        zeroCoverageDays.forEach(day => {
+          // Find a nurse on this shift who is resting on this day
+          const nurseToReassign = nursesOnThisShift.find(nurse => 
+            nurse.restDays.includes(day)
+          );
+          
+          if (nurseToReassign) {
+            fixedAssignments[nurseToReassign.nurseId][day] = targetShift;
+            console.log(`✅ Assigned nurse ${nurseToReassign.nurseId} to ${targetShift} shift on ${day} to fix coverage gap`);
+            
+            // Remove this day from their rest days for next iteration
+            nurseToReassign.restDays = nurseToReassign.restDays.filter(d => d !== day);
+          } else {
+            // No nurse on this shift available - try to find ANY nurse with a rest day
+            const anyNurseWithRestDay = Object.entries(fixedAssignments).find(
+              ([nurseId, schedule]) => schedule[day] === "rest"
+            );
+            
+            if (anyNurseWithRestDay) {
+              const [nurseId] = anyNurseWithRestDay;
+              fixedAssignments[nurseId][day] = targetShift;
+              console.log(`⚠️ No ${targetShift} shift nurse available - assigned any available nurse ${nurseId} to ${day}`);
+            } else {
+              console.error(`❌ CRITICAL: Cannot fix coverage gap for ${targetShift} shift on ${day} - no nurses available!`);
+            }
+          }
+        });
+      }
+    });
     
     return fixedAssignments;
   }
@@ -340,9 +366,17 @@ export class NurseScheduleService {
       const firstShift = Math.ceil(remaining / 2); // Slightly favor 1st shift
       const secondShift = remaining - firstShift;
       return { "1st": firstShift, "2nd": secondShift, "3rd": thirdShift };
+    } else if (totalNurses <= 9) {
+      // ✅ FIX: For 7-9 nurses, ensure minimum 3 nurses per shift for full week coverage
+      // With 3 nurses per shift × 5 work days = 15 nurse-days across 7 days = ~2 nurses/day
+      const thirdShift = Math.max(3, Math.floor(totalNurses / 3)); // At least 3 for coverage
+      const remaining = totalNurses - thirdShift;
+      const firstShift = Math.ceil(remaining / 2);
+      const secondShift = remaining - firstShift;
+      return { "1st": firstShift, "2nd": secondShift, "3rd": thirdShift };
     } else {
       // For larger teams, ensure adequate 3rd shift coverage
-      const thirdShift = Math.max(2, Math.floor(totalNurses * 0.2)); // 20% minimum, at least 2 nurses
+      const thirdShift = Math.max(3, Math.floor(totalNurses * 0.25)); // 25% minimum, at least 3 nurses
       const remaining = totalNurses - thirdShift;
       const firstShift = Math.ceil(remaining / 2); // Slightly favor 1st shift
       const secondShift = remaining - firstShift;
@@ -923,14 +957,31 @@ export class NurseScheduleService {
       absenceSnapshot.docs.forEach(docRef => {
         batch.delete(docRef.ref);
         absenceDeleteCount++;
-        console.log(`�️  Deleting nurse absence: ${docRef.id}`);
+        console.log(`❌️  Deleting nurse absence: ${docRef.id}`);
       });
 
-      console.log(`🗑️ About to delete ${shiftDeleteCount} NURSE shift assignments, ${elderlyDeleteCount} NURSE elderly assignments, ${tempReassignDeleteCount} NURSE temporary reassignments, and ${absenceDeleteCount} NURSE absence records (caregiver data preserved)`);
+      // Query and delete ONLY nurse attendance records from attendance collection
+      console.log("🔍 Querying attendance collection for nurses...");
+      const attendanceQuery = query(
+        collection(this.db, "attendance"),
+        where("user_type", "==", "nurse")
+      );
+      const attendanceSnapshot = await getDocs(attendanceQuery);
+      
+      console.log(`📊 Found ${attendanceSnapshot.docs.length} nurse documents in attendance`);
+      
+      let attendanceDeleteCount = 0;
+      attendanceSnapshot.docs.forEach(docRef => {
+        batch.delete(docRef.ref);
+        attendanceDeleteCount++;
+        console.log(`❌️  Deleting nurse attendance: ${docRef.id}`);
+      });
+
+      console.log(`🗑️ About to delete ${shiftDeleteCount} NURSE shift assignments, ${elderlyDeleteCount} NURSE elderly assignments, ${tempReassignDeleteCount} NURSE temporary reassignments, ${absenceDeleteCount} NURSE absence records, and ${attendanceDeleteCount} NURSE attendance records (caregiver data preserved)`);
       
       await batch.commit();
       
-      console.log(`✅ Successfully cleared ${shiftDeleteCount} shift assignments, ${elderlyDeleteCount} elderly assignments, ${tempReassignDeleteCount} temporary reassignments, and ${absenceDeleteCount} absence records for ${nurseIds.length} nurses (CAREGIVER DATA PRESERVED)`);
+      console.log(`✅ Successfully cleared ${shiftDeleteCount} shift assignments, ${elderlyDeleteCount} elderly assignments, ${tempReassignDeleteCount} temporary reassignments, ${absenceDeleteCount} absence records, and ${attendanceDeleteCount} attendance records for ${nurseIds.length} nurses (CAREGIVER DATA PRESERVED)`);
       
       return {
         success: true,
@@ -938,6 +989,7 @@ export class NurseScheduleService {
         elderlyDeleteCount,
         tempReassignDeleteCount,
         absenceDeleteCount,
+        attendanceDeleteCount,
         nurseCount: nurseIds.length
       };
       
@@ -1101,17 +1153,20 @@ export class NurseScheduleService {
   ) {
     const batch = writeBatch(this.db);
     
-    // Clear existing assignments first
-    assignments.forEach((a) => {
-      if (nurses.some((n) => n.id === a.user_id)) {
-        batch.delete(doc(this.db, "house_shift_assignments", a.id));
-      }
+    // ✅ OPTIMIZATION: Filter nurses once at the beginning
+    const nurseIds = new Set(nurses.map(n => n.id));
+    
+    // ✅ OPTIMIZATION: Filter assignments that need deletion (avoid unnecessary deletions)
+    const assignmentsToDelete = assignments.filter(a => nurseIds.has(a.user_id));
+    const elderlyAssignmentsToDelete = nurseElderlyAssignments.filter(a => nurseIds.has(a.user_id));
+    
+    // Clear existing assignments
+    assignmentsToDelete.forEach(a => {
+      batch.delete(doc(this.db, "house_shift_assignments", a.id));
     });
     
-    nurseElderlyAssignments.forEach((a) => {
-      if (nurses.some((n) => n.id === a.user_id)) {
-        batch.delete(doc(this.db, "elderly_assignments", a.id));
-      }
+    elderlyAssignmentsToDelete.forEach(a => {
+      batch.delete(doc(this.db, "elderly_assignments", a.id));
     });
     
     // Generate new monthly schedule
@@ -1120,6 +1175,17 @@ export class NurseScheduleService {
       assignments, 
       lastShiftRotation
     );
+    
+    // ✅ OPTIMIZATION: Prepare shift definition lookup map
+    const shiftDefMap = {};
+    NurseScheduleService.SHIFT_DEFS.forEach(s => {
+      shiftDefMap[s.key] = s;
+    });
+    
+    // ✅ OPTIMIZATION: Get version once instead of awaiting inside loop
+    const version = await this.getNextVersion();
+    const now = new Date();
+    const endDate = new Date(Date.now() + (periodDuration * 24 * 60 * 60 * 1000));
     
     // Save new shift assignments
     for (const nurseId of Object.keys(monthlyAssignments)) {
@@ -1138,18 +1204,18 @@ export class NurseScheduleService {
       for (const [shift, days] of Object.entries(byShift)) {
         const docId = `${nurseId}_${shift}`;
         const ref = doc(this.db, "house_shift_assignments", docId);
-        const shiftDef = NurseScheduleService.SHIFT_DEFS.find((s) => s.key === shift);
+        const shiftDef = shiftDefMap[shift];
         const payload = {
           user_id: nurseId,
           user_type: "nurse",
           assignment_type: "auto_generated_schedule",
-          created_at: new Date(),
+          created_at: now,
           days_assigned: days,
           schedule_period: {
             auto_generated: true,
             duration_days: periodDuration,
-            start_date: new Date(),
-            end_date: new Date(Date.now() + (periodDuration * 24 * 60 * 60 * 1000))
+            start_date: now,
+            end_date: endDate
           },
           shift,
           shift_name: shiftDef?.name || "",
@@ -1157,7 +1223,7 @@ export class NurseScheduleService {
           end_time: shiftDef?.endTime || "",
           is_current: true,
           status: "active",
-          version: await this.getNextVersion()
+          version: version
         };
         batch.set(ref, payload, { merge: true });
       }
@@ -1166,8 +1232,9 @@ export class NurseScheduleService {
     // Commit shift assignments first
     await batch.commit();
     
-    // Generate and save elderly assignments after shift assignments are saved
+    // ✅ OPTIMIZATION: Generate and save elderly assignments in parallel batches
     const elderlyBatch = writeBatch(this.db);
+    
     // For auto-generation, no existing temp reassignments or assignments to consider
     const elderlyAssignments = await this.generateElderlyAssignments(
       monthlyAssignments, 
@@ -1179,6 +1246,12 @@ export class NurseScheduleService {
       []  // no existing elderly assignments for new schedule
     );
     
+    // ✅ OPTIMIZATION: Create nurse lookup map to avoid repeated finds
+    const nurseMap = {};
+    nurses.forEach(n => {
+      nurseMap[n.id] = n;
+    });
+    
     for (const nurseId of Object.keys(elderlyAssignments)) {
       const dayToElderly = elderlyAssignments[nurseId] || {};
       
@@ -1189,8 +1262,8 @@ export class NurseScheduleService {
             const docId = `${nurseId}_${day}`;
             const ref = doc(this.db, "elderly_assignments", docId);
             
-            // Get nurse details for the new schema
-            const nurse = nurses.find(n => n.id === nurseId);
+            // ✅ OPTIMIZATION: Use nurse map instead of find
+            const nurse = nurseMap[nurseId];
             const housesForElderly = [...new Set(elderlyIds.map(elderlyId => this.getHouseForElderly(elderlyId, elderlyList)).filter(Boolean))];
             
             const payload = {
@@ -1200,7 +1273,7 @@ export class NurseScheduleService {
               user_fname: nurse?.user_fname || "",
               user_lname: nurse?.user_lname || "",
               assign_version: 1,
-              assigned_at: new Date(),
+              assigned_at: now,
               day,
               elderly_ids: elderlyIds,
               house_id: housesForElderly,
@@ -1216,12 +1289,11 @@ export class NurseScheduleService {
     
     await elderlyBatch.commit();
     
-    // Update nurse statuses to "active" for all nurses in the generated schedule
-    const statusUpdatePromises = nurses.map(async (nurse) => {
-      if (nurse.scheduleStatus === "pending_integration") {
-        await this.updateNurseScheduleStatus(nurse.id, "active", new Date());
-      }
-    });
+    // ✅ OPTIMIZATION: Update nurse statuses in parallel (already using Promise.all)
+    const statusUpdatePromises = nurses
+      .filter(nurse => nurse.scheduleStatus === "pending_integration")
+      .map(nurse => this.updateNurseScheduleStatus(nurse.id, "active", now));
+    
     await Promise.all(statusUpdatePromises);
     
     // Calculate statistics for feedback

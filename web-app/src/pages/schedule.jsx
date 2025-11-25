@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { db } from "../firebase";
 import {
   collection,
@@ -32,6 +32,7 @@ import ConfirmationModal from "./confirmationModal";
 import EmergencyCoverageModal from "./emergencyCoverageModal";
 import NewCaregiverModal from "./newCaregiverModal";
 import SearchResultsDropdown from "./searchResultsDropdown";
+import ScheduleCustomizationModal from "./scheduleCustomizationModal";
 
 
 export default function Schedule() {
@@ -42,11 +43,16 @@ export default function Schedule() {
   const [elderlyAssigns, setElderlyAssigns] = useState([]);
   const [tempReassigns, setTempReassigns] = useState([]);
   const [absences, setAbsences] = useState([]);
+  
+  // Track undo operations to prevent emergency modal from appearing during undo
+  const undoInProgress = useRef(false);
 
   const [duration, setDuration] = useState(6);
   const [customDuration, setCustomDuration] = useState("");
   const [showOverlay, setShowOverlay] = useState(false);
   const [pendingDuration, setPendingDuration] = useState(6);
+  const [showCustomizationModal, setShowCustomizationModal] = useState(false);
+  const [customizationSettings, setCustomizationSettings] = useState(null);
   const [showSuccess, setShowSuccess] = useState(false);
 
   const [viewMode, setViewMode] = useState("current");
@@ -121,6 +127,21 @@ export default function Schedule() {
   const [currentVersion, setCurrentVersion] = useState(0);
 
   const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+  // Helper function to get the correct date for temp reassignment matching
+  // For 3rd shift, we need to check both the current date and previous date
+  // because 3rd shift runs from 10 PM to 6 AM (crosses midnight)
+  const getRelevantDatesForShift = (dateStr, shift) => {
+    if (shift === "3rd") {
+      // For 3rd shift, include both the date and the previous day
+      // because temp reassignments created at 10 PM yesterday are still valid until 6 AM today
+      const currentDate = new Date(dateStr);
+      const previousDate = new Date(currentDate);
+      previousDate.setDate(previousDate.getDate() - 1);
+      return [dateStr, previousDate.toISOString().slice(0, 10)];
+    }
+    return [dateStr]; // For 1st and 2nd shifts, only use the exact date
+  };
 
   // Custom alert function to replace native alert()
   const showAlert = (message, title = "Notification") => {
@@ -770,6 +791,12 @@ export default function Schedule() {
   // NOTE: Only updates the badge count - modal only shows when admin clicks Emergency Coverage button
   useEffect(() => {
     const checkEmergencies = async () => {
+      // Skip emergency check if undo operation is in progress
+      if (undoInProgress.current) {
+        console.log('⏸️ Skipping emergency check - undo operation in progress');
+        return;
+      }
+      
       if (assignments.length === 0 || elderlyAssigns.length === 0) {
         setEmergencyCount(0);
         return;
@@ -859,7 +886,7 @@ export default function Schedule() {
   };
 
   // Schedule generation function - now uses API service
-  const handleScheduleGeneration = async (months) => {
+  const handleScheduleGeneration = async (months, customization = null) => {
     try {
       // 🔧 DEBUG MODE: Use minutes instead of months if debug mode is enabled
       let durationInMonths = months;
@@ -873,7 +900,8 @@ export default function Schedule() {
       const result = await ScheduleService.generateSchedule(durationInMonths, {
         caregivers,
         houses,
-        elderly: elderlyList
+        elderly: elderlyList,
+        customization // Pass customization settings to the service
       });
       
       if (result.success) {
@@ -897,11 +925,20 @@ export default function Schedule() {
     }
   };
 
-  const confirmGenerate = async () => {
+  const confirmGenerate = async (customization = null) => {
     setIsGenerating(true);
     setShowOverlay(false);
+    setShowCustomizationModal(false);
+    
+    // Extract duration from customization if available
+    const months = customization?.duration || 6; // Default to 6 months
+    
+    if (customization) {
+      setCustomizationSettings(customization);
+    }
+    
     try {
-      await handleScheduleGeneration(pendingDuration);
+      await handleScheduleGeneration(months, customization);
       
       // Refresh schedule info immediately after generation
       await new Promise(resolve => setTimeout(resolve, 500)); // Wait for DB operations
@@ -912,8 +949,8 @@ export default function Schedule() {
         let start, end;
         
         if (firstAssignment.schedule_period) {
-          start = firstAssignment.schedule_period.start?.toDate?.() || new Date(firstAssignment.schedule_period.start);
-          end = firstAssignment.schedule_period.end?.toDate?.() || new Date(firstAssignment.schedule_period.end);
+          start = firstAssignment.schedule_period.start_date?.toDate?.() || new Date(firstAssignment.schedule_period.start_date);
+          end = firstAssignment.schedule_period.end_date?.toDate?.() || new Date(firstAssignment.schedule_period.end_date);
         } else {
           start = firstAssignment.start_date?.toDate?.() || new Date(firstAssignment.start_date);
           end = firstAssignment.end_date?.toDate?.() || new Date(firstAssignment.end_date);
@@ -939,9 +976,7 @@ export default function Schedule() {
   };
 
   const handleGenerateClick = () => {
-    const months = customDuration ? parseInt(customDuration) : duration;
-    setPendingDuration(months);
-    setShowOverlay(true);
+    setShowCustomizationModal(true);
   };
 
   // Manual emergency coverage activation - now with modal
@@ -1322,11 +1357,9 @@ export default function Schedule() {
         date: targetDateStr
       });
 
-      // Temporarily suppress emergency modal during undo operation
-      // This prevents the modal from showing when emergency count is recalculated
-      const previousEmergencyCount = emergencyCount;
-      setEmergencyCount(0);
-      setShowEmergencyModal(false);
+      // Set undo flag to prevent emergency detection during the operation
+      undoInProgress.current = true;
+      console.log('🔒 Undo operation started - emergency detection paused');
 
       const result = await AbsenceService.unmarkAbsent(
         userId,
@@ -1357,7 +1390,7 @@ export default function Schedule() {
           message += `\n\n📋 ${result.deletedTempAssignments} temporary assignment(s) have been removed.`;
         }
 
-        // IMPORTANT: Reload ALL data BEFORE showing alert
+        // IMPORTANT: Reload ALL data BEFORE re-enabling emergency detection
         // This ensures the UI reflects the changes and prevents emergency modal from showing
         console.log(`\n%c━━━ RELOADING ASSIGNMENTS ━━━`, 'color: #00FF00; font-weight: bold; font-size: 14px');
         await loadAllAssignments();
@@ -1367,24 +1400,27 @@ export default function Schedule() {
         // Success - real-time listener will automatically update absences array
         console.log(`\n%c✅ UNDO COMPLETE - Assignments reloaded successfully`, 'color: #00FF00; font-weight: bold; font-size: 14px');
 
+        // Re-enable emergency detection AFTER data is reloaded
+        // This allows the emergency check to run with fresh data
+        setTimeout(() => {
+          undoInProgress.current = false;
+          console.log('🔓 Undo operation complete - emergency detection resumed');
+        }, 500);
+
         // Now show the success message
         showAlert(message, "Absence Unmarked");
-        
-        // Re-enable emergency detection after a short delay
-        // The real-time listeners will recalculate the correct emergency count
-        setTimeout(() => {
-          console.log('🔄 Re-enabling emergency detection after undo');
-        }, 1000);
       } else {
-        // If undo failed, restore previous emergency count
-        setEmergencyCount(previousEmergencyCount);
+        // If undo failed, re-enable emergency detection
+        undoInProgress.current = false;
+        console.log('🔓 Undo operation failed - emergency detection resumed');
         showAlert(result.message, "Error");
       }
 
     } catch (error) {
       console.error("Error unmarking absent:", error);
-      // Restore previous emergency count on error
-      setEmergencyCount(previousEmergencyCount);
+      // Re-enable emergency detection on error
+      undoInProgress.current = false;
+      console.log('🔓 Undo operation error - emergency detection resumed');
       showAlert(
         `Failed to unmark absence: ${error.message}`,
         "Error"
@@ -1436,11 +1472,15 @@ export default function Schedule() {
   
   console.log(`Base assignments for ${caregiverId} on ${dayName}: ${base.length}`, base);
 
+  // Get relevant dates for the current shift (handles 3rd shift crossing midnight)
+  const relevantDates = getRelevantDatesForShift(selectedDateStr, activeShift);
+  console.log(`Relevant dates for ${activeShift} shift: ${relevantDates.join(', ')}`);
+
   const toTemp = tempReassigns
     .filter(
       (t) =>
         t.to_user_id === caregiverId &&
-        t.date === selectedDateStr &&
+        relevantDates.includes(t.date) && // Check if temp reassignment date is in relevant dates
         t.assign_version === currentVersion
     )
     .flatMap((t) => t.elderly_ids || []); // Handle array structure
@@ -1451,7 +1491,7 @@ export default function Schedule() {
     .filter(
       (t) =>
         t.from_user_id === caregiverId &&
-        t.date === selectedDateStr &&
+        relevantDates.includes(t.date) && // Check if temp reassignment date is in relevant dates
         t.assign_version === currentVersion
     )
     .flatMap((t) => t.elderly_ids || []); // Handle array structure
@@ -1485,9 +1525,12 @@ export default function Schedule() {
     const selectedDateStr = formatDateString(selectedDate);
     const dayName = daysOfWeek[selectedDate.getDay() === 0 ? 6 : selectedDate.getDay() - 1];
     
+    // Get relevant dates for the current shift (handles 3rd shift crossing midnight)
+    const relevantDates = getRelevantDatesForShift(selectedDateStr, activeShift);
+    
     // Find emergency coverage temp assignments
     const emergencyTempAssigns = tempReassigns.filter(tr => 
-      tr.date === selectedDateStr && 
+      relevantDates.includes(tr.date) && // Use relevant dates instead of exact match
       tr.from_user_id === "EMERGENCY_ABSENT"
     );
     
@@ -1737,8 +1780,7 @@ export default function Schedule() {
           </button>
           <button
             onClick={() => { setViewMode("previous"); }}
-            className={`toggle-btn ${viewMode === "previous" ? "active" : ""}`}
-            style={{ marginLeft: 8 }}
+            className={`toggle-btn schedule-history-btn ${viewMode === "previous" ? "active" : ""}`}
           >
             Caregiver Schedule History
           </button> */}
@@ -1758,89 +1800,24 @@ export default function Schedule() {
       </div>
 
       <div className="control-panel">
-        <label>Duration (Months):</label>
-        <select value={duration} onChange={(e) => {
-          const val = parseInt(e.target.value);
-          setDuration(val);
-          localStorage.setItem("schedule_duration", val); // save selection
-        }}>
-          <option value={3}>3 Months</option>
-          <option value={6}>6 Months</option>
-          <option value={12}>12 Months</option>
-        </select>
-        <input
-          type="number"
-          placeholder="Custom Months"
-          value={customDuration}
-          min="1"
-          max="36"
-          onKeyDown={(e) => {
-            // Prevent typing letters, special characters (except backspace, delete, arrow keys, tab)
-            if (!/[0-9]/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
-              e.preventDefault();
-            }
-          }}
-          onChange={(e) => {
-            const val = e.target.value;
-            // Only allow positive numbers
-            if (val === '' || (parseInt(val) > 0 && parseInt(val) <= 36)) {
-              setCustomDuration(val);
-              localStorage.setItem("schedule_custom", val); // save custom input
-            }
-          }}
-        />
-        
-        {/* 🔧 DEBUG MODE: Show minutes input when debug mode is enabled */}
-        {DEBUG_MODE && (
-          <>
-            <label style={{ marginLeft: 16, color: '#ff6b6b', fontWeight: 'bold' }}>
-              🔧 DEBUG - Minutes:
-            </label>
-            <input
-              type="number"
-              placeholder="Test Minutes"
-              value={debugMinutes}
-              min="1"
-              max="60"
-              style={{ 
-                border: '2px solid #ff6b6b',
-                backgroundColor: '#fff3f3'
-              }}
-              onKeyDown={(e) => {
-                if (!/[0-9]/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
-                  e.preventDefault();
-                }
-              }}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === '' || (parseInt(val) > 0 && parseInt(val) <= 60)) {
-                  setDebugMinutes(val);
-                  console.log(`🔧 DEBUG: Set test duration to ${val} minutes`);
-                }
-              }}
-              title="For testing: Schedule will expire after this many minutes"
-            />
-          </>
-        )}
-        
         <button onClick={handleGenerateClick} title="Generate a new caregiver schedule for the selected period">Generate Schedule</button>
-        <button onClick={handleClearSchedule} style={{ marginLeft: 8, background: '#e74c3c', color: 'white' }} title="Delete all current caregiver schedules and assignments">Clear Schedule</button>
-        {/* <button onClick={handleCleanupOrphanedAssignments} style={{ marginLeft: 8, background: '#dc3545', color: 'white' }}>🧹 Fix Unknown</button> */}
-        {/* <button onClick={handleDatabaseMaintenance} style={{ marginLeft: 8, background: '#9b59b6', color: 'white' }}>🗑️ Database Cleanup</button> */}
+        <button onClick={handleClearSchedule} className="clear-schedule-btn" title="Delete all current caregiver schedules and assignments">Clear Schedule</button>
+        {/* <button onClick={handleCleanupOrphanedAssignments} className="cleanup-btn">🧹 Fix Unknown</button> */}
+        {/* <button onClick={handleDatabaseMaintenance} className="db-maintenance-btn">🗑️ Database Cleanup</button> */}
         <button 
           onClick={handleEmergencyCoverage} 
-          style={{ marginLeft: 8, background: '#f39c12', color: 'white', position: 'relative' }}
+          className="emergency-coverage-btn"
           disabled={!scheduleInfo}
           title="Handle emergency situations by temporarily reassigning caregivers between houses"
         >
           🚨 Emergency Coverage
           {scheduleInfo && emergencyCount > 0 && (
-            <span className="notification-badge" style={{ background: '#dc3545' }}>{emergencyCount}</span>
+            <span className="notification-badge">{emergencyCount}</span>
           )}
         </button>
         <button 
           onClick={handleNewCaregiverIntegration} 
-          style={{ marginLeft: 8, background: '#28a745', color: 'white', position: 'relative' }}
+          className="integration-btn"
           disabled={!scheduleInfo}
           title="Integrate newly registered caregivers into the current schedule"
         >
@@ -1849,7 +1826,7 @@ export default function Schedule() {
             <span className="notification-badge">{unassignedCount}</span>
           )}
         </button>
-        <button onClick={handleExportPDF} style={{ marginLeft: 8, background: '#007bff', color: 'white' }} disabled={!scheduleInfo} title="Export the current schedule to PDF for printing or sharing">📄 Download Schedule</button>
+        <button onClick={handleExportPDF} className="export-pdf-btn" disabled={!scheduleInfo} title="Export the current schedule to PDF for printing or sharing">📄 Download Schedule</button>
       </div>
 
       {/* Search Bar */}
@@ -2076,7 +2053,7 @@ export default function Schedule() {
                       const hasMore = elders.length > 3;
                       
                       return (
-                        <div className="elderly-list-container" style={{ maxHeight: isExpanded ? '120px' : 'none', overflowY: isExpanded ? 'auto' : 'visible' }}>
+                        <div className={`elderly-list-container ${!isExpanded ? 'expanded-full' : ''}`}>
                           {displayedElders.map((e, idx) => (
                             <div key={idx} className="elderly-name-item">
                               {`${e.elderly_fname} ${e.elderly_lname}`}
@@ -2111,7 +2088,7 @@ export default function Schedule() {
                       <span className="on-leave-text">
                         🏖️ On Leave on {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}<br/>
                         {absenceDetails.reason && (
-                          <small style={{ color: '#4caf50', fontStyle: 'italic' }}>
+                          <small className="leave-notice">
                             {absenceDetails.reason}
                           </small>
                         )}
@@ -2125,7 +2102,7 @@ export default function Schedule() {
                         ↩️ Undo Absent
                       </button>
                     ) : isEmergency ? (
-                      <span style={{ color: '#f39c12', fontWeight: 'bold', fontSize: '12px' }}>
+                      <span className="leave-warning">
                         🚨 Emergency Coverage<br/>
                         <small>
                           {emergencyDetails.originalHouse && emergencyDetails.emergencyHouse 
@@ -2198,25 +2175,12 @@ export default function Schedule() {
       {/* Auto-Regeneration Notification Modal */}
       {showAutoRegenModal && (
         <div className="popup-overlay">
-          <div className="popup-content" style={{ maxWidth: '500px' }}>
-            <div className="popup-title" style={{ 
-              fontSize: '20px', 
-              marginBottom: '20px',
-              color: '#2ecc71',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}>
-              <span style={{ fontSize: '32px' }}>🔄</span>
+          <div className="popup-content auto-regen-success-popup">
+            <div className="popup-title auto-regen-success-title">
+              <span className="auto-regen-success-icon">🔄</span>
               <span>Schedule Automatically Updated!</span>
             </div>
-            <div style={{ 
-              textAlign: 'left', 
-              lineHeight: '1.8',
-              fontSize: '15px',
-              color: '#34495e',
-              marginBottom: '20px'
-            }}>
+            <div className="auto-regen-success-content">
               <p style={{ marginBottom: '15px' }}>
                 The previous schedule period has expired, and a new schedule has been automatically generated.
               </p>
@@ -2264,17 +2228,10 @@ export default function Schedule() {
             </div>
             <div className="popup-buttons">
               <button 
-                className="popup-btn yes" 
+                className="popup-btn yes auto-regen-confirm-btn" 
                 onClick={() => {
                   setShowAutoRegenModal(false);
                   setAutoRegenInfo({ start: null, end: null, version: 0 });
-                }}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  fontSize: '16px',
-                  backgroundColor: '#2ecc71',
-                  border: 'none'
                 }}
                 title="Acknowledge the new schedule and close this notification"
               >
@@ -2284,6 +2241,15 @@ export default function Schedule() {
           </div>
         </div>
       )}
+
+      {/* Schedule Customization Modal */}
+      <ScheduleCustomizationModal
+        isOpen={showCustomizationModal}
+        onClose={() => setShowCustomizationModal(false)}
+        onGenerate={confirmGenerate}
+        houses={houses}
+        caregivers={caregivers}
+      />
 
     </div>
   );

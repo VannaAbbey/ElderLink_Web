@@ -24,8 +24,9 @@ export default function Dashboard() {
 
         usersSnapshot.forEach((doc) => {
           const data = doc.data();
-          if (data.user_type === "caregiver") caregiverCount++;
-          if (data.user_type === "nurse") nurseCount++;
+          // Only count active users (user_activation !== false)
+          if (data.user_type === "caregiver" && data.user_activation !== false) caregiverCount++;
+          if (data.user_type === "nurse" && data.user_activation !== false) nurseCount++;
         });
 
         setTotalCaregivers(caregiverCount);

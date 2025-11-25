@@ -8,6 +8,8 @@ import {
   addDoc,
   doc,
   updateDoc,
+  query,
+  where,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -23,7 +25,7 @@ import {
   integrateNewElderlyIntoNurseSchedule 
 } from "../services/nurseElderlyIntegrationService";
 
-export default function HouseView({ houseId: propHouseId }) {
+export default function HouseView({ houseId: propHouseId, currentHouse, onEditHouse, onDeleteHouse }) {
   const { houseId: paramHouseId } = useParams();
   const houseId = propHouseId || paramHouseId;
   const navigate = useNavigate();
@@ -50,6 +52,7 @@ export default function HouseView({ houseId: propHouseId }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewImage, setPreviewImage] = useState("");
   const [sortAsc, setSortAsc] = useState(true); // Full-name sort
+  const [houses, setHouses] = useState([]); // Store all houses from Firestore
   const storage = getStorage();
 
   const houseImages = {
@@ -60,21 +63,31 @@ export default function HouseView({ houseId: propHouseId }) {
     H005: "/images/Gabriel.png",
   };
 
-  const houseNames = {
-    H001: "House of St. Sebastian",
-    H002: "House of St. Emmanuel",
-    H003: "House of St. Charbell",
-    H004: "House of St. Rose of Lima",
-    H005: "House of St. Gabriel",
+  // Function to get house image with fallback to default
+  const getHouseImage = (hId) => {
+    if (hId === "INFIRMARY") {
+      return "/images/infirmary-icon.png";
+    }
+    return houseImages[hId] || "/images/default-house.png";
   };
 
-  const houseShortTitles = {
-  H001: "Women Receiving Psychological Support",
-  H002: "Women Requiring Full-Time Bed Care",
-  H003: "Men Requiring Full-Time Bed Care",
-  H004: "Women Living Independently with Assistance",
-  H005: "Men Living Independently with Assistance",
-};
+  // Function to get house name dynamically
+  const getHouseName = (hId) => {
+    if (hId === "INFIRMARY") {
+      return "🏥 Infirmary";
+    }
+    const house = houses.find(h => h.house_id === hId);
+    return house ? house.house_name : "Unknown House";
+  };
+
+  // Function to get house short title dynamically
+  const getHouseShortTitle = (hId) => {
+    if (hId === "INFIRMARY") {
+      return "Elderly currently receiving medical care";
+    }
+    const house = houses.find(h => h.house_id === hId);
+    return house ? (house.house_desc || "No description available.") : "No description available.";
+  };
 
 
 const [editElderlyId, setEditElderlyId] = useState(null);
@@ -88,22 +101,45 @@ const [editElderlyId, setEditElderlyId] = useState(null);
   // Success modal state
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [infirmaryTransfers, setInfirmaryTransfers] = useState([]);
 
   useEffect(() => {
-    const fetchElderly = async () => {
+    const fetchData = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, "elderly"));
+        // Fetch elderly
+        const elderlySnapshot = await getDocs(collection(db, "elderly"));
         setElderlyList(
-          querySnapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
+          elderlySnapshot.docs.map((d) => ({ id: d.id, ...d.data() }))
         );
+
+        // Fetch houses
+        const housesSnapshot = await getDocs(collection(db, "house"));
+        const housesList = housesSnapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data()
+        }));
+        setHouses(housesList);
+        
+        // Fetch infirmary transfers (approved ones to get transfer reasons)
+        const transfersSnapshot = await getDocs(
+          query(collection(db, "infirmary_transfers"), where("transfer_status", "==", "approved"))
+        );
+        const transfersList = transfersSnapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data()
+        }));
+        setInfirmaryTransfers(transfersList);
       } catch (err) {
-        console.error("Error fetching elderly:", err);
+        console.error("Error fetching data:", err);
       }
     };
-    fetchElderly();
+    fetchData();
   }, []);
 
-  const elderlyInHouse = elderlyList.filter((e) => e.house_id === houseId);
+  // Filter elderly based on houseId or Infirmary
+  const elderlyInHouse = houseId === "INFIRMARY"
+    ? elderlyList.filter((e) => e.elderly_location === "Infirmary")
+    : elderlyList.filter((e) => e.house_id === houseId);
 
   // Filtered + Sorted Elderly
 const filteredElderly = elderlyInHouse
@@ -396,9 +432,9 @@ const filteredElderly = elderlyInHouse
     setSelectedElderly([]);
   };
 
-  const totalElderlyInHouse = elderlyList.filter(
-    (e) => e.house_id === houseId && e.elderly_status === "Alive"
-  ).length;
+  const totalElderlyInHouse = houseId === "INFIRMARY"
+    ? elderlyList.filter((e) => e.elderly_location === "Infirmary" && e.elderly_status === "Alive").length
+    : elderlyList.filter((e) => e.house_id === houseId && e.elderly_status === "Alive").length;
 
   return (
   <div className="elderly-profile-container wide-layout">
@@ -406,21 +442,45 @@ const filteredElderly = elderlyInHouse
   <div className="elderly-profile-header">
     <div className="header-house">
   <div className="header-top">
-    <img
-      src={houseImages[houseId] || "/images/default-house.png"}
-      alt={houseNames[houseId]}
-      className="header-image"
-    />
-    <h1 className="header-title">{houseNames[houseId]}</h1>
+    {houseId !== "INFIRMARY" && getHouseImage(houseId) && (
+      <img
+        src={getHouseImage(houseId)}
+        alt={getHouseName(houseId)}
+        className="header-image"
+      />
+    )}
+    <h1 className="header-title">
+      {getHouseName(houseId)}
+    </h1>
   </div>
   <p className="house-shortTitle">
-    {houseShortTitles[houseId] || "No short title available."}
+    {getHouseShortTitle(houseId)}
   </p>
   <div className="header-title-wrapper">
     <span className="total-elderly"> Total Number of Alive Elderly: {totalElderlyInHouse}</span>
   </div>
 </div>
   </div>
+
+      {/* House Action Buttons */}
+      {currentHouse && houseId !== "INFIRMARY" && (
+        <div className="house-action-buttons">
+          <button
+            className="house-action-btn edit-house-btn"
+            onClick={() => onEditHouse(currentHouse)}
+            title={`Edit ${currentHouse.house_name}`}
+          >
+            ✏️ Edit House
+          </button>
+          <button
+            className="house-action-btn delete-house-btn"
+            onClick={() => onDeleteHouse(currentHouse)}
+            title={`Delete ${currentHouse.house_name}`}
+          >
+            🗑️ Delete House
+          </button>
+        </div>
+      )}
 
       {/* Search & Sort */}
       <div className="search-sort-row">
@@ -489,7 +549,7 @@ const filteredElderly = elderlyInHouse
           <th className="icon-col"></th>
           <th className="name-col">Full Name</th>
           <th className="age-col">Age</th>
-          <th className="mobility-col">Mobility Status</th>
+          <th className="mobility-col">{houseId === "INFIRMARY" ? "Transfer Reason" : "Mobility Status"}</th>
           {showSelectPanel && <th className="select-col">Select</th>}
           <th className="action-th">Action</th>
         </tr>
@@ -517,7 +577,12 @@ const filteredElderly = elderlyInHouse
                 {elder.elderly_fname} {elder.elderly_lname}
               </td>
               <td className="age-cell">{elder.elderly_age ?? "—"}</td>
-              <td className="mobility-cell">{elder.elderly_mobilityStatus || "—"}</td>
+              <td className="mobility-cell">
+                {houseId === "INFIRMARY" 
+                  ? (infirmaryTransfers.find(t => t.elderly_id === elder.id)?.transfer_reason || "—")
+                  : (elder.elderly_mobilityStatus || "—")
+                }
+              </td>
               {showSelectPanel && (
                 <td
                   className="select-cell"
@@ -755,11 +820,13 @@ const filteredElderly = elderlyInHouse
                 onChange={handleChange}
               >
                 <option value="">-- Select House --</option>
-                {Object.entries(houseNames).map(([id, name]) => (
-                  <option key={id} value={id}>
-                    {name}
-                  </option>
-                ))}
+                {houses
+                  .filter((house) => house.house_id !== houseId) // Exclude current house
+                  .map((house) => (
+                    <option key={house.id} value={house.house_id}>
+                      {house.house_name}
+                    </option>
+                  ))}
               </select>
             </div>
 
@@ -804,7 +871,7 @@ const filteredElderly = elderlyInHouse
                 <strong>Elderly profile saved successfully!</strong>
               </p>
               <p className="integration-house-text">
-                Active schedules found for <strong>{houseNames[houseId]}</strong>:
+                Active schedules found for <strong>{getHouseName(houseId)}</strong>:
               </p>
               <ul className="integration-staff-list">
                 <li><strong>Caregivers:</strong> {scheduleInfo?.caregiverCount || 0} assigned</li>
