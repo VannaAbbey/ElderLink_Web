@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../firebase";
-import { FaBell, FaBars, FaTimes, FaHome, FaUsers, FaCalendarAlt, FaUserMd, FaExclamationTriangle, FaUserCircle, FaClipboardList } from "react-icons/fa";
+import { FaBell, FaBars, FaTimes, FaHome, FaUsers, FaCalendarAlt, FaUserMd, FaExclamationTriangle, FaUserCircle, FaClipboardList, FaHeartbeat } from "react-icons/fa";
 import { collection, query, where, onSnapshot, updateDoc, doc, getDoc, getDocs } from "firebase/firestore";
 import { processApprovedLeave } from "../services/absenceService";
 import Notifications from "./notifications";
@@ -657,7 +657,8 @@ export default function Navbar() {
     { path: "/nurse-schedule", label: "Nurse Schedule", icon: <FaUserMd /> },
     { path: "/shift-logs", label: "Shift Logs", icon: <FaClipboardList /> },
     { path: "/incident-reports", label: "Incident Reports", icon: <FaExclamationTriangle /> },
-    { path: "/summary-vitals-meds", label: "Summary of Vitals & Meds", icon: <FaClipboardList /> },
+    { path: "/summary-vitals-meds", label: "Medication Management", icon: <FaClipboardList /> },
+    { path: "/vital-monitoring", label: "Vital Monitoring", icon: <FaHeartbeat /> },
     { path: "/accounts", label: "Accounts", icon: <FaUserCircle /> },
   ];
 

@@ -27,7 +27,8 @@ import EditNurseOverlay from "./pages/edit_nurse_overlay"; // ✅ added
 import NurseSchedule from "./pages/nurse-schedule.jsx";
 import IncidentReports from "./pages/incidentReports.jsx";
 import ShiftLogs from "./pages/shift-logs.jsx";
-import SummaryVitalsMeds from "./pages/summary-vitals-meds.jsx";
+import MedicationManagement from "./pages/medication_management.jsx";
+import VitalMonitoring from "./pages/vital_monitoring.jsx";
 
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -59,7 +60,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <Route path="/nurse-schedule" element={<NurseSchedule />} />
       <Route path="/incident-reports" element={<IncidentReports />} />
       <Route path="/shift-logs" element={<ShiftLogs />} />
-      <Route path="/summary-vitals-meds" element={<SummaryVitalsMeds />} />
+      <Route path="/summary-vitals-meds" element={<MedicationManagement />} />
+      <Route path="/vital-monitoring" element={<VitalMonitoring />} />
 
     </Routes>
   </BrowserRouter>
