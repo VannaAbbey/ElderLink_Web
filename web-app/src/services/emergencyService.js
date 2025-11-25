@@ -217,17 +217,101 @@ export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, e
             absentCaregivers: coverage.caregivers.filter(c => c.isAbsent)
           });
           console.log(`🚨 EMERGENCY DETECTED: ${house} ${shift} Shift - ALL ${coverage.absent} caregivers absent!`);
-        } else if (coverage.present > 1) {
-          // POTENTIAL DONOR: Has more than 1 present caregiver
+        } else if (coverage.present >= 1) {
+          // POTENTIAL DONOR: Has at least 1 present caregiver
           const presentCaregivers = coverage.caregivers.filter(c => !c.isAbsent);
           availableDonors.push({
             house,
             shift,
             availableCount: coverage.present,
-            presentCaregivers
+            presentCaregivers,
+            dateStr: targetDateStr // Track which date this donor is from
           });
         }
       }
+    }
+    
+    // For 3rd shift emergencies, also check NEXT DAY's 1st and 2nd shifts for potential donors
+    // Because 3rd shift (10 PM - 6 AM) ends in the next day, so next day's shifts come after
+    const has3rdShiftEmergency = emergencyNeeds.some(need => need.shift === "3rd");
+    if (has3rdShiftEmergency) {
+      console.log(`🌙 3rd shift emergency detected - checking NEXT DAY for additional donors...`);
+      
+      // Calculate next day
+      const nextDayDate = new Date(targetDateStr);
+      nextDayDate.setDate(nextDayDate.getDate() + 1);
+      const nextDayStr = nextDayDate.toISOString().slice(0, 10);
+      const nextDayIndex = nextDayDate.getDay();
+      const nextDayName = daysOfWeek[nextDayIndex === 0 ? 6 : nextDayIndex - 1];
+      
+      console.log(`📅 Checking ${nextDayStr} (${nextDayName}) for 1st and 2nd shift donors...`);
+      
+      // Get next day's assignments
+      const nextDayAssignments = assignments.filter(a => 
+        a.is_current && 
+        (a.days_assigned || []).map(d => d.toLowerCase()).includes(nextDayName.toLowerCase())
+      );
+      
+      // Get next day's absences
+      const nextDayAbsences = await getAbsencesForDate(nextDayStr);
+      const nextDayAbsentIds = new Set(nextDayAbsences.map(a => a.user_id));
+      
+      // Build coverage map for next day's 1st and 2nd shifts only
+      const nextDayCoverageMap = {};
+      for (const house of houses) {
+        nextDayCoverageMap[house] = {};
+        for (const shift of ["1st", "2nd"]) { // Only check 1st and 2nd shifts of next day
+          nextDayCoverageMap[house][shift] = {
+            total: 0,
+            present: 0,
+            caregivers: []
+          };
+        }
+      }
+      
+      // Fill next day coverage map
+      for (const assignment of nextDayAssignments) {
+        const { house_id, shift } = assignment;
+        if (shift !== "1st" && shift !== "2nd") continue; // Only 1st and 2nd shifts
+        
+        const caregiverId = assignment.user_id || assignment.caregiver_id;
+        if (!caregiverId) continue;
+        
+        const isAbsent = nextDayAbsentIds.has(caregiverId);
+        
+        nextDayCoverageMap[house_id][shift].total++;
+        nextDayCoverageMap[house_id][shift].caregivers.push({
+          caregiverId: caregiverId,
+          assignmentId: assignment.id,
+          isAbsent: isAbsent
+        });
+        
+        if (!isAbsent) {
+          nextDayCoverageMap[house_id][shift].present++;
+        }
+      }
+      
+      // Add next day's 1st and 2nd shift donors to available donors
+      let nextDayDonorCount = 0;
+      for (const house of houses) {
+        for (const shift of ["1st", "2nd"]) {
+          const coverage = nextDayCoverageMap[house][shift];
+          if (coverage.present >= 1) {
+            const presentCaregivers = coverage.caregivers.filter(c => !c.isAbsent);
+            availableDonors.push({
+              house,
+              shift,
+              availableCount: coverage.present,
+              presentCaregivers,
+              dateStr: nextDayStr, // Next day donors
+              isNextDay: true // Flag to indicate this is from next day
+            });
+            nextDayDonorCount++;
+          }
+        }
+      }
+      
+      console.log(`✅ Found ${nextDayDonorCount} additional donors from next day (${nextDayStr})`);
     }
     
     // Log summary
@@ -242,29 +326,46 @@ export const checkEmergencyNeedsAndDonors = async (targetDateStr, assignments, e
     }
     
     // Match emergency needs with potential donors from same or future shifts
+    // Donors can now be from ANY house (cross-house donations allowed)
     const emergencyOptions = [];
     const shiftOrder = { "1st": 1, "2nd": 2, "3rd": 3 };
     
     for (const need of emergencyNeeds) {
       // Find donors from the same shift OR future shifts (not past shifts)
+      // Now includes donors from ALL houses, not just the same house
       const suitableDonors = availableDonors.filter(donor => {
-        // Same shift is always acceptable
-        if (donor.shift === need.shift) return donor.availableCount > 1;
+        // Don't select the emergency house itself as a donor
+        if (donor.house === need.house) return false;
         
-        // For 1st shift emergency: can use 2nd or 3rd shift caregivers
-        // For 2nd shift emergency: can use 3rd shift caregivers
-        // For 3rd shift emergency: can use 1st or 2nd shift caregivers from NEXT day
-        // (but we handle same-day emergencies, so 3rd shift can't use future shifts from same day)
+        // Same shift is always acceptable (from any house except the emergency house)
+        // Allow donors with at least 1 available caregiver
+        if (donor.shift === need.shift) return donor.availableCount >= 1;
+        
+        // For 1st shift emergency: can use 2nd or 3rd shift caregivers from same day
+        // For 2nd shift emergency: can use 3rd shift caregivers from same day
+        // For 3rd shift emergency: can use same 3rd shift (different houses) OR next day's 1st/2nd shifts
         
         if (need.shift === "1st") {
-          // 1st shift can get donors from 2nd or 3rd shift
-          return (donor.shift === "2nd" || donor.shift === "3rd") && donor.availableCount > 1;
+          // 1st shift can get donors from 2nd or 3rd shift (any house, same day only)
+          return (donor.shift === "2nd" || donor.shift === "3rd") && 
+                 !donor.isNextDay && 
+                 donor.availableCount >= 1;
         } else if (need.shift === "2nd") {
-          // 2nd shift can get donors from 3rd shift
-          return donor.shift === "3rd" && donor.availableCount > 1;
+          // 2nd shift can get donors from 3rd shift (any house, same day only)
+          return donor.shift === "3rd" && 
+                 !donor.isNextDay && 
+                 donor.availableCount >= 1;
         } else if (need.shift === "3rd") {
-          // 3rd shift can get donors from same shift only (different house)
-          return donor.shift === "3rd" && donor.availableCount > 1;
+          // 3rd shift can get donors from:
+          // 1. Same day 3rd shift (different houses)
+          // 2. Next day's 1st shift (because 1st shift starts at 6 AM, right after 3rd shift ends)
+          // 3. Next day's 2nd shift (starts at 2 PM, well after 3rd shift ends)
+          if (donor.shift === "3rd" && !donor.isNextDay) {
+            return donor.availableCount >= 1; // Same day 3rd shift from other houses
+          }
+          if (donor.isNextDay && (donor.shift === "1st" || donor.shift === "2nd")) {
+            return donor.availableCount >= 1; // Next day's 1st or 2nd shift
+          }
         }
         
         return false;
