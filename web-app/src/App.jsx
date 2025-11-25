@@ -29,7 +29,7 @@ import EditNurseOverlay from "./pages/edit_nurse_overlay"; // ✅ added
 import NurseSchedule from "./pages/nurse-schedule";
 import IncidentReports from "./pages/incidentReports";
 import ShiftLogs from "./pages/shift-logs";
-import SummaryVitalsMeds from "./pages/summary-vitals-meds";
+import MedicationManagement from "./pages/medication_management";
 
 // --- ProtectedRoute Component ---
 function ProtectedRoute({ user, children }) {
@@ -186,7 +186,7 @@ export default function App() {
           path="/summary-vitals-meds"
           element={
             <ProtectedRoute user={user}>
-              <SummaryVitalsMeds />
+              <MedicationManagement />
             </ProtectedRoute>
           }
         />
