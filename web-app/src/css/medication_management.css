@@ -1,4 +1,4 @@
-/* Summary of Vitals & Meds Page Styles */
+/* Medication Management Page Styles (renamed from summary-vitals-meds.css) */
 
 .summary-vitals-meds-page {
   min-height: 100vh;
@@ -46,7 +46,7 @@
   margin: 0;
 }
 
-/* Status badges used in Medication Record */
+/* Status badges used in Medication Management */
 .incident-type-badge.completed {
   background: #e6f8ed;
   color: #10753f;
@@ -65,6 +65,67 @@
   border-radius: 16px;
   font-weight: 600;
   text-transform: capitalize;
+}
+
+/* Export overlay (shared style) */
+.export-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.35);
+  z-index: 1200;
+}
+
+.export-dialog {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: 0 10px 40px rgba(2,6,23,0.2);
+  min-width: 320px;
+  max-width: 520px;
+  color: #0f172a;
+}
+
+/* Larger, centered header for export dialogs */
+.export-dialog h3,
+.export-dialog h4 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  text-align: center;
+}
+
+.export-option {
+  background: #1E3A5F; /* site primary blue */
+  color: #fff;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.export-cancel {
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.export-cancel:hover {
+  background: #1E3A5F; /* site primary blue */
+  color: #ffffff;
+  border-color: #1E3A5F;
+}
+
+.table-export-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
 }
 
 /* Responsive Design */

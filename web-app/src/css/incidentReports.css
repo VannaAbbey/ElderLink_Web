@@ -88,6 +88,28 @@
   opacity: 0.9;
   color: white;
 }
+
+/* Apply the same stat-card styles to the Summary (Medication Record) page */
+.summary-vitals-meds-container .stat-card {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2c5f8d 100%);
+  color: white;
+  padding: 1rem 1.5rem;
+  border-radius: 12px;
+  text-align: center;
+  min-width: 120px;
+  box-shadow: 0 4px 12px rgba(30, 58, 95, 0.3);
+}
+.summary-vitals-meds-container .stat-number {
+  font-size: 2rem;
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+  color: white;
+}
+.summary-vitals-meds-container .stat-label {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  color: white;
+}
 .date-filter-container {
   display: flex;
   justify-content: space-between;
@@ -224,6 +246,49 @@
 .incident-reports-container .table-export-btn:hover {
   background: rgba(255, 255, 255, 0.3);
   transform: translateY(-2px);
+}
+
+/* Make the same header styles available to the summary page container */
+.incidents-table-container .table-header {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  align-items: center;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2c5f8d 100%);
+  border-radius: 12px 12px 0 0;
+}
+.incidents-table-container .table-header h2 {
+  color: white;
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+/* Larger, well-spaced export button for the Medication Record page */
+.incidents-table-container .table-export-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  width: 56px;
+  height: 56px;
+  font-size: 1.6rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-left: 12px;
+}
+.incidents-table-container .table-export-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+  transform: translateY(-2px);
+}
+.incidents-table-container .table-export-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .incident-reports-container .table-export-btn:disabled {
   opacity: 0.5;
