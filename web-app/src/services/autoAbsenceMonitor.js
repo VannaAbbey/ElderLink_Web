@@ -24,7 +24,7 @@ const SHIFT_DEFINITIONS = {
 };
 
 // Grace period in minutes after shift start before marking absent
-const GRACE_PERIOD_MINUTES = 15;
+const GRACE_PERIOD_MINUTES = 60;
 
 // 🔧 DEBUG MODE: Set to true to enable immediate testing without waiting for shift times
 // When enabled, uses a much shorter check interval and simulated grace period
@@ -387,6 +387,7 @@ const getScheduledUsers = (assignments, shift, dayName, userType) => {
  * @param {Array} tempReassigns - All temporary reassignments
  * @param {Function} onEmergencyDetected - Callback for emergency coverage detection (caregivers only)
  * @param {Date} testStartTime - Optional test start time for debug mode
+ * @param {Function} logActivity - Optional callback for logging auto-absences
  * @returns {Promise<Object>} Result summary
  */
 export const autoMarkAbsentUsers = async (
@@ -394,7 +395,8 @@ export const autoMarkAbsentUsers = async (
   elderlyAssigns,
   tempReassigns,
   onEmergencyDetected = null,
-  testStartTime = null
+  testStartTime = null,
+  logActivity = null
 ) => {
   try {
     const currentShift = getCurrentShift();
@@ -481,6 +483,22 @@ export const autoMarkAbsentUsers = async (
           caregiverCount++;
           processedUsers.push({ userId, userType: "caregiver" });
           if (VERBOSE_LOGGING) console.log(`✅ Caregiver ${userId} auto-marked absent`);
+          
+          // Log auto-absence if logging callback provided
+          if (logActivity) {
+            logActivity("Caregiver Auto-Marked Absent", {
+              performed_by: "System (Auto-Absence Monitor)",
+              description: `Automatically marked caregiver ${userId} as absent on ${dateStr} (${currentShift} Shift) - no check-in after grace period`,
+              metadata: {
+                caregiver_id: userId,
+                date: dateStr,
+                day: dayName,
+                shift: currentShift,
+                marked_by_type: "automatic",
+                reason: "No check-in after grace period"
+              }
+            });
+          }
         } catch (error) {
           console.error(`❌ Error auto-marking caregiver ${userId}:`, error);
         }
@@ -577,6 +595,22 @@ export const autoMarkAbsentUsers = async (
           nurseCount++;
           processedUsers.push({ userId, userType: "nurse" });
           console.log(`✅ Nurse ${userId} auto-marked absent`);
+          
+          // Log auto-absence if logging callback provided
+          if (logActivity) {
+            logActivity("Nurse Auto-Marked Absent", {
+              performed_by: "System (Auto-Absence Monitor)",
+              description: `Automatically marked nurse ${userId} as absent on ${dateStr} (${currentShift} Shift) - no check-in after grace period`,
+              metadata: {
+                nurse_id: userId,
+                date: dateStr,
+                day: dayName,
+                shift: currentShift,
+                marked_by_type: "automatic",
+                reason: "No check-in after grace period"
+              }
+            });
+          }
         } catch (error) {
           console.error(`❌ Error auto-marking nurse ${userId}:`, error);
         }

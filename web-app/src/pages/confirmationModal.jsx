@@ -2,7 +2,8 @@ export default function ConfirmationModal({
   isOpen, 
   caregiverName, 
   onConfirm, 
-  onCancel 
+  onCancel,
+  message
 }) {
   if (!isOpen) return null;
 
@@ -10,7 +11,7 @@ export default function ConfirmationModal({
     <div className="popup-overlay">
       <div className="popup-content">
         <div className="popup-title">
-          Are you really sure you want to mark <span className="caregiver-name">{caregiverName}</span> as absent?
+          {message || `Are you really sure you want to mark ${caregiverName} as absent?`}
         </div>
         <div className="popup-buttons">
           <button className="popup-btn yes" onClick={onConfirm}>

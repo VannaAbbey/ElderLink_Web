@@ -388,21 +388,32 @@ export const integrateNewCaregiver = async (caregiverId, assignmentData, current
     const caregiverData = { id: caregiverExists.id, ...caregiverExists.data() };
     console.log(`✅ Verified caregiver exists: ${caregiverData.user_fname} ${caregiverData.user_lname}`);
     
-    // Get current schedule version and dates
+    // Get current schedule version and dates (or create defaults if no schedule exists)
     const currentAssignment = currentAssignments.find(a => a.is_current);
+    
+    let version, startDate, endDate;
+    
     if (!currentAssignment) {
-      throw new Error("No current schedule found");
-    }
-    
-    const version = currentAssignment.version;
-    
-    // Dates are nested inside schedule_period object
-    const startDate = currentAssignment.schedule_period?.start_date || currentAssignment.start_date;
-    const endDate = currentAssignment.schedule_period?.end_date || currentAssignment.end_date;
-    
-    if (!startDate || !endDate) {
-      console.error("Current assignment structure:", currentAssignment);
-      throw new Error("Could not find start_date or end_date in current assignment. Please check the assignment structure.");
+      // No existing schedule - create a new one starting today for 6 months
+      console.log("⚠️ No existing schedule found - creating new schedule starting today");
+      version = 1;
+      startDate = Timestamp.fromDate(new Date());
+      const endDateCalc = new Date();
+      endDateCalc.setMonth(endDateCalc.getMonth() + 6); // Default 6 months
+      endDate = Timestamp.fromDate(endDateCalc);
+      console.log(`📅 New schedule period: ${startDate.toDate().toLocaleDateString()} → ${endDate.toDate().toLocaleDateString()}`);
+    } else {
+      // Use existing schedule
+      version = currentAssignment.version;
+      
+      // Dates are nested inside schedule_period object
+      startDate = currentAssignment.schedule_period?.start_date || currentAssignment.start_date;
+      endDate = currentAssignment.schedule_period?.end_date || currentAssignment.end_date;
+      
+      if (!startDate || !endDate) {
+        console.error("Current assignment structure:", currentAssignment);
+        throw new Error("Could not find start_date or end_date in current assignment. Please check the assignment structure.");
+      }
     }
     
     // ⚠️ CRITICAL: Check if this caregiver already has an assignment for this house/shift

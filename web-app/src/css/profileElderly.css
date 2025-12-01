@@ -91,3 +91,73 @@
   margin-right: 22em;
   margin-top: 0.5em;
 }
+/* --- Activity Log Section --- */
+.activity-log-section {
+  width: 100%;
+  max-width: 1200px;
+  margin: 30px auto;
+  padding: 20px;
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 88, 142, 0.3);
+}
+
+.activity-log-section h2 {
+  color: #00588E;
+  margin-bottom: 20px;
+  font-size: 1.5rem;
+  border-bottom: 2px solid #00588E;
+  padding-bottom: 10px;
+}
+
+.activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.activity-item {
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-left: 4px solid #00588E;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.activity-item:hover {
+  background-color: #e9ecef;
+  box-shadow: 0 2px 8px rgba(0, 88, 142, 0.2);
+}
+
+.activity-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 10px;
+}
+
+.activity-admin {
+  font-weight: 600;
+  color: #00588E;
+  font-size: 0.95rem;
+}
+
+.activity-time {
+  color: #6c757d;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.activity-action {
+  margin-bottom: 5px;
+  color: #495057;
+  font-size: 0.9rem;
+}
+
+.activity-details {
+  color: #6c757d;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  padding-left: 10px;
+}

@@ -40,3 +40,239 @@
   border-radius: 0 6px 6px 6px;
   background: #fff;
 }
+
+/* Audit Logs Viewer Styles */
+.audit-logs-container {
+  padding: 30px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.audit-logs-header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.audit-logs-header h2 {
+  color: #00588E;
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.audit-subtitle {
+  color: #6c757d;
+  font-size: 14px;
+}
+
+.audit-filters {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 25px;
+  padding: 20px;
+  background-color: #f8f9fa;
+  border-radius: 10px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.filter-group label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #495057;
+}
+
+.filter-group select,
+.filter-group input {
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.filter-group input.search-input {
+  min-width: 200px;
+}
+
+.refresh-btn {
+  padding: 8px 20px;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background-color 0.3s;
+}
+
+.refresh-btn:hover {
+  background-color: #218838;
+}
+
+.audit-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 20px;
+  border-radius: 10px;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.stat-card:nth-child(2) {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.stat-card:nth-child(3) {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.stat-card:nth-child(4) {
+  background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+}
+
+.stat-number {
+  display: block;
+  font-size: 32px;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+
+.stat-label {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.audit-table-container {
+  overflow-x: auto;
+  background-color: white;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.audit-table thead {
+  background-color: #00588E;
+  color: white;
+}
+
+.audit-table th {
+  padding: 15px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.audit-table tbody tr {
+  border-bottom: 1px solid #e9ecef;
+  transition: background-color 0.2s;
+}
+
+.audit-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+.audit-table td {
+  padding: 12px 15px;
+  font-size: 13px;
+  color: #495057;
+}
+
+.timestamp-cell {
+  white-space: nowrap;
+  color: #6c757d;
+  font-size: 12px;
+}
+
+.user-cell {
+  font-weight: 600;
+  color: #212529;
+}
+
+.admin-cell {
+  color: #28a745;
+  font-weight: 500;
+}
+
+.details-cell {
+  font-size: 12px;
+  color: #6c757d;
+  max-width: 300px;
+}
+
+.details-cell div {
+  margin-bottom: 4px;
+}
+
+.action-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-update {
+  background-color: #cfe2ff;
+  color: #084298;
+}
+
+.badge-logout {
+  background-color: #f8d7da;
+  color: #842029;
+}
+
+.badge-delete {
+  background-color: #f1aeb5;
+  color: #58151c;
+}
+
+.badge-default {
+  background-color: #e2e3e5;
+  color: #41464b;
+}
+
+.user-type-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.badge-caregiver {
+  background-color: #d1e7dd;
+  color: #0f5132;
+}
+
+.badge-nurse {
+  background-color: #cff4fc;
+  color: #055160;
+}
+
+.loading-text,
+.no-logs-text {
+  text-align: center;
+  padding: 40px;
+  color: #6c757d;
+  font-size: 16px;
+}

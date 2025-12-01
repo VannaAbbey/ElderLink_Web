@@ -69,46 +69,48 @@
   gap: 1rem;
 }
 .incident-reports-container .stat-card {
-  background: linear-gradient(135deg, #1e3a5f 0%, #2c5f8d 100%);
-  color: white;
+  background: white;
+  color: #2c3e50;
   padding: 1rem 1.5rem;
   border-radius: 12px;
   text-align: center;
   min-width: 120px;
-  box-shadow: 0 4px 12px rgba(30, 58, 95, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 2px solid #e0e6ed;
 }
 .incident-reports-container .stat-number {
   font-size: 2rem;
   font-weight: bold;
   margin-bottom: 0.25rem;
-  color: white;
+  color: #1e3a5f;
 }
 .incident-reports-container .stat-label {
   font-size: 0.85rem;
   opacity: 0.9;
-  color: white;
+  color: #7f8c8d;
 }
 
 /* Apply the same stat-card styles to the Summary (Medication Record) page */
 .summary-vitals-meds-container .stat-card {
-  background: linear-gradient(135deg, #1e3a5f 0%, #2c5f8d 100%);
-  color: white;
+  background: white;
+  color: #2c3e50;
   padding: 1rem 1.5rem;
   border-radius: 12px;
   text-align: center;
   min-width: 120px;
-  box-shadow: 0 4px 12px rgba(30, 58, 95, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 2px solid #e0e6ed;
 }
 .summary-vitals-meds-container .stat-number {
   font-size: 2rem;
   font-weight: bold;
   margin-bottom: 0.25rem;
-  color: white;
+  color: #1e3a5f;
 }
 .summary-vitals-meds-container .stat-label {
   font-size: 0.85rem;
   opacity: 0.9;
-  color: white;
+  color: #7f8c8d;
 }
 .date-filter-container {
   display: flex;
@@ -356,17 +358,30 @@
   font-size: 1rem;
 }
 .nurses-list {
-  max-width: 200px;
+  max-width: 250px;
 }
 .nurses-names {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.5rem;
 }
 .nurse-name-item {
-  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
   color: #2c3e50;
-  padding: 0.2rem 0;
+  padding: 0.4rem 0.6rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 3px solid #00588E;
+}
+.nurse-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+.nurse-name {
+  font-weight: 500;
 }
 .no-nurses {
   font-size: 0.85rem;
@@ -379,6 +394,316 @@
   color: #2c3e50;
   line-height: 1.4;
 }
+
+/* Status Cell Styling */
+.status-cell {
+  min-width: 220px;
+}
+
+.status-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-ongoing {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeaa7;
+}
+
+.status-resolved {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.status-investigating {
+  background: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
+}
+
+.status-closed {
+  background: #e2e3e5;
+  color: #383d41;
+  border: 1px solid #d6d8db;
+}
+
+.update-status-btn {
+  background: #00588E;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.update-status-btn:hover {
+  background: #004870;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 88, 142, 0.3);
+}
+
+.last-updated-info {
+  font-size: 0.75rem;
+  color: #7f8c8d;
+  font-style: italic;
+}
+
+/* Status Update Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.status-modal {
+  background: white;
+  border-radius: 16px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.status-modal-header {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2c5f8d 100%);
+  color: white;
+  padding: 1.5rem;
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-modal-header h2 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.close-modal-btn-x {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 2rem;
+  cursor: pointer;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background 0.3s ease;
+}
+
+.close-modal-btn-x:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.status-modal-content {
+  padding: 1.5rem;
+}
+
+.incident-summary {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.incident-summary p {
+  margin: 0.5rem 0;
+  color: #2c3e50;
+  font-size: 0.95rem;
+}
+
+.incident-summary strong {
+  color: #1e3a5f;
+  font-weight: 600;
+}
+
+.status-select-group {
+  margin-bottom: 1.5rem;
+}
+
+.status-select-group label {
+  display: block;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+}
+
+.status-select {
+  width: 100%;
+  padding: 0.8rem;
+  border: 2px solid #e0e6ed;
+  border-radius: 8px;
+  font-size: 1rem;
+  color: #2c3e50;
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.3s ease;
+}
+
+.status-select:focus {
+  outline: none;
+  border-color: #1e3a5f;
+}
+
+.update-history {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid #e0e6ed;
+}
+
+.update-history h3 {
+  color: #1e3a5f;
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.history-item {
+  background: #f8f9fa;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border-left: 3px solid #1e3a5f;
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+  gap: 1rem;
+}
+
+.history-admin {
+  font-weight: 600;
+  color: #1e3a5f;
+  font-size: 0.9rem;
+}
+
+.history-change {
+  color: #2c3e50;
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+}
+
+.history-time {
+  color: #7f8c8d;
+  font-size: 0.75rem;
+  font-style: italic;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.status-badge-small {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin: 0 0.2rem;
+}
+
+.status-modal-actions {
+  padding: 1rem 1.5rem;
+  background: #f8f9fa;
+  border-radius: 0 0 16px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+.cancel-btn {
+  padding: 0.7rem 1.5rem;
+  background: white;
+  color: #2c3e50;
+  border: 2px solid #e0e6ed;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.cancel-btn:hover {
+  background: #f8f9fa;
+  border-color: #d0d5dd;
+}
+
+.update-btn {
+  padding: 0.7rem 1.5rem;
+  background: #1e3a5f;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.update-btn:hover {
+  background: #152d47;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(30, 58, 95, 0.3);
+}
+
 @media (max-width: 1024px) {
   .incident-header {
     flex-direction: column;

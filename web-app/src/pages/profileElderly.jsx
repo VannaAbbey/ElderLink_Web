@@ -1,17 +1,21 @@
 // src/pages/profileElderly.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MdArrowBack, MdCake, MdTransgender, MdAccessible, MdHome } from "react-icons/md";
 import { FaHeartbeat, FaUser, FaNotesMedical, FaClipboardList, FaUserSlash } from "react-icons/fa";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { doc, getDoc, updateDoc, arrayUnion, serverTimestamp } from "firebase/firestore";
+import { db, auth } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { AuthContext } from "../contexts/authcontext";
 import "../css/profileElderly.css";
+import "../css/activity-log.css";
 
 
 export default function Profile_Elderly() {
   const { id } = useParams(); // Firestore Document ID from route
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
+  const [currentAdminName, setCurrentAdminName] = useState("");
   const [elder, setElder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showEditOverlay, setShowEditOverlay] = useState(false);
@@ -47,6 +51,53 @@ export default function Profile_Elderly() {
     return date.toISOString().split("T")[0];
   };
 
+  // Fetch admin name for logging
+  useEffect(() => {
+    const fetchAdminName = async () => {
+      try {
+        let currentUser = user;
+        
+        // Fallback to auth.currentUser if AuthContext is null
+        if (!currentUser) {
+          currentUser = auth.currentUser;
+        }
+
+        if (currentUser) {
+          console.log("🔍 Fetching admin name for UID:", currentUser.uid);
+          
+          const userDocRef = doc(db, "users", currentUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          
+          if (userDocSnap.exists()) {
+            const userData = userDocSnap.data();
+            const fullName = `${userData.user_fname || ""} ${userData.user_lname || ""}`.trim();
+            
+            if (fullName) {
+              setCurrentAdminName(fullName);
+              console.log("✅ Admin name set:", fullName);
+            } else {
+              // Fallback to email if name fields are empty
+              setCurrentAdminName(currentUser.email || "Admin User");
+              console.log("⚠️ Using email as fallback:", currentUser.email);
+            }
+          } else {
+            // User document doesn't exist, use email
+            setCurrentAdminName(currentUser.email || "Admin User");
+            console.log("⚠️ User document not found, using email:", currentUser.email);
+          }
+        } else {
+          console.log("❌ No authenticated user found");
+          setCurrentAdminName("Admin User");
+        }
+      } catch (error) {
+        console.error("❌ Error fetching admin name:", error);
+        // Fallback to a default name on error
+        setCurrentAdminName(user?.email || "Admin User");
+      }
+    };
+
+    fetchAdminName();
+  }, [user]);
 
   useEffect(() => {
     const fetchElder = async () => {
@@ -110,6 +161,36 @@ export default function Profile_Elderly() {
       let birthdayValue = formData.elderly_bday;
       if (typeof birthdayValue === "string") birthdayValue = new Date(birthdayValue);
 
+      // Track what changed for logging
+      const changes = [];
+      const oldData = elder;
+      
+      if (formData.elderly_fname !== oldData.elderly_fname) {
+        changes.push(`First Name: "${oldData.elderly_fname}" → "${formData.elderly_fname}"`);
+      }
+      if (formData.elderly_lname !== oldData.elderly_lname) {
+        changes.push(`Last Name: "${oldData.elderly_lname}" → "${formData.elderly_lname}"`);
+      }
+      if (formData.elderly_age !== oldData.elderly_age) {
+        changes.push(`Age: ${oldData.elderly_age} → ${formData.elderly_age}`);
+      }
+      if (formData.elderly_sex !== oldData.elderly_sex) {
+        changes.push(`Sex: "${oldData.elderly_sex}" → "${formData.elderly_sex}"`);
+      }
+      if (formData.elderly_mobilityStatus !== oldData.elderly_mobilityStatus) {
+        changes.push(`Mobility: "${oldData.elderly_mobilityStatus}" → "${formData.elderly_mobilityStatus}"`);
+      }
+      if (formData.elderly_dietNotes !== oldData.elderly_dietNotes) {
+        changes.push(`Diet Notes: "${oldData.elderly_dietNotes}" → "${formData.elderly_dietNotes}"`);
+      }
+      if (formData.elderly_condition !== oldData.elderly_condition) {
+        changes.push(`Condition: "${oldData.elderly_condition}" → "${formData.elderly_condition}"`);
+      }
+      if (selectedImage) {
+        changes.push("Profile picture updated");
+      }
+
+      const changesDetail = changes.length > 0 ? changes.join(", ") : "No changes detected";
 
       await updateDoc(elderRef, {
         elderly_fname: formData.elderly_fname,
@@ -121,6 +202,21 @@ export default function Profile_Elderly() {
         elderly_dietNotes: formData.elderly_dietNotes,
         elderly_condition: formData.elderly_condition,
         elderly_profilePic: uploadedImageUrl,
+        activity_log: arrayUnion({
+          action: "Profile Updated",
+          performed_by: currentAdminName || user?.email || "Admin User",
+          timestamp: new Date(),
+          details: changesDetail
+        }),
+        last_updated_by: currentAdminName || user?.email || "Admin User",
+        last_updated_at: serverTimestamp()
+      });
+
+      console.log("✏️ Elderly profile updated:", {
+        id: elder.id,
+        name: `${formData.elderly_fname} ${formData.elderly_lname}`,
+        changes: changesDetail,
+        by: currentAdminName || user?.email || "Admin User"
       });
 
 
@@ -185,6 +281,31 @@ export default function Profile_Elderly() {
         </div>
       </div>
 
+      {/* --- Activity Log Section --- */}
+      {elder.activity_log && elder.activity_log.length > 0 && (
+        <div className="activity-log-section">
+          <h2>Activity Log</h2>
+          <div className="activity-timeline">
+            {[...elder.activity_log].reverse().map((log, index) => (
+              <div key={index} className="activity-item">
+                <div className="activity-header">
+                  <span className="activity-admin">{log.performed_by || "Unknown Admin"}</span>
+                  <span className="activity-time">
+                    {log.timestamp?.toDate 
+                      ? log.timestamp.toDate().toLocaleString() 
+                      : new Date(log.timestamp).toLocaleString()}
+                  </span>
+                </div>
+                <div className="activity-action">
+                  <strong>{log.action}</strong>
+                </div>
+                <div className="activity-details">{log.details}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
 
       {/* --- Edit Overlay --- */}
       {showEditOverlay && (
@@ -236,13 +357,38 @@ export default function Profile_Elderly() {
 
             <div className="form-group">
               <label>Mobility Status</label>
-              <select name="elderly_mobilityStatus" value={formData.elderly_mobilityStatus} onChange={handleChange}>
+              <select 
+                name="elderly_mobilityStatus" 
+                value={
+                  ["Independent", "Assisted", "Wheelchair-bound", "Bedridden", "Needs Supervision"].includes(formData.elderly_mobilityStatus)
+                    ? formData.elderly_mobilityStatus
+                    : "Custom"
+                }
+                onChange={(e) => {
+                  if (e.target.value !== "Custom") {
+                    handleChange(e);
+                  } else {
+                    setFormData(prev => ({ ...prev, elderly_mobilityStatus: "" }));
+                  }
+                }}
+              >
                 <option>Independent</option>
                 <option>Assisted</option>
                 <option>Wheelchair-bound</option>
                 <option>Bedridden</option>
                 <option>Needs Supervision</option>
+                <option>Custom</option>
               </select>
+              {!["Independent", "Assisted", "Wheelchair-bound", "Bedridden", "Needs Supervision"].includes(formData.elderly_mobilityStatus) && (
+                <input
+                  type="text"
+                  name="elderly_mobilityStatus"
+                  value={formData.elderly_mobilityStatus || ""}
+                  onChange={handleChange}
+                  placeholder="Enter custom mobility status"
+                  style={{ marginTop: "8px" }}
+                />
+              )}
             </div>
 
 

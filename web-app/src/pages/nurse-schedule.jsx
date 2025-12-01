@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from "react";
-import { db } from "../firebase";
-import { onSnapshot, collection, query, where, writeBatch, doc, getDocs, Timestamp } from "firebase/firestore";
+import React, { useState, useEffect, useContext } from "react";
+import { db, auth } from "../firebase";
+import { onSnapshot, collection, query, where, writeBatch, doc, getDocs, Timestamp, addDoc, getDoc } from "firebase/firestore";
 import "../css/schedule.css";
+import "../css/activity-log.css";
+import { AuthContext } from "../contexts/authcontext";
 import Navbar from "./navbar";
 import { NurseScheduleService } from "../services/nurseScheduleService";
 import { markNurseAbsent, getTempReassignments, hasAbsenceForDate, batchCheckAbsencesForDate } from "../services/nurseAbsenceService";
@@ -12,6 +14,10 @@ import CustomAlertModal from "./customAlertModal";
 import NurseEmergencyCoverageModal from "./nurseEmergencyCoverageModal";
 
 export default function NurseSchedule() {
+  const { user } = useContext(AuthContext);
+  const [currentAdminName, setCurrentAdminName] = useState("");
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [showActivityLog, setShowActivityLog] = useState(false);
   const [nurses, setNurses] = useState([]);
   const [houses, setHouses] = useState([]);
   const [elderlyList, setElderlyList] = useState([]);
@@ -27,7 +33,21 @@ export default function NurseSchedule() {
   // Initialize activeDay based on current date
   const getCurrentDayName = () => {
     const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    return days[new Date().getDay()];
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    const currentTime = hours * 60 + minutes;
+    
+    // For 3rd shift between midnight (00:00) and 6 AM (360 minutes),
+    // return the PREVIOUS day since that's when the shift started
+    const currentShift = AutoAbsenceMonitor.getCurrentShift();
+    if (currentShift === "3rd" && currentTime >= 0 && currentTime < 360) {
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return days[yesterday.getDay()];
+    }
+    
+    return days[now.getDay()];
   };
   const [activeDay, setActiveDay] = useState(getCurrentDayName());
   const [notification, setNotification] = useState("");
@@ -71,6 +91,75 @@ export default function NurseSchedule() {
 
   const shiftDefs = NurseScheduleService.SHIFT_DEFS;
   const daysOfWeek = NurseScheduleService.DAYS_OF_WEEK;
+
+  // Fetch admin name for activity logging
+  const [adminFirstName, setAdminFirstName] = useState("");
+  const [adminLastName, setAdminLastName] = useState("");
+  
+  useEffect(() => {
+    const fetchAdminName = async () => {
+      try {
+        let adminName = "Unknown Admin";
+        
+        // Try to get from AuthContext first
+        if (user?.uid) {
+          const userDoc = await getDoc(doc(db, "users", user.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            adminName = `${userData.user_fname || ''} ${userData.user_lname || ''}`.trim();
+            setAdminFirstName(userData.user_fname || "");
+            setAdminLastName(userData.user_lname || "");
+          }
+        }
+        // Fallback to auth.currentUser
+        else if (auth.currentUser?.uid) {
+          const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            adminName = `${userData.user_fname || ''} ${userData.user_lname || ''}`.trim();
+            setAdminFirstName(userData.user_fname || "");
+            setAdminLastName(userData.user_lname || "");
+          }
+        }
+        // Last resort: use email
+        else if (auth.currentUser?.email) {
+          adminName = auth.currentUser.email;
+        }
+        
+        setCurrentAdminName(adminName);
+      } catch (error) {
+        console.error("Error fetching admin name:", error);
+        setCurrentAdminName("System");
+      }
+    };
+    
+    fetchAdminName();
+  }, [user]);
+
+  // Fetch activity logs with real-time listener
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      query(
+        collection(db, "schedule_activity_logs"),
+        where("log_type", "==", "nurse_schedule_management")
+      ),
+      (snapshot) => {
+        const logs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Sort by timestamp descending (most recent first)
+        logs.sort((a, b) => {
+          const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+          const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+          return timeB - timeA;
+        });
+        setActivityLogs(logs);
+      },
+      (error) => {
+        console.error("Error fetching activity logs:", error);
+      }
+    );
+    
+    return () => unsubscribe();
+  }, []);
 
   // ✅ PERFORMANCE FIX: Single effect to load and subscribe to data
   // Combines initial load with real-time listener to avoid duplicate queries
@@ -306,7 +395,8 @@ export default function NurseSchedule() {
         assignments,
         elderlyAssigns: nurseElderlyAssignments,
         tempReassigns: tempReassignments,
-        onEmergencyDetected: null // Nurses don't have emergency coverage feature
+        onEmergencyDetected: null, // Nurses don't have emergency coverage feature
+        logActivity: logNurseScheduleActivity
       }),
       async (result) => {
         console.log(`⚠️ [NURSE] Auto-marked ${result.nurses} nurse(s) absent - data will refresh via listeners`);
@@ -774,6 +864,30 @@ export default function NurseSchedule() {
     return baseAssignments;
   };
 
+  // Activity Logging Function
+  const logNurseScheduleActivity = async (action, details = {}) => {
+    try {
+      const performed_by = details.performed_by || currentAdminName || "Unknown Admin";
+      
+      await addDoc(collection(db, "schedule_activity_logs"), {
+        action,
+        performed_by,
+        timestamp: Timestamp.now(),
+        details: details.description || "",
+        log_type: "nurse_schedule_management",
+        metadata: {
+          ...details.metadata,
+          admin_fname: adminFirstName || undefined,
+          admin_lname: adminLastName || undefined
+        }
+      });
+      
+      console.log(`📋 Activity logged: ${action} by ${performed_by}`);
+    } catch (error) {
+      console.error("Error logging nurse schedule activity:", error);
+    }
+  };
+
   // Handle marking nurse as absent
   const handleMarkAbsent = async (assignmentId, nurseId) => {
     try {
@@ -950,6 +1064,19 @@ export default function NurseSchedule() {
 
             setNotification(`✅ ${nurseFullName} marked as absent. Elderly assignments have been redistributed. You can undo this action if needed.`);
             setTimeout(() => setNotification(""), 7000);
+
+            // Log the manual absence marking
+            await logNurseScheduleActivity("Nurse Marked Absent", {
+              description: `Manually marked nurse ${nurseFullName} as absent on ${dayName}, ${selectedDate.toLocaleDateString()} (${activeShift} Shift)`,
+              metadata: {
+                nurse_id: nurseId,
+                nurse_name: nurseFullName,
+                date: targetDateStr,
+                day: dayName,
+                shift: activeShift,
+                marked_by_type: "manual"
+              }
+            });
 
           } catch (error) {
             console.error("Error marking nurse absent:", error);
@@ -1157,6 +1284,18 @@ export default function NurseSchedule() {
             `Shifts: 1st (${shiftCounts["1st"]}), 2nd (${shiftCounts["2nd"]}), 3rd (${shiftCounts["3rd"]}) nurses. Working: ${minDaily}-${maxDaily}/day, Resting: ${minRest}-${maxRest}/day. All nurses integrated!`
           );
           
+          // Log the schedule generation
+          await logNurseScheduleActivity("Nurse Schedule Generated", {
+            description: `Generated nurse schedule for ${scheduleGeneration.periodDuration} days with ${nurses.length} nurses across ${houses.length} houses`,
+            metadata: {
+              duration_days: scheduleGeneration.periodDuration,
+              nurse_count: nurses.length,
+              house_count: houses.length,
+              shift_distribution: shiftCounts,
+              statistics: { minDaily, maxDaily, minRest, maxRest }
+            }
+          });
+          
         } catch (e) {
           setLoadingModal({ isOpen: false, message: "" });
           showAlert("Error", `Failed to generate schedule: ${e.message}`);
@@ -1328,6 +1467,19 @@ export default function NurseSchedule() {
           "Emergency Coverage Activated"
         );
         
+        // Log the emergency coverage activation
+        await logNurseScheduleActivity("Emergency Coverage Activated", {
+          description: `Activated emergency coverage for ${totalReassignments.length} emergency situation(s) - reassigned nurses to cover absent positions`,
+          metadata: {
+            emergency_count: totalReassignments.length,
+            reassignments: totalReassignments.map(er => ({
+              emergency_shift: er.emergencyShift,
+              donor_shift: er.donorShift,
+              date: er.targetDateStr || formatDateString(selectedDate)
+            }))
+          }
+        });
+        
         // Refresh data
         const selectedDateStr = formatDateString(selectedDate);
         const tempReassigns = await getTempReassignments(selectedDateStr, activeShift);
@@ -1437,6 +1589,30 @@ export default function NurseSchedule() {
                 )}
               </button>
             )}
+            
+            {/* Activity Log Button */}
+            <button
+              onClick={() => setShowActivityLog(!showActivityLog)}
+              className="activity-log-btn"
+              style={{
+                backgroundColor: '#216386',
+                color: 'white',
+                padding: '8px 16px',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                position: 'relative'
+              }}
+              title="View nurse schedule activity history and changes"
+            >
+              📋 Activity Log
+              {activityLogs.length > 0 && (
+                <span className="notification-badge">
+                  {activityLogs.length}
+                </span>
+              )}
+            </button>
           </div>
           
           {viewMode === "edit" && (
@@ -2066,6 +2242,60 @@ export default function NurseSchedule() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Activity Log Section */}
+        {showActivityLog && (
+          <div className="activity-log-section">
+            <h2>Nurse Schedule Activity Log</h2>
+            {activityLogs.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#6c757d', padding: '20px' }}>
+                No activity logs recorded yet.
+              </p>
+            ) : (
+              <div className="activity-timeline">
+                {activityLogs.map((log, index) => {
+                  // Format timestamp
+                  let timestampStr = 'Unknown time';
+                  if (log.timestamp) {
+                    try {
+                      const date = log.timestamp.toDate ? log.timestamp.toDate() : new Date(log.timestamp);
+                      timestampStr = date.toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      });
+                    } catch (e) {
+                      console.error('Error formatting timestamp:', e);
+                    }
+                  }
+
+                  // Display admin name with first and last name if available
+                  let adminDisplay = log.performed_by || 'Unknown';
+                  if (log.metadata?.admin_fname && log.metadata?.admin_lname) {
+                    adminDisplay = `${log.metadata.admin_fname} ${log.metadata.admin_lname}`;
+                  }
+
+                  return (
+                    <div key={log.id || index} className="activity-item">
+                      <div className="activity-header">
+                        <span className="activity-admin">{adminDisplay}</span>
+                        <span className="activity-time">{timestampStr}</span>
+                      </div>
+                      <div className="activity-action">
+                        <strong>{log.action}</strong>
+                      </div>
+                      {log.details && (
+                        <div className="activity-details">{log.details}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </main>

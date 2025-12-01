@@ -156,28 +156,38 @@ export const unmarkAbsent = async (
     tempSnap.docs.forEach((docSnap, index) => {
       const data = docSnap.data();
       
-      // Only delete temp assignments that involve caregivers from THIS house
-      const involvesThisHouse = houseCaregiverIds.has(data.from_user_id) || houseCaregiverIds.has(data.to_user_id);
+      // Enhanced logic to identify temp assignments that should be removed:
+      // 1. Direct involvement: assignments FROM or TO the user being unmarked
+      // 2. House involvement: assignments involving caregivers from the same house/shift
+      // 3. Emergency coverage: assignments with from_user_id="EMERGENCY_ABSENT" that affect this house
+      const directInvolvement = data.from_user_id === userId || data.to_user_id === userId;
+      const houseInvolvement = houseCaregiverIds.has(data.from_user_id) || houseCaregiverIds.has(data.to_user_id);
+      const emergencyCoverageForThisHouse = data.from_user_id === "EMERGENCY_ABSENT" && 
+        (houseCaregiverIds.has(data.to_user_id) || data.original_house_id === houseId);
       
-      if (involvesThisHouse) {
-        console.log(`   📄 Temp Assignment ${index + 1}/${tempSnap.docs.length} (HOUSE ${houseId}):`, {
+      const shouldDelete = directInvolvement || houseInvolvement || emergencyCoverageForThisHouse;
+      
+      if (shouldDelete) {
+        console.log(`   📄 Temp Assignment ${index + 1}/${tempSnap.docs.length} (REMOVING):`, {
           id: docSnap.id,
           shift: data.shift,
           from_user_id: data.from_user_id,
           to_user_id: data.to_user_id,
-          elderly_count: (data.elderly_ids || []).length
+          elderly_count: (data.elderly_ids || []).length,
+          reason: directInvolvement ? "Direct involvement" : 
+                  houseInvolvement ? "House involvement" : 
+                  emergencyCoverageForThisHouse ? "Emergency coverage" : "Unknown"
         });
         
         batch.delete(docSnap.ref);
         deletedCount++;
-        console.log(`   🗑️  Marked for deletion: ${docSnap.id}`);
         
         // Check if emergency coverage
-        if (data.is_emergency === true) {
+        if (data.is_emergency === true || data.from_user_id === "EMERGENCY_ABSENT") {
           emergencyCoverageRemoved = true;
         }
       } else {
-        console.log(`   ⏭️  Skipping temp assignment ${docSnap.id} (different house)`);
+        console.log(`   ⏭️  Skipping temp assignment ${docSnap.id} (no involvement with house ${houseId})`);
       }
     });
 

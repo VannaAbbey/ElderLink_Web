@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { db } from "../firebase";
+import React, { useEffect, useState, useContext } from "react";
+import { db, auth } from "../firebase";
 import {
   collection,
   onSnapshot,
@@ -8,14 +8,19 @@ import {
   getDoc,
   getDocs,
   query,
-  where
+  where,
+  arrayUnion,
+  serverTimestamp
 } from "firebase/firestore";
 import { useLocation, useNavigate } from "react-router-dom";
+import { AuthContext } from "../contexts/authcontext";
 import { processApprovedLeave } from "../services/absenceService";
 import "../css/elderlyManagement.css";
 import "../css/notifications.css";
 
 export default function Notifications({ isOpen, onClose, isModal = false, focusedNotification = null }) {
+  const { user } = useContext(AuthContext);
+  const [currentAdminName, setCurrentAdminName] = useState("");
   const [elderlyRecordRequests, setElderlyRecordRequests] = useState([]);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [userRegistrations, setUserRegistrations] = useState([]);
@@ -49,6 +54,39 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
       setCustomAlert({ show: false, message: "", type: "" });
     }, 4000); // Hide after 4 seconds
   };
+
+  // Fetch admin name for logging
+  useEffect(() => {
+    const fetchAdminName = async () => {
+      try {
+        let currentUser = user;
+        
+        if (!currentUser) {
+          currentUser = auth.currentUser;
+        }
+
+        if (currentUser) {
+          const userDocRef = doc(db, "users", currentUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          
+          if (userDocSnap.exists()) {
+            const userData = userDocSnap.data();
+            const fullName = `${userData.user_fname || ""} ${userData.user_lname || ""}`.trim();
+            setCurrentAdminName(fullName || currentUser.email || "Admin User");
+          } else {
+            setCurrentAdminName(currentUser.email || "Admin User");
+          }
+        } else {
+          setCurrentAdminName("Admin User");
+        }
+      } catch (error) {
+        console.error("Error fetching admin name:", error);
+        setCurrentAdminName(user?.email || "Admin User");
+      }
+    };
+
+    fetchAdminName();
+  }, [user]);
 
   // Fetch houses data once on mount
   useEffect(() => {
@@ -252,29 +290,62 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
 
         // Build update object dynamically based on what fields exist in the request
         const updateFields = {};
+        const changes = [];
         
         // Status-related fields
         if (notifData.elderly_status !== undefined) {
           updateFields.elderly_status = notifData.elderly_status;
+          changes.push(`Status updated to ${notifData.elderly_status}`);
         }
         if (notifData.elderly_deathDate !== undefined) {
           updateFields.elderly_deathDate = notifData.elderly_status === "Deceased" && notifData.elderly_deathDate
             ? notifData.elderly_deathDate
             : null;
+          if (notifData.elderly_status === "Deceased" && notifData.elderly_deathDate) {
+            const deathDate = notifData.elderly_deathDate.toDate ? 
+              notifData.elderly_deathDate.toDate().toLocaleDateString() : 
+              new Date(notifData.elderly_deathDate).toLocaleDateString();
+            changes.push(`Death date: ${deathDate}`);
+          }
         }
         if (notifData.elderly_causeOfDeath !== undefined) {
           updateFields.elderly_causeOfDeath = notifData.elderly_causeOfDeath || "";
+          if (notifData.elderly_causeOfDeath) {
+            changes.push(`Cause of death: ${notifData.elderly_causeOfDeath}`);
+          }
         }
         
         // Diet and medical condition fields
         if (notifData.elderly_dietNotes !== undefined) {
           updateFields.elderly_dietNotes = notifData.elderly_dietNotes;
+          changes.push(`Diet notes updated`);
         }
         if (notifData.elderly_condition !== undefined) {
           updateFields.elderly_condition = notifData.elderly_condition;
+          changes.push(`Medical condition updated`);
         }
         if (notifData.elderly_mobilityStatus !== undefined) {
           updateFields.elderly_mobilityStatus = notifData.elderly_mobilityStatus;
+          changes.push(`Mobility status: ${notifData.elderly_mobilityStatus}`);
+        }
+
+        // Add logging for the changes
+        if (changes.length > 0) {
+          const actionType = notifData.elderly_status === "Deceased" ? "Marked as Deceased" : "Record Updated";
+          updateFields.activity_log = arrayUnion({
+            action: actionType,
+            performed_by: currentAdminName || user?.email || "Admin User",
+            timestamp: new Date(),
+            details: changes.join(", ")
+          });
+          updateFields.last_updated_by = currentAdminName || user?.email || "Admin User";
+          updateFields.last_updated_at = serverTimestamp();
+
+          console.log(`📝 Elderly record ${actionType}:`, {
+            id: notifData.elderly_id,
+            changes: changes.join(", "),
+            by: currentAdminName || user?.email || "Admin User"
+          });
         }
 
         // Update elderly profile with the changed fields
@@ -427,18 +498,33 @@ export default function Notifications({ isOpen, onClose, isModal = false, focuse
 
       const transferData = transferSnap.data();
       
-      // Update elderly location to Infirmary
+      // Update elderly location to Infirmary with logging
       const elderlyRef = doc(db, "elderly", transferData.elderly_id);
       await updateDoc(elderlyRef, {
         elderly_location: "Infirmary",
-        updated_at: new Date()
+        updated_at: new Date(),
+        activity_log: arrayUnion({
+          action: "Transferred to Infirmary",
+          performed_by: currentAdminName || user?.email || "Admin User",
+          timestamp: new Date(),
+          details: `Reason: ${transferData.transfer_reason || "Not specified"}`
+        }),
+        last_updated_by: currentAdminName || user?.email || "Admin User",
+        last_updated_at: serverTimestamp()
       });
 
       // Update transfer status
       await updateDoc(transferRef, {
         transfer_status: "approved",
         approved_at: new Date(),
+        approved_by: currentAdminName || user?.email || "Admin User",
         updated_at: new Date()
+      });
+
+      console.log("🏥 Infirmary transfer approved:", {
+        elderly_id: transferData.elderly_id,
+        elderly_name: transferData.elderly_name,
+        by: currentAdminName || user?.email || "Admin User"
       });
 
       showCustomAlert(`Transfer approved. ${transferData.elderly_name} has been moved to Infirmary.`, "success");

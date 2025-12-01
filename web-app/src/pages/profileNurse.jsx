@@ -7,6 +7,7 @@ import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { processCaregiverResignation } from "../services/resignationService";
+import ConfirmationModal from "./confirmationModal";
 import "../css/profileNurse.css";
 
 export default function ProfileNurse() {
@@ -17,6 +18,8 @@ export default function ProfileNurse() {
   const [showEditOverlay, setShowEditOverlay] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showResignConfirm, setShowResignConfirm] = useState(false); // ✅ added
+  const [showForceLogoutConfirm, setShowForceLogoutConfirm] = useState(false);
+  const [showForceLogoutSuccess, setShowForceLogoutSuccess] = useState(false);
   const [formData, setFormData] = useState({});
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewImage, setPreviewImage] = useState("");
@@ -102,6 +105,28 @@ export default function ProfileNurse() {
       setSelectedImage(null);
     } catch (err) {
       console.error("Update failed:", err);
+    }
+  };
+
+  // ✅ Force Logout
+  const handleForceLogout = async () => {
+    try {
+      const nurseRef = doc(db, "users", nurse.id);
+      
+      // Set force_logout flag to trigger logout on mobile app
+      // Mobile app should listen to this field and logout when it's true
+      await updateDoc(nurseRef, {
+        active_session_token: null,
+        force_logout: true,
+        force_logout_timestamp: new Date(),
+      });
+
+      console.log("✅ Nurse force logged out successfully");
+      setShowForceLogoutConfirm(false);
+      setShowForceLogoutSuccess(true);
+    } catch (err) {
+      console.error("Failed to force logout:", err);
+      alert("Failed to force logout. Please try again.");
     }
   };
 
@@ -201,12 +226,42 @@ const handleMarkAsResigned = async () => {
         </div>
       </div>
 
-      {/* Mark as Resigned Button */}
+      {/* Action Buttons */}
       {nurse.user_activation && (
         <div className="resign-button-container">
-          <button className="resign-btn" onClick={() => setShowResignConfirm(true)}>
-          Mark as Resigned
+          <button className="force-logout-btn" onClick={() => setShowForceLogoutConfirm(true)}>
+            Force Logout
           </button>
+          <button className="resign-btn" onClick={() => setShowResignConfirm(true)}>
+            Mark as Resigned
+          </button>
+        </div>
+      )}
+
+      {/* Force Logout Confirmation */}
+      <ConfirmationModal
+        isOpen={showForceLogoutConfirm}
+        caregiverName={`${nurse.user_fname} ${nurse.user_lname}`}
+        message={`Are you sure you want to force logout ${nurse.user_fname} ${nurse.user_lname}? This will immediately terminate their active session.`}
+        onConfirm={handleForceLogout}
+        onCancel={() => setShowForceLogoutConfirm(false)}
+      />
+
+      {/* Force Logout Success */}
+      {showForceLogoutSuccess && (
+        <div className="overlay">
+          <div className="overlay-content">
+            <h3>✅ Force Logout Successful</h3>
+            <p style={{ marginTop: '10px', color: '#666' }}>
+              {nurse.user_fname} {nurse.user_lname} has been force logged out.
+            </p>
+            <p style={{ marginTop: '10px', color: '#666', fontSize: '14px' }}>
+              They will be automatically logged out from their mobile device when the app detects the logout signal.
+            </p>
+            <div className="overlay-buttons">
+              <button onClick={() => setShowForceLogoutSuccess(false)}>OK</button>
+            </div>
+          </div>
         </div>
       )}
 

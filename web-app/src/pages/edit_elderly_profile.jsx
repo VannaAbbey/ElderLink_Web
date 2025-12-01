@@ -132,11 +132,39 @@ export default function EditElderlyOverlay({ elderId, onClose, onUpdate }) {
 
         <div className="form-group">
           <label>Mobility Status</label>
-          <select name="elderly_mobilityStatus" value={formData.elderly_mobilityStatus} onChange={handleChange}>
+          <select 
+            name="elderly_mobilityStatus" 
+            value={
+              ["Independent", "Assisted", "Wheelchair-bound", "Bedridden", "Needs Supervision", "Needs Assistance"].includes(formData.elderly_mobilityStatus)
+                ? formData.elderly_mobilityStatus
+                : "Custom"
+            }
+            onChange={(e) => {
+              if (e.target.value !== "Custom") {
+                handleChange(e);
+              } else {
+                setFormData(prev => ({ ...prev, elderly_mobilityStatus: "" }));
+              }
+            }}
+          >
             <option>Independent</option>
-            <option>Needs Assistance</option>
+            <option>Assisted</option>
+            <option>Wheelchair-bound</option>
             <option>Bedridden</option>
+            <option>Needs Supervision</option>
+            <option>Needs Assistance</option>
+            <option>Custom</option>
           </select>
+          {!["Independent", "Assisted", "Wheelchair-bound", "Bedridden", "Needs Supervision", "Needs Assistance"].includes(formData.elderly_mobilityStatus) && (
+            <input
+              type="text"
+              name="elderly_mobilityStatus"
+              value={formData.elderly_mobilityStatus || ""}
+              onChange={handleChange}
+              placeholder="Enter custom mobility status"
+              style={{ marginTop: "8px" }}
+            />
+          )}
         </div>
 
         <div className="overlay-buttons">
