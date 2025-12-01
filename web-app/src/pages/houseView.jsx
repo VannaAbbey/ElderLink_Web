@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MdArrowBack } from "react-icons/md";
 import { FaHeartbeat, FaUserSlash, FaUserCircle } from "react-icons/fa";
@@ -10,8 +10,13 @@ import {
   updateDoc,
   query,
   where,
+  getDoc,
+  arrayUnion,
+  serverTimestamp,
+  deleteDoc,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
+import { AuthContext } from "../contexts/authcontext";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import "../css/elderlyManagement.css";
 import EditElderlyOverlay from "./edit_elderly_profile";
@@ -29,6 +34,8 @@ export default function HouseView({ houseId: propHouseId, currentHouse, onEditHo
   const { houseId: paramHouseId } = useParams();
   const houseId = propHouseId || paramHouseId;
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
+  const [currentAdminName, setCurrentAdminName] = useState("");
 
   const [activeTab, setActiveTab] = useState("Alive");
   const [searchTerm, setSearchTerm] = useState("");
@@ -38,6 +45,9 @@ export default function HouseView({ houseId: propHouseId, currentHouse, onEditHo
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [selectedElderly, setSelectedElderly] = useState([]);
   const [reason, setReason] = useState("");
+  const [showDeleteElderlyMode, setShowDeleteElderlyMode] = useState(false);
+  const [selectedForDeletion, setSelectedForDeletion] = useState([]);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [formData, setFormData] = useState({
     elderly_fname: "",
     elderly_lname: "",
@@ -102,6 +112,69 @@ const [editElderlyId, setEditElderlyId] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [infirmaryTransfers, setInfirmaryTransfers] = useState([]);
+
+  // Fetch current admin name
+  useEffect(() => {
+    const fetchAdminName = async () => {
+      console.log("🔍 AuthContext user:", user);
+      
+      if (!user) {
+        console.warn("⚠️ User is NULL - You might not be logged in!");
+        const currentUser = auth.currentUser;
+        console.log("🔍 Firebase Auth currentUser:", currentUser);
+        
+        if (currentUser) {
+          console.log("✅ Found user from Firebase Auth directly");
+          try {
+            const adminDoc = await getDoc(doc(db, "users", currentUser.uid));
+            if (adminDoc.exists()) {
+              const adminData = adminDoc.data();
+              const fullName = `${adminData.user_fname || ""} ${adminData.user_lname || ""}`.trim();
+              
+              if (!fullName) {
+                setCurrentAdminName(currentUser.email || "Admin User");
+                console.log("✅ Using fallback name:", currentUser.email || "Admin User");
+              } else {
+                setCurrentAdminName(fullName);
+                console.log("✅ Admin name loaded:", fullName);
+              }
+            }
+          } catch (error) {
+            console.error("❌ Error fetching admin name:", error);
+            setCurrentAdminName(currentUser.email || "Admin User");
+          }
+        } else {
+          console.error("❌ No user logged in at all!");
+          setCurrentAdminName("Admin User");
+        }
+        return;
+      }
+      
+      try {
+        console.log("🔍 Fetching admin name for user:", user.uid);
+        const adminDoc = await getDoc(doc(db, "users", user.uid));
+        if (adminDoc.exists()) {
+          const adminData = adminDoc.data();
+          const fullName = `${adminData.user_fname || ""} ${adminData.user_lname || ""}`.trim();
+          
+          if (!fullName) {
+            setCurrentAdminName(user.email || "Admin User");
+            console.log("✅ Using fallback name:", user.email || "Admin User");
+          } else {
+            setCurrentAdminName(fullName);
+            console.log("✅ Admin name loaded:", fullName);
+          }
+        } else {
+          console.warn("⚠️ Admin document not found for user:", user.uid);
+          setCurrentAdminName(user.email || "Admin User");
+        }
+      } catch (error) {
+        console.error("❌ Error fetching admin name:", error);
+        setCurrentAdminName(user.email || "Admin User");
+      }
+    };
+    fetchAdminName();
+  }, [user]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -241,11 +314,22 @@ const filteredElderly = elderlyInHouse
         elderly_deathDate: "",
         house_id: houseId,
         user_id: "",
+        // Add audit logging fields
+        created_by: currentAdminName || user?.email || "Admin User",
+        created_at: serverTimestamp(),
+        activity_log: arrayUnion({
+          action: "Created",
+          performed_by: currentAdminName || user?.email || "Admin User",
+          timestamp: new Date(),
+          details: `Elderly profile created in ${houseId}`
+        })
       };
 
       // Save elderly to database first
       const docRef = await addDoc(collection(db, "elderly"), newElderly);
       const newElderlyId = docRef.id;
+      
+      console.log("✅ Elderly profile created by:", currentAdminName || user?.email || "Admin User");
       
       // Refresh elderly list
       const q = await getDocs(collection(db, "elderly"));
@@ -387,6 +471,63 @@ const filteredElderly = elderlyInHouse
     );
   };
 
+  const toggleDeleteSelection = (elderId) => {
+    setSelectedForDeletion((prev) =>
+      prev.includes(elderId)
+        ? prev.filter((id) => id !== elderId)
+        : [...prev, elderId]
+    );
+  };
+
+  const handleDeleteElderlyClick = () => {
+    setShowDeleteElderlyMode(true);
+    setSelectedForDeletion([]);
+  };
+
+  const cancelDeleteMode = () => {
+    setShowDeleteElderlyMode(false);
+    setSelectedForDeletion([]);
+  };
+
+  const confirmDeleteElderly = async () => {
+    if (selectedForDeletion.length === 0) {
+      alert("Please select at least one elderly to delete.");
+      return;
+    }
+
+    try {
+      // Delete all selected elderly with logging
+      for (const elderlyId of selectedForDeletion) {
+        const elderlyDoc = await getDoc(doc(db, "elderly", elderlyId));
+        const elderlyData = elderlyDoc.data();
+        
+        // Log deletion before removing
+        console.log("🗑️ Deleting elderly profile:", {
+          id: elderlyId,
+          name: `${elderlyData?.elderly_fname} ${elderlyData?.elderly_lname}`,
+          deleted_by: currentAdminName || user?.email || "Admin User"
+        });
+        
+        await deleteDoc(doc(db, "elderly", elderlyId));
+      }
+
+      console.log("✅ Deleted", selectedForDeletion.length, "elderly profiles by:", currentAdminName || user?.email || "Admin User");
+      
+      setSuccessMessage(`Successfully deleted ${selectedForDeletion.length} elderly profile(s).`);
+      setShowSuccessModal(true);
+      setShowDeleteConfirmModal(false);
+      setShowDeleteElderlyMode(false);
+      setSelectedForDeletion([]);
+
+      // Refresh elderly list
+      const q = await getDocs(collection(db, "elderly"));
+      setElderlyList(q.docs.map((d) => ({ id: d.id, ...d.data() })));
+    } catch (error) {
+      console.error("Error deleting elderly:", error);
+      alert("Failed to delete elderly profiles. Please try again.");
+    }
+  };
+
   const confirmAllocation = async () => {
     if (!formData.newHouseId) {
       alert("Please select a new house.");
@@ -404,12 +545,32 @@ const filteredElderly = elderlyInHouse
     try {
       const updates = selectedElderly.map(async (elderId) => {
         const elderRef = doc(db, "elderly", elderId);
+        const elderDoc = await getDoc(elderRef);
+        const elderData = elderDoc.data();
+        const oldHouseId = elderData?.house_id;
+        
         await updateDoc(elderRef, {
           house_id: formData.newHouseId,
           allocation_reason: reason,
+          activity_log: arrayUnion({
+            action: "Reallocated",
+            performed_by: currentAdminName || user?.email || "Admin User",
+            timestamp: new Date(),
+            details: `Moved from ${oldHouseId} to ${formData.newHouseId}. Reason: ${reason}`
+          })
+        });
+
+        console.log("🏠 Reallocated elderly:", {
+          id: elderId,
+          name: `${elderData?.elderly_fname} ${elderData?.elderly_lname}`,
+          from: oldHouseId,
+          to: formData.newHouseId,
+          by: currentAdminName || user?.email || "Admin User"
         });
       });
       await Promise.all(updates);
+
+      console.log("✅ Reallocated", selectedElderly.length, "elderly profiles by:", currentAdminName || user?.email || "Admin User");
 
       const q = await getDocs(collection(db, "elderly"));
       setElderlyList(q.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -479,6 +640,13 @@ const filteredElderly = elderlyInHouse
           >
             🗑️ Delete House
           </button>
+          <button
+            className="house-action-btn delete-elderly-btn"
+            onClick={handleDeleteElderlyClick}
+            title="Delete elderly profiles"
+          >
+            🗑️ Delete Elderly
+          </button>
         </div>
       )}
 
@@ -523,6 +691,57 @@ const filteredElderly = elderlyInHouse
         </div>
       )}
 
+      {/* Delete Elderly Mode Banner */}
+      {showDeleteElderlyMode && (
+        <div style={{
+          background: '#FFF3CD',
+          border: '2px solid #FFECB5',
+          borderRadius: '8px',
+          padding: '15px',
+          marginBottom: '15px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <div>
+            <strong style={{ color: '#856404', fontSize: '16px' }}>🗑️ Delete Elderly Mode</strong>
+            <p style={{ color: '#856404', margin: '5px 0 0 0', fontSize: '14px' }}>
+              Select the elderly profiles you want to delete ({selectedForDeletion.length} selected)
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={() => setShowDeleteConfirmModal(true)}
+              disabled={selectedForDeletion.length === 0}
+              style={{
+                background: '#dc3545',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '6px',
+                cursor: selectedForDeletion.length === 0 ? 'not-allowed' : 'pointer',
+                opacity: selectedForDeletion.length === 0 ? 0.5 : 1
+              }}
+            >
+              Delete Selected ({selectedForDeletion.length})
+            </button>
+            <button
+              onClick={cancelDeleteMode}
+              style={{
+                background: '#6c757d',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Elderly Table with Status Tabs */}
       <div className="elderly-table-wrapper" style={{ position: "relative" }}>
         <div className="status-tabs">
@@ -551,6 +770,7 @@ const filteredElderly = elderlyInHouse
           <th className="age-col">Age</th>
           <th className="mobility-col">{houseId === "INFIRMARY" ? "Transfer Reason" : "Mobility Status"}</th>
           {showSelectPanel && <th className="select-col">Select</th>}
+          {showDeleteElderlyMode && <th className="select-col">Delete</th>}
           <th className="action-th">Action</th>
         </tr>
       </thead>
@@ -592,6 +812,18 @@ const filteredElderly = elderlyInHouse
                     type="checkbox"
                     checked={isSelected(elder.id)}
                     onChange={() => toggleSelect(elder.id)}
+                  />
+                </td>
+              )}
+              {showDeleteElderlyMode && (
+                <td
+                  className="select-cell"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedForDeletion.includes(elder.id)}
+                    onChange={() => toggleDeleteSelection(elder.id)}
                   />
                 </td>
               )}
@@ -707,14 +939,52 @@ const filteredElderly = elderlyInHouse
               <label>Mobility Status<span className="required-asterisk">*</span></label>
               <select
                 name="elderly_mobilityStatus"
-                value={formData.elderly_mobilityStatus}
-                onChange={handleChange}
+                value={
+                  ["Independent", "Assisted", "Wheelchair-bound", "Bedridden", "Needs Supervision", "Needs Assistance"].includes(formData.elderly_mobilityStatus)
+                    ? formData.elderly_mobilityStatus
+                    : "Custom"
+                }
+                onChange={(e) => {
+                  if (e.target.value !== "Custom") {
+                    handleChange(e);
+                  } else {
+                    setFormData(prev => ({ ...prev, elderly_mobilityStatus: "" }));
+                  }
+                }}
                 required
               >
+                <option value="">Select mobility status</option>
                 <option>Independent</option>
-                <option>Needs Assistance</option>
+                <option>Assisted</option>
+                <option>Wheelchair-bound</option>
                 <option>Bedridden</option>
+                <option>Needs Supervision</option>
+                <option>Needs Assistance</option>
+                <option>Custom</option>
               </select>
+              {!["Independent", "Assisted", "Wheelchair-bound", "Bedridden", "Needs Supervision", "Needs Assistance"].includes(formData.elderly_mobilityStatus) && formData.elderly_mobilityStatus !== "" && (
+                <input
+                  type="text"
+                  name="elderly_mobilityStatus"
+                  value={formData.elderly_mobilityStatus || ""}
+                  onChange={handleChange}
+                  placeholder="Enter custom mobility status"
+                  style={{ marginTop: "8px" }}
+                  required
+                />
+              )}
+              {formData.elderly_mobilityStatus === "" && (
+                <input
+                  type="text"
+                  name="elderly_mobilityStatus"
+                  value=""
+                  onChange={handleChange}
+                  placeholder="Enter custom mobility status"
+                  style={{ marginTop: "8px" }}
+                  required
+                  autoFocus
+                />
+              )}
             </div>
 
             <div className="form-group">
@@ -920,6 +1190,73 @@ const filteredElderly = elderlyInHouse
             <p className="integration-footer-text">
               If you skip, the new elderly will be included in the next schedule generation.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Elderly Confirmation Modal */}
+      {showDeleteConfirmModal && (
+        <div className="overlay">
+          <div className="overlay-content" style={{ maxWidth: '500px' }}>
+            <span
+              className="overlay-close"
+              onClick={() => setShowDeleteConfirmModal(false)}
+            >
+              ✖
+            </span>
+            <h2 className="overlay-header" style={{ color: '#dc3545' }}>⚠️ Delete Elderly Profiles</h2>
+            
+            <div style={{ padding: '20px 0' }}>
+              <p style={{ fontSize: '16px', marginBottom: '15px' }}>
+                Are you sure you want to delete <strong>{selectedForDeletion.length}</strong> elderly profile(s)?
+              </p>
+              
+              <div style={{ 
+                maxHeight: '200px', 
+                overflowY: 'auto', 
+                background: '#f8f9fa', 
+                padding: '10px', 
+                borderRadius: '6px',
+                marginBottom: '15px'
+              }}>
+                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                  {elderlyList
+                    .filter((e) => selectedForDeletion.includes(e.id))
+                    .map((e) => (
+                      <li key={e.id} style={{ marginBottom: '5px' }}>
+                        {e.elderly_fname} {e.elderly_lname}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+              
+              <div style={{ 
+                background: '#FFF3CD', 
+                border: '1px solid #FFECB5', 
+                borderRadius: '6px', 
+                padding: '12px'
+              }}>
+                <p style={{ fontSize: '13px', color: '#856404', margin: 0 }}>
+                  ⚠️ <strong>Warning:</strong> This action cannot be undone. All elderly profile data will be permanently deleted.
+                </p>
+              </div>
+            </div>
+
+            <div className="overlay-buttons">
+              <button 
+                className="save-btn" 
+                onClick={confirmDeleteElderly}
+                style={{ background: '#dc3545' }}
+              >
+                Delete {selectedForDeletion.length} Profile(s)
+              </button>
+              <button
+                className="cancel-btn"
+                onClick={() => setShowDeleteConfirmModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

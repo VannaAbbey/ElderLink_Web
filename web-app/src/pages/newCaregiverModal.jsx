@@ -15,17 +15,19 @@ export default function NewCaregiverModal({
   daysOfWeek, 
   areWorkDaysConsecutive, 
   onExecute, 
-  onCancel 
+  onCancel,
+  isIntegrating
 }) {
   if (!isOpen) return null;
 
   return (
-    <div className="popup-overlay">
-      <div className="integration-modal">
-        <div className="integration-modal-header">
-          <h3>👥 New Caregiver Integration</h3>
-          <p>Integrate new caregivers into the existing schedule</p>
-        </div>
+    <>
+      <div className="popup-overlay">
+        <div className="integration-modal">
+          <div className="integration-modal-header">
+            <h3>👥 New Caregiver Integration</h3>
+            <p>Integrate new caregivers into the existing schedule</p>
+          </div>
         
         <div className="modal-body">
           {/* Caregiver Selection */}
@@ -163,7 +165,7 @@ export default function NewCaregiverModal({
                     </div>
 
                     <div className="field-group">
-                      <label>Work Days (Select 5 consecutive days):</label>
+                      <label>Work Days (Select specific days - 1 to 7 days):</label>
                       <div className="days-checkboxes">
                         {daysOfWeek.map(day => (
                           <label key={day} className="day-checkbox">
@@ -172,12 +174,10 @@ export default function NewCaregiverModal({
                               checked={manualAssignment.workDays.includes(day)}
                               onChange={(e) => {
                                 if (e.target.checked) {
-                                  if (manualAssignment.workDays.length < 5) {
-                                    setManualAssignment(prev => ({
-                                      ...prev, 
-                                      workDays: [...prev.workDays, day]
-                                    }));
-                                  }
+                                  setManualAssignment(prev => ({
+                                    ...prev, 
+                                    workDays: [...prev.workDays, day]
+                                  }));
                                 } else {
                                   setManualAssignment(prev => ({
                                     ...prev,
@@ -190,15 +190,10 @@ export default function NewCaregiverModal({
                           </label>
                         ))}
                       </div>
-                      <small>Selected: {manualAssignment.workDays.length}/5 days</small>
-                      {manualAssignment.workDays.length === 5 && !areWorkDaysConsecutive(manualAssignment.workDays) && (
-                        <small style={{ color: '#dc3545', display: 'block', marginTop: '4px', fontWeight: 'bold' }}>
-                          ⚠️ Rest days must be consecutive (2 consecutive days off)
-                        </small>
-                      )}
-                      {manualAssignment.workDays.length === 5 && areWorkDaysConsecutive(manualAssignment.workDays) && (
+                      <small>Selected: {manualAssignment.workDays.length} day(s)</small>
+                      {manualAssignment.workDays.length > 0 && (
                         <small style={{ color: '#28a745', display: 'block', marginTop: '4px', fontWeight: 'bold' }}>
-                          ✓ Rest days are consecutive
+                          ✓ Selected days: {manualAssignment.workDays.join(', ')}
                         </small>
                       )}
                     </div>
@@ -213,17 +208,29 @@ export default function NewCaregiverModal({
           <button 
             className="execute-integration-btn" 
             onClick={onExecute}
-            disabled={!selectedNewCaregiver || 
+            disabled={isIntegrating || !selectedNewCaregiver || 
               (integrationMode === 'auto' && !selectedRecommendation) ||
-              (integrationMode === 'manual' && (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length !== 5 || !areWorkDaysConsecutive(manualAssignment.workDays)))}
+              (integrationMode === 'manual' && (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length === 0))}
           >
-            Integrate Caregiver
+            {isIntegrating ? 'Integrating...' : 'Integrate Caregiver'}
           </button>
-          <button className="cancel-integration-btn" onClick={onCancel}>
+          <button className="cancel-integration-btn" onClick={onCancel} disabled={isIntegrating}>
             Cancel
           </button>
         </div>
       </div>
     </div>
+    
+    {/* Loading Modal */}
+    {isIntegrating && (
+      <div className="popup-overlay" style={{ zIndex: 10000 }}>
+        <div className="popup-card">
+          <div className="loading-spinner"></div>
+          <p>Integrating caregiver... Please wait</p>
+          <small style={{ color: '#666', marginTop: '10px' }}>This may take a few moments</small>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

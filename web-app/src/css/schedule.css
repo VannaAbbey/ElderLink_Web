@@ -597,6 +597,17 @@
   text-align: center;
   font-size: 18px;
   color: #333;
+  min-width: 300px;
+}
+
+.popup-card p {
+  margin: 10px 0;
+  font-weight: 500;
+}
+
+.popup-card small {
+  display: block;
+  margin-top: 10px;
 }
 
 /* Spinner */
@@ -608,6 +619,7 @@
   height: 60px;
   animation: spin 1s linear infinite;
   margin: 0 auto 20px auto;
+  display: block;
 }
 
 @keyframes spin {
@@ -2025,7 +2037,8 @@
 .db-maintenance-btn,
 .emergency-coverage-btn,
 .integration-btn,
-.export-pdf-btn {
+.export-pdf-btn,
+.activity-log-btn {
   margin-left: 8px;
 }
 
@@ -2059,6 +2072,12 @@
 .export-pdf-btn {
   background: #007bff !important;
   color: white !important;
+}
+
+.activity-log-btn {
+  background: #216386 !important;
+  color: white !important;
+  position: relative;
 }
 
 /* Elderly List Expansion */

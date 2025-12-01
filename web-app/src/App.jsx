@@ -202,9 +202,6 @@ export default function App() {
           <Route path="/edit_elderly_profile/:id" element={<EditElderlyProfile />} /> {/* ✅ new route */}
                 <Route path="/edit_caregiver_overlay/:id" element={<EditCaregiverOverlay />} /> {/* ✅ added */}
                       <Route path="/edit_nurse_overlay/:id" element={<EditNurseOverlay />} /> {/* ✅ added */}
-                
-
-
 
         {/* Fallback Route */}
         <Route

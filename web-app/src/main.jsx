@@ -32,13 +32,13 @@ import VitalMonitoring from "./pages/vital_monitoring.jsx";
 
 
 ReactDOM.createRoot(document.getElementById("root")).render(
-  <BrowserRouter>
-    {/* 🔐 Session Validator - Monitors for multiple simultaneous logins */}
-    <SessionValidator />
-    
-    <Routes>
-      {/* Default route redirects to login */}
-      <Route path="/" element={<Navigate to="/login" replace />} />
+    <BrowserRouter>
+      {/* 🔐 Session Validator - Monitors for multiple simultaneous logins */}
+      <SessionValidator />
+      
+      <Routes>
+        {/* Default route redirects to login */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
 
       {/* App routes */}
       <Route path="/login" element={<Login />} />
@@ -62,7 +62,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <Route path="/shift-logs" element={<ShiftLogs />} />
       <Route path="/summary-vitals-meds" element={<MedicationManagement />} />
       <Route path="/vital-monitoring" element={<VitalMonitoring />} />
-
     </Routes>
   </BrowserRouter>
 );

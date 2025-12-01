@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { db } from "../firebase";
+import React, { useState, useEffect, useRef, useContext } from "react";
+import { db, auth } from "../firebase";
 import {
   collection,
   getDocs,
@@ -7,10 +7,17 @@ import {
   where,
   onSnapshot,
   writeBatch,
-  doc
+  doc,
+  addDoc,
+  Timestamp,
+  getDoc,
+  arrayUnion,
+  serverTimestamp
 } from "firebase/firestore";
 import "../css/schedule.css";
+import "../css/activity-log.css";
 import Navbar from "./navbar";
+import { AuthContext } from "../contexts/authcontext";
 import * as ScheduleService from "../services/scheduleService";
 import * as NewCaregiverService from "../services/newCaregiverService";
 import * as EmergencyService from "../services/emergencyService";
@@ -36,6 +43,11 @@ import ScheduleCustomizationModal from "./scheduleCustomizationModal";
 
 
 export default function Schedule() {
+  const { user } = useContext(AuthContext);
+  const [currentAdminName, setCurrentAdminName] = useState("");
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [showActivityLog, setShowActivityLog] = useState(false);
+  
   const [caregivers, setCaregivers] = useState([]);
   const [houses, setHouses] = useState([]);
   const [elderlyList, setElderlyList] = useState([]);
@@ -80,6 +92,7 @@ export default function Schedule() {
   });
   const [systemRecommendations, setSystemRecommendations] = useState([]);
   const [selectedRecommendation, setSelectedRecommendation] = useState(null);
+  const [isIntegrating, setIsIntegrating] = useState(false); // Loading state for integration
   
   // State for tracking which caregiver's elderly list is expanded
   const [expandedElderlyLists, setExpandedElderlyLists] = useState(new Set());
@@ -88,7 +101,21 @@ export default function Schedule() {
   // Initialize activeDay based on current date
   const getCurrentDayName = () => {
     const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    return days[new Date().getDay()];
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    const currentTime = hours * 60 + minutes;
+    
+    // For 3rd shift between midnight (00:00) and 6 AM (360 minutes),
+    // return the PREVIOUS day since that's when the shift started
+    const currentShift = AutoAbsenceMonitor.getCurrentShift();
+    if (currentShift === "3rd" && currentTime >= 0 && currentTime < 360) {
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return days[yesterday.getDay()];
+    }
+    
+    return days[now.getDay()];
   };
   const [activeDay, setActiveDay] = useState(getCurrentDayName());
   // ========== END DAYS OF WEEK TABS SECTION ==========
@@ -219,6 +246,66 @@ export default function Schedule() {
     setActiveShift(shift);
     setShowSearchResults(false);
   };
+
+  // Fetch admin name for logging
+  const [adminFirstName, setAdminFirstName] = useState("");
+  const [adminLastName, setAdminLastName] = useState("");
+  
+  useEffect(() => {
+    const fetchAdminName = async () => {
+      try {
+        let currentUser = user;
+        
+        if (!currentUser) {
+          currentUser = auth.currentUser;
+        }
+
+        if (currentUser) {
+          const userDocRef = doc(db, "users", currentUser.uid);
+          const userDocSnap = await getDoc(userDocRef);
+          
+          if (userDocSnap.exists()) {
+            const userData = userDocSnap.data();
+            const fullName = `${userData.user_fname || ""} ${userData.user_lname || ""}`.trim();
+            setCurrentAdminName(fullName || currentUser.email || "Admin User");
+            setAdminFirstName(userData.user_fname || "");
+            setAdminLastName(userData.user_lname || "");
+          } else {
+            setCurrentAdminName(currentUser.email || "Admin User");
+          }
+        } else {
+          setCurrentAdminName("System");
+        }
+      } catch (error) {
+        console.error("Error fetching admin name:", error);
+        setCurrentAdminName(user?.email || "System");
+      }
+    };
+
+    fetchAdminName();
+  }, [user]);
+
+  // Fetch activity logs for schedule
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      query(
+        collection(db, "schedule_activity_logs"),
+        where("log_type", "==", "schedule_management")
+      ),
+      (snapshot) => {
+        const logs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        // Sort by timestamp, most recent first
+        logs.sort((a, b) => {
+          const timeA = a.timestamp?.toDate?.() || new Date(a.timestamp);
+          const timeB = b.timestamp?.toDate?.() || new Date(b.timestamp);
+          return timeB - timeA;
+        });
+        setActivityLogs(logs);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
 
 
   useEffect(() => {
@@ -487,17 +574,16 @@ export default function Schedule() {
   useEffect(() => {
     // Handle emergency coverage detection
     const handleEmergencyDetected = (emergencyCheck) => {
-      console.log(`\n%c🚨🚨🚨 EMERGENCY COVERAGE TRIGGERED! 🚨🚨🚨`, 'color: #FF0000; font-weight: bold; font-size: 18px; background: #FFF3CD; padding: 10px;');
+      console.log(`\n%c🚨🚨🚨 EMERGENCY COVERAGE DETECTED! 🚨🚨🚨`, 'color: #FF0000; font-weight: bold; font-size: 18px; background: #FFF3CD; padding: 10px;');
       console.log(`%c${emergencyCheck.emergencyCount} house/shift(s) with ZERO coverage!`, 'color: #FF6B6B; font-weight: bold; font-size: 16px');
       
-      // Set emergency options and show modal
+      // Update emergency count badge (but don't auto-show modal)
       setEmergencyOptions(emergencyCheck.emergencyOptions);
       setEmergencyCount(emergencyCheck.emergencyCount); // Update badge count
-      setShowEmergencyModal(true);
       
-      // Show alert to admin
+      // Just show notification alert (no automatic modal)
       showAlert(
-        `🚨 EMERGENCY: ${emergencyCheck.emergencyCount} house/shift(s) have NO caregivers available! Please assign emergency coverage immediately.`,
+        `🚨 EMERGENCY: ${emergencyCheck.emergencyCount} house/shift(s) have NO caregivers available! Please click the "Emergency Coverage" button to assign coverage.`,
         `🚨 Emergency Coverage Required`
       );
     };
@@ -569,7 +655,8 @@ export default function Schedule() {
         assignments,
         elderlyAssigns,
         tempReassigns,
-        onEmergencyDetected: handleEmergencyDetected
+        onEmergencyDetected: handleEmergencyDetected,
+        logActivity: logScheduleActivity
       }),
       async (result) => {
         console.log(`⚠️ Auto-marked ${result.processed} user(s) absent - real-time listeners will update UI automatically`);
@@ -885,6 +972,27 @@ export default function Schedule() {
     }
   };
 
+  // Activity logging function
+  const logScheduleActivity = async (action, details = {}) => {
+    try {
+      await addDoc(collection(db, "schedule_activity_logs"), {
+        action: action,
+        performed_by: details.performed_by || currentAdminName || user?.email || "System",
+        timestamp: Timestamp.now(),
+        details: details.description || "",
+        log_type: "schedule_management",
+        metadata: {
+          ...details.metadata,
+          admin_fname: adminFirstName || undefined,
+          admin_lname: adminLastName || undefined
+        }
+      });
+      console.log(`📝 Logged activity: ${action}`);
+    } catch (error) {
+      console.error("Error logging schedule activity:", error);
+    }
+  };
+
   // Schedule generation function - now uses API service
   const handleScheduleGeneration = async (months, customization = null) => {
     try {
@@ -913,6 +1021,19 @@ export default function Schedule() {
           endDate.setMinutes(endDate.getMinutes() + parseInt(debugMinutes));
           console.log(`🔧 DEBUG: Schedule should expire at: ${endDate.toLocaleString()}`);
         }
+        
+        // Log schedule generation activity
+        await logScheduleActivity("Schedule Generated", {
+          performed_by: currentAdminName || user?.email || "Admin User",
+          description: `Generated ${durationInMonths}-month caregiver schedule (Version ${result.version})${customization ? ' with custom settings' : ''}`,
+          metadata: {
+            duration_months: durationInMonths,
+            version: result.version,
+            caregivers_count: caregivers.length,
+            houses_count: houses.length,
+            has_customization: !!customization
+          }
+        });
         
         setCurrentVersion(result.version);
         // Refresh data after generation
@@ -1052,6 +1173,23 @@ export default function Schedule() {
       if (result.success) {
         if (result.emergencyReassignments?.length > 0) {
           const emergencyCount = result.emergencyReassignments.length;
+          
+          // Log emergency coverage activity
+          await logScheduleActivity("Emergency Coverage Activated", {
+            performed_by: currentAdminName || user?.email || "Admin User",
+            description: `Activated emergency coverage for ${emergencyCount} emergency situation(s) on ${selectedDateStr}`,
+            metadata: {
+              date: selectedDateStr,
+              emergencies_resolved: emergencyCount,
+              reassignments: result.emergencyReassignments.map(er => ({
+                emergency_house: er.emergencyHouse,
+                emergency_shift: er.emergencyShift,
+                donor_house: er.donorHouse,
+                caregiver_assigned: er.caregiverName
+              }))
+            }
+          });
+          
           showAlert(`🚨 Emergency coverage activated!\n\n${emergencyCount} emergency reassignment(s) made:\n${result.emergencyReassignments.map(er => `• ${er.emergencyHouse} ${er.emergencyShift} covered by caregiver from ${er.donorHouse}`).join('\n')}`, "Emergency Coverage Activated");
           
           // Refresh data to show changes
@@ -1085,14 +1223,13 @@ export default function Schedule() {
               if (emergencyCheck.hasEmergency) {
                 console.log(`🆘 Found ${emergencyCheck.emergencyCount} more emergencies!`);
                 
-                // Re-open modal with remaining emergencies
+                // Update emergency data (but don't auto-show modal again)
                 setEmergencyOptions(emergencyCheck.emergencyOptions);
                 setEmergencyCount(emergencyCheck.emergencyCount); // Update badge count
                 setSelectedDonorChoices({});
-                setShowEmergencyModal(true);
                 
                 showAlert(
-                  `✅ First emergency resolved!\n\n🚨 However, ${emergencyCheck.emergencyCount} more emergency situation${emergencyCheck.emergencyCount > 1 ? 's remain' : ' remains'}. Please assign coverage.`,
+                  `✅ First emergency resolved!\n\n🚨 However, ${emergencyCheck.emergencyCount} more emergency situation${emergencyCheck.emergencyCount > 1 ? 's remain' : ' remains'}. Please click "Emergency Coverage" button again to assign remaining coverage.`,
                   "More Emergencies Found"
                 );
               } else {
@@ -1168,13 +1305,22 @@ export default function Schedule() {
       showAlert("Please select a caregiver first.", "No Caregiver Selected");
       return;
     }
+    
+    // Prevent double submission
+    if (isIntegrating) {
+      console.log("⚠️ Integration already in progress, ignoring duplicate request");
+      return;
+    }
 
     try {
+      setIsIntegrating(true); // Start loading
+      
       let assignmentData;
       
       if (integrationMode === 'auto') {
         if (!selectedRecommendation) {
           showAlert("Please select a system recommendation first.", "No Recommendation Selected");
+          setIsIntegrating(false);
           return;
         }
         // Use the selected recommendation
@@ -1182,12 +1328,14 @@ export default function Schedule() {
       } else if (integrationMode === 'manual') {
         // Validate manual assignment
         if (!manualAssignment.house || !manualAssignment.shift || manualAssignment.workDays.length === 0) {
-          showAlert("Please complete all manual assignment fields.", "Incomplete Assignment");
+          showAlert("Please complete all manual assignment fields (house, shift, and at least 1 work day).", "Incomplete Assignment");
+          setIsIntegrating(false);
           return;
         }
         assignmentData = manualAssignment;
       } else {
         showAlert("Please select assignment options.", "No Assignment Data");
+        setIsIntegrating(false);
         return;
       }
 
@@ -1196,23 +1344,35 @@ export default function Schedule() {
       
       if (result.success) {
         console.log(`✅ Integration successful: ${result.elderlyAssigned} elderly assigned to new caregiver, ${result.totalElderlyRedistributed} total redistributed`);
-      console.log(`%c🎉 INTEGRATION COMPLETED SUCCESSFULLY!`, 'color: green; font-size: 16px; font-weight: bold;');
-      console.log(`%cNew caregiver assignments: ${result.elderlyAssigned}`, 'color: green; font-weight: bold;');
-      console.log(`%cTotal redistributed: ${result.totalElderlyRedistributed}`, 'color: blue; font-weight: bold;');
+        console.log(`%c🎉 INTEGRATION COMPLETED SUCCESSFULLY!`, 'color: green; font-size: 16px; font-weight: bold;');
+        console.log(`%cNew caregiver assignments: ${result.elderlyAssigned}`, 'color: green; font-weight: bold;');
+        console.log(`%cTotal redistributed: ${result.totalElderlyRedistributed}`, 'color: blue; font-weight: bold;');
         
-        // Force a complete data refresh with proper timing
+        // Log new caregiver integration activity
+        const newCaregiverInfo = caregivers.find(c => c.user_id === selectedNewCaregiver);
+        await logScheduleActivity("Caregiver Added to Schedule", {
+          performed_by: currentAdminName || user?.email || "Admin User",
+          description: `Integrated ${newCaregiverInfo?.user_fname || 'New'} ${newCaregiverInfo?.user_lname || 'Caregiver'} into schedule (${assignmentData.house}, ${assignmentData.shift} Shift, ${assignmentData.workDays.join(', ')})`,
+          metadata: {
+            caregiver_id: selectedNewCaregiver,
+            caregiver_name: `${newCaregiverInfo?.user_fname} ${newCaregiverInfo?.user_lname}`,
+            house: assignmentData.house,
+            shift: assignmentData.shift,
+            work_days: assignmentData.workDays,
+            elderly_assigned: result.elderlyAssigned,
+            total_redistributed: result.totalElderlyRedistributed,
+            integration_mode: integrationMode
+          }
+        });
+        
+        // Optimized data refresh - run in parallel for faster loading
         console.log("🔄 Refreshing all schedule data after integration...");
         
-        // Wait a bit for database operations to fully complete
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Refresh all data including caregivers list FIRST
-        await loadStaticData(); // This will refresh the caregivers list so names show properly
-        await loadAllAssignments();
-        await loadAllElderlyAssigns();
-        
-        // Additional delay to ensure UI state is fully updated
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await Promise.all([
+          loadStaticData(),
+          loadAllAssignments(),
+          loadAllElderlyAssigns()
+        ]);
         
         console.log("✅ Data refresh completed after caregiver integration");
         
@@ -1233,6 +1393,8 @@ export default function Schedule() {
     } catch (error) {
       console.error("Error integrating new caregiver:", error);
       showAlert("Failed to integrate caregiver. Please try again.", "Error");
+    } finally {
+      setIsIntegrating(false); // Stop loading
     }
   };
 
@@ -1313,6 +1475,22 @@ export default function Schedule() {
         await loadAllAssignments();
         await loadAllElderlyAssigns();
         await loadTempReassigns();
+        
+        // Log absence marking activity
+        const caregiverInfo = caregivers.find(c => c.user_id === pendingAbsentAssignment.userId);
+        await logScheduleActivity("Caregiver Marked Absent", {
+          performed_by: currentAdminName || user?.email || "Admin User",
+          description: `Marked ${caregiverInfo?.user_fname || 'Caregiver'} ${caregiverInfo?.user_lname || ''} as absent on ${dayName}, ${selectedDateStr} (${pendingAbsentAssignment.shift} Shift, ${pendingAbsentAssignment.houseId})`,
+          metadata: {
+            caregiver_id: pendingAbsentAssignment.userId,
+            caregiver_name: `${caregiverInfo?.user_fname} ${caregiverInfo?.user_lname}`,
+            date: selectedDateStr,
+            day: dayName,
+            shift: pendingAbsentAssignment.shift,
+            house_id: pendingAbsentAssignment.houseId,
+            marked_by_type: "manual"
+          }
+        });
         
         // Check if emergency coverage is needed and notify admin (but don't auto-show modal)
         if (result.emergencyCheck && result.emergencyCheck.hasEmergency) {
@@ -1397,15 +1575,46 @@ export default function Schedule() {
         await loadAllElderlyAssigns();
         await loadTempReassigns();
         
+        // Force refresh emergency coverage count to reflect the new state
+        console.log(`🔄 Refreshing emergency coverage status after undo...`);
+        const selectedDateStr = formatDateString(selectedDate);
+        try {
+          const emergencyCheck = await EmergencyService.checkEmergencyNeedsAndDonors(
+            selectedDateStr,
+            assignments,
+            elderlyAssigns,
+            tempReassigns
+          );
+          setEmergencyCount(emergencyCheck.emergencyCount || 0);
+          console.log(`✅ Emergency count updated: ${emergencyCheck.emergencyCount || 0}`);
+        } catch (emerError) {
+          console.warn("Warning: Could not refresh emergency count after undo:", emerError);
+          setEmergencyCount(0); // Reset to 0 on error
+        }
+        
         // Success - real-time listener will automatically update absences array
-        console.log(`\n%c✅ UNDO COMPLETE - Assignments reloaded successfully`, 'color: #00FF00; font-weight: bold; font-size: 14px');
+        console.log(`\n%c✅ UNDO COMPLETE - All data refreshed successfully`, 'color: #00FF00; font-weight: bold; font-size: 14px');
 
-        // Re-enable emergency detection AFTER data is reloaded
+        // Re-enable emergency detection AFTER data is reloaded and emergency count is refreshed
         // This allows the emergency check to run with fresh data
         setTimeout(() => {
           undoInProgress.current = false;
           console.log('🔓 Undo operation complete - emergency detection resumed');
-        }, 500);
+        }, 1000);
+
+        // Log the undo action
+        await logScheduleActivity("Caregiver Absence Unmarked (UNDO)", {
+          description: `Unmarked caregiver absence for ${userId} on ${targetDateStr} (${shift} Shift) - restored original assignments`,
+          metadata: {
+            caregiver_id: userId,
+            date: targetDateStr,
+            shift: shift,
+            house_id: houseId,
+            deleted_temp_assignments: result.deletedTempAssignments,
+            emergency_coverage_removed: result.emergencyCoverageRemoved,
+            still_absent_count: result.stillAbsentCount
+          }
+        });
 
         // Now show the success message
         showAlert(message, "Absence Unmarked");
@@ -1818,15 +2027,24 @@ export default function Schedule() {
         <button 
           onClick={handleNewCaregiverIntegration} 
           className="integration-btn"
-          disabled={!scheduleInfo}
           title="Integrate newly registered caregivers into the current schedule"
         >
           👥 Add Caregiver
-          {scheduleInfo && unassignedCount > 0 && (
+          {unassignedCount > 0 && (
             <span className="notification-badge">{unassignedCount}</span>
           )}
         </button>
         <button onClick={handleExportPDF} className="export-pdf-btn" disabled={!scheduleInfo} title="Export the current schedule to PDF for printing or sharing">📄 Download Schedule</button>
+        <button 
+          onClick={() => setShowActivityLog(!showActivityLog)} 
+          className="activity-log-btn"
+          title="View schedule activity history and changes"
+        >
+          📋 Activity Log
+          {activityLogs.length > 0 && (
+            <span className="notification-badge">{activityLogs.length}</span>
+          )}
+        </button>
       </div>
 
       {/* Search Bar */}
@@ -2121,6 +2339,54 @@ export default function Schedule() {
             })}
           </tbody>
         </table>
+
+        {/* Activity Log Section */}
+        {showActivityLog && (
+          <div className="activity-log-section">
+            <h2>Schedule Activity Log</h2>
+            {activityLogs.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#6c757d', padding: '20px' }}>
+                No activity logs recorded yet.
+              </p>
+            ) : (
+              <div className="activity-timeline">
+                {activityLogs.map((log, index) => {
+                  // Format timestamp
+                  let timestampStr = 'Unknown time';
+                  if (log.timestamp) {
+                    try {
+                      const date = log.timestamp.toDate ? log.timestamp.toDate() : new Date(log.timestamp);
+                      timestampStr = date.toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      });
+                    } catch (e) {
+                      console.error('Error formatting timestamp:', e);
+                    }
+                  }
+
+                  return (
+                    <div key={log.id || index} className="activity-item">
+                      <div className="activity-header">
+                        <span className="activity-admin">{log.performed_by || 'Unknown'}</span>
+                        <span className="activity-time">{timestampStr}</span>
+                      </div>
+                      <div className="activity-action">
+                        <strong>{log.action}</strong>
+                      </div>
+                      {log.details && (
+                        <div className="activity-details">{log.details}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       </main>
 
@@ -2162,6 +2428,7 @@ export default function Schedule() {
         areWorkDaysConsecutive={(workDays) => areWorkDaysConsecutive(workDays, daysOfWeek)}
         onExecute={executeNewCaregiverIntegration}
         onCancel={cancelNewCaregiverIntegration}
+        isIntegrating={isIntegrating}
       />
 
       {/* Custom Alert Modal */}

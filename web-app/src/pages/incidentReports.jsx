@@ -1,24 +1,48 @@
 // src/pages/incidentReports.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import { useNavigate } from "react-router-dom";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
+import { AuthContext } from "../contexts/authcontext";
 import {
   collection,
   onSnapshot,
   query,
   orderBy,
   doc,
-  getDoc
+  getDoc,
+  updateDoc,
+  arrayUnion,
+  serverTimestamp
 } from "firebase/firestore";
 import Navbar from "./navbar";
+import CustomAlertModal from "./customAlertModal";
 import "../css/incidentReports.css";
 
 export default function IncidentReports() {
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
   const [incidents, setIncidents] = useState([]);
   const [filteredIncidents, setFilteredIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAllIncidents, setShowAllIncidents] = useState(false);
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState(null);
+  const [newStatus, setNewStatus] = useState("");
+  const [currentAdminName, setCurrentAdminName] = useState("");
+  const [showCustomAlert, setShowCustomAlert] = useState(false);
+  const [customAlertMessage, setCustomAlertMessage] = useState("");
+  const [customAlertTitle, setCustomAlertTitle] = useState("");
+  
+  // Custom alert function
+  const showAlert = (message, title = "Alert") => {
+    setCustomAlertMessage(message);
+    setCustomAlertTitle(title);
+    setShowCustomAlert(true);
+  };
+
+  const closeAlert = () => {
+    setShowCustomAlert(false);
+  };
   
   // Set today's date as default
   const getTodayDate = () => {
@@ -31,6 +55,79 @@ export default function IncidentReports() {
   // Store user and elderly data for quick lookup
   const [usersData, setUsersData] = useState({});
   const [elderlyData, setElderlyData] = useState({});
+
+  // Fetch current admin name
+  useEffect(() => {
+    const fetchAdminName = async () => {
+      console.log("🔍 AuthContext user:", user);
+      
+      if (!user) {
+        console.warn("⚠️ User is NULL - You might not be logged in!");
+        // Try to get user from Firebase Auth directly as backup
+        const currentUser = auth.currentUser;
+        console.log("🔍 Firebase Auth currentUser:", currentUser);
+        
+        if (currentUser) {
+          console.log("✅ Found user from Firebase Auth directly");
+          try {
+            const adminDoc = await getDoc(doc(db, "users", currentUser.uid));
+            if (adminDoc.exists()) {
+              const adminData = adminDoc.data();
+              console.log("📋 Admin data from Firestore:", adminData);
+              const fullName = `${adminData.user_fname || ""} ${adminData.user_lname || ""}`.trim();
+              
+              if (!fullName) {
+                setCurrentAdminName(currentUser.email || "Admin User");
+                console.log("✅ Using fallback name:", currentUser.email || "Admin User");
+              } else {
+                setCurrentAdminName(fullName);
+                console.log("✅ Admin name loaded:", fullName);
+              }
+            }
+          } catch (error) {
+            console.error("❌ Error fetching admin name:", error);
+            setCurrentAdminName(currentUser.email || "Admin User");
+          }
+        } else {
+          console.error("❌ No user logged in at all!");
+          setCurrentAdminName("Admin User");
+        }
+        return;
+      }
+      
+      try {
+        console.log("🔍 Fetching admin name for user:", user.uid);
+        const adminDoc = await getDoc(doc(db, "users", user.uid));
+        if (adminDoc.exists()) {
+          const adminData = adminDoc.data();
+          console.log("📋 Admin data from Firestore:", adminData);
+          console.log("👤 First name:", adminData.user_fname);
+          console.log("👤 Last name:", adminData.user_lname);
+          
+          const fullName = `${adminData.user_fname || ""} ${adminData.user_lname || ""}`.trim();
+          
+          if (!fullName) {
+            console.error("⚠️ Admin name is empty! Check if user_fname and user_lname exist in Firestore");
+            // Set a fallback name so updates can still work
+            setCurrentAdminName(user.email || "Admin User");
+            console.log("✅ Using fallback name:", user.email || "Admin User");
+          } else {
+            setCurrentAdminName(fullName);
+            console.log("✅ Admin name loaded:", fullName);
+          }
+        } else {
+          console.warn("⚠️ Admin document not found for user:", user.uid);
+          // Set fallback name
+          setCurrentAdminName(user.email || "Admin User");
+        }
+      } catch (error) {
+        console.error("❌ Error fetching admin name:", error);
+        // Set fallback name on error
+        setCurrentAdminName(user.email || "Admin User");
+      }
+    };
+    fetchAdminName();
+  }, [user]);
 
   // Fetch all incidents in real-time
   useEffect(() => {
@@ -153,10 +250,130 @@ export default function IncidentReports() {
     setSelectedDate(""); // Clear the selected date when showing all
   };
 
+  // Open status update modal
+  const handleOpenStatusModal = (incident) => {
+    setSelectedIncident(incident);
+    setNewStatus(incident.incident_status || "Ongoing");
+    setShowStatusModal(true);
+  };
+
+  // Close status update modal
+  const handleCloseStatusModal = () => {
+    setShowStatusModal(false);
+    setSelectedIncident(null);
+    setNewStatus("");
+  };
+
+  // Update incident status
+  const handleUpdateStatus = async () => {
+    if (!selectedIncident || !newStatus) {
+      showAlert("Unable to update status. Please try again.", "Error");
+      return;
+    }
+
+    console.log("📝 Current admin name value:", currentAdminName);
+    console.log("📝 Admin name length:", currentAdminName.length);
+    console.log("📝 User object:", user);
+
+    // Ensure admin name is loaded (should be instant, but check just in case)
+    if (!currentAdminName || currentAdminName.trim() === "") {
+      console.error("⚠️ Admin name not loaded yet. Current value:", currentAdminName);
+      // Use email as fallback if name is not available
+      const fallbackName = user?.email || "Admin User";
+      console.log("📝 Using fallback name:", fallbackName);
+      
+      try {
+        const incidentRef = doc(db, "incident_report", selectedIncident.id);
+        const oldStatus = selectedIncident.incident_status || "Ongoing";
+
+        // Create update log entry with fallback name
+        // Note: Use new Date() instead of serverTimestamp() inside arrayUnion
+        const updateLog = {
+          updatedBy: fallbackName,
+          updatedAt: new Date(),
+          oldStatus: oldStatus,
+          newStatus: newStatus
+        };
+
+        // Update the incident document
+        await updateDoc(incidentRef, {
+          incident_status: newStatus,
+          status_updates: arrayUnion(updateLog),
+          last_updated_by: fallbackName,
+          last_updated_at: serverTimestamp()
+        });
+
+        console.log("✅ Incident status updated successfully with fallback name");
+        handleCloseStatusModal();
+        return;
+      } catch (error) {
+        console.error("❌ Error updating incident status:", error);
+        showAlert("Failed to update status: " + error.message, "Error");
+        return;
+      }
+    }
+
+    console.log("📝 Updating status by:", currentAdminName);
+
+    try {
+      const incidentRef = doc(db, "incident_report", selectedIncident.id);
+      const oldStatus = selectedIncident.incident_status || "Ongoing";
+
+      // Create update log entry
+      // Note: Use new Date() instead of serverTimestamp() inside arrayUnion
+      const updateLog = {
+        updatedBy: currentAdminName,
+        updatedAt: new Date(),
+        oldStatus: oldStatus,
+        newStatus: newStatus
+      };
+
+      // Update the incident document
+      await updateDoc(incidentRef, {
+        incident_status: newStatus,
+        status_updates: arrayUnion(updateLog),
+        last_updated_by: currentAdminName,
+        last_updated_at: serverTimestamp()
+      });
+
+      console.log("✅ Incident status updated successfully");
+      handleCloseStatusModal();
+    } catch (error) {
+      console.error("❌ Error updating incident status:", error);
+      showAlert("Failed to update status: " + error.message, "Error");
+    }
+  };
+
+  // Get status badge color
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "Ongoing":
+        return "status-ongoing";
+      case "Resolved":
+        return "status-resolved";
+      case "Under Investigation":
+        return "status-investigating";
+      case "Closed":
+        return "status-closed";
+      default:
+        return "status-ongoing";
+    }
+  };
+
   // Format date and time
   const formatDateTime = (timestamp) => {
     if (!timestamp) return "N/A";
-    const date = timestamp.toDate();
+    
+    // Handle both Firestore Timestamp and JavaScript Date objects
+    let date;
+    if (timestamp.toDate) {
+      date = timestamp.toDate();
+    } else if (timestamp instanceof Date) {
+      date = timestamp;
+    } else {
+      return "N/A";
+    }
+    
     return date.toLocaleString("en-US", {
       year: "numeric",
       month: "long",
@@ -190,7 +407,7 @@ export default function IncidentReports() {
   // Export to PDF
   const handleExportPDF = async () => {
     if (filteredIncidents.length === 0) {
-      alert('No incidents to export');
+      showAlert('No incidents to export', 'No Data');
       return;
     }
 
@@ -207,7 +424,7 @@ export default function IncidentReports() {
       });
     } catch (error) {
       console.error('Error exporting PDF:', error);
-      alert('Failed to export PDF: ' + error.message);
+      showAlert('Failed to export PDF: ' + error.message, 'Export Error');
     }
   };
 
@@ -306,6 +523,7 @@ export default function IncidentReports() {
                   <th>House</th>
                   <th>Reported By</th>
                   <th>Nurses Notified</th>
+                  <th>Status</th>
                   <th>Additional Information</th>
                 </tr>
               </thead>
@@ -339,13 +557,35 @@ export default function IncidentReports() {
                         <div className="nurses-names">
                           {incident.nurseNames.map((name, idx) => (
                             <div key={idx} className="nurse-name-item">
-                              👨‍⚕️ {name}
+                              <span className="nurse-icon">👨‍⚕️</span>
+                              <span className="nurse-name">{name}</span>
                             </div>
                           ))}
                         </div>
                       ) : (
                         <span className="no-nurses">No nurses notified</span>
                       )}
+                    </td>
+                    <td className="status-cell">
+                      <div className="status-container">
+                        <div className="status-row">
+                          <span className={`status-badge ${getStatusColor(incident.incident_status || "Ongoing")}`}>
+                            {incident.incident_status || "Ongoing"}
+                          </span>
+                          <button 
+                            onClick={() => handleOpenStatusModal(incident)} 
+                            className="update-status-btn"
+                            title="Update incident status"
+                          >
+                            ✏️
+                          </button>
+                        </div>
+                        {incident.last_updated_by && (
+                          <div className="last-updated-info">
+                            Updated by {incident.last_updated_by}
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="additional-info">
                       {incident.additional_info || "No additional information provided."}
@@ -356,6 +596,76 @@ export default function IncidentReports() {
             </table>
           </div>
         )}
+
+        {/* Status Update Modal */}
+        {showStatusModal && selectedIncident && (
+          <div className="modal-overlay" onClick={handleCloseStatusModal}>
+            <div className="status-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="status-modal-header">
+                <h2>📝 Update Incident Status</h2>
+                <button onClick={handleCloseStatusModal} className="close-modal-btn-x">×</button>
+              </div>
+              
+              <div className="status-modal-content">
+                <div className="incident-summary">
+                  <p><strong>Incident Type:</strong> {selectedIncident.incident_type}</p>
+                  <p><strong>Elderly:</strong> {selectedIncident.elderlyName}</p>
+                  <p><strong>Date:</strong> {formatDate(selectedIncident.incident_date_time)}</p>
+                  <p><strong>Current Status:</strong> <span className={`status-badge ${getStatusColor(selectedIncident.incident_status || "Ongoing")}`}>{selectedIncident.incident_status || "Ongoing"}</span></p>
+                </div>
+
+                <div className="status-select-group">
+                  <label htmlFor="status-select">Select New Status:</label>
+                  <select 
+                    id="status-select"
+                    value={newStatus} 
+                    onChange={(e) => setNewStatus(e.target.value)}
+                    className="status-select"
+                  >
+                    <option value="Ongoing">Ongoing</option>
+                    <option value="Under Investigation">Under Investigation</option>
+                    <option value="Resolved">Resolved</option>
+                    <option value="Closed">Closed</option>
+                  </select>
+                </div>
+
+                {selectedIncident.status_updates && selectedIncident.status_updates.length > 0 && (
+                  <div className="update-history">
+                    <h3>Update History:</h3>
+                    <div className="history-list">
+                      {selectedIncident.status_updates.slice().reverse().map((update, idx) => (
+                        <div key={idx} className="history-item">
+                          <div className="history-header">
+                            <div className="history-admin">👤 {update.updatedBy}</div>
+                            <div className="history-time">
+                              {update.updatedAt && formatDateTime(update.updatedAt)}
+                            </div>
+                          </div>
+                          <div className="history-change">
+                            Changed from <span className={`status-badge-small ${getStatusColor(update.oldStatus)}`}>{update.oldStatus}</span> to <span className={`status-badge-small ${getStatusColor(update.newStatus)}`}>{update.newStatus}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="status-modal-actions">
+                <button onClick={handleCloseStatusModal} className="cancel-btn">Cancel</button>
+                <button onClick={handleUpdateStatus} className="update-btn">Update Status</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Alert Modal */}
+        <CustomAlertModal
+          isOpen={showCustomAlert}
+          onClose={closeAlert}
+          title={customAlertTitle}
+          message={customAlertMessage}
+        />
       </div>
     </>
   );

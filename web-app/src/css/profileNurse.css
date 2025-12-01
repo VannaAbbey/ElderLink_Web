@@ -196,6 +196,25 @@
 .resign-button-container {
   margin-top: 30px;
   text-align: center;
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  align-items: center;
+}
+
+.force-logout-btn {
+  background-color: #ff9800;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s;
+}
+
+.force-logout-btn:hover {
+  background-color: #f57c00;
 }
 
 .resign-btn {
